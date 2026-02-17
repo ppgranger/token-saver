@@ -1,0 +1,231 @@
+"""Kubernetes output processor: kubectl get, describe, logs."""
+
+import re
+
+from .base import Processor
+
+
+class KubectlProcessor(Processor):
+    priority = 32
+    hook_patterns = [
+        r"^(kubectl|oc)\s+(get|describe|logs|top)\b",
+    ]
+
+    @property
+    def name(self) -> str:
+        return "kubectl"
+
+    def can_handle(self, command: str) -> bool:
+        return bool(re.search(r"\b(kubectl|oc)\s+(get|describe|logs|top)\b", command))
+
+    def process(self, command: str, output: str) -> str:
+        if not output or not output.strip():
+            return output
+
+        if re.search(r"\b(kubectl|oc)\s+describe\b", command):
+            return self._process_describe(output)
+        if re.search(r"\b(kubectl|oc)\s+logs\b", command):
+            return self._process_logs(output)
+        if re.search(r"\b(kubectl|oc)\s+get\b", command):
+            return self._process_get(output)
+        if re.search(r"\b(kubectl|oc)\s+top\b", command):
+            return self._process_get(output)
+        return output
+
+    def _strip_column(self, header: str, lines: list[str], col_name: str) -> tuple[str, list[str]]:
+        """Remove a column by name from tabular output."""
+        m = re.search(rf"\b{col_name}\b", header)
+        if not m:
+            return header, lines
+        col_start = m.start()
+        # Find end: next column start or end of line
+        rest = header[m.end():]
+        next_col = re.search(r"\S", rest)
+        col_end = m.end() + next_col.start() if next_col else len(header)
+
+        new_header = header[:col_start] + header[col_end:]
+        new_lines = []
+        for line in lines:
+            if len(line) >= col_end:
+                new_lines.append(line[:col_start] + line[col_end:])
+            elif len(line) > col_start:
+                new_lines.append(line[:col_start])
+            else:
+                new_lines.append(line)
+        return new_header, new_lines
+
+    def _process_get(self, output: str) -> str:
+        """Compress kubectl get: summarize healthy resources, show unhealthy."""
+        lines = output.splitlines()
+        if len(lines) <= 10:
+            return output
+
+        header = lines[0]
+        entries = lines[1:]
+
+        # Strip AGE column (rarely useful for LLM)
+        if "AGE" in header:
+            header, entries = self._strip_column(header, entries, "AGE")
+
+        # Detect pods vs other resources
+        is_pods = "STATUS" in header and "READY" in header
+
+        if not is_pods:
+            # Generic tabular output — just truncate if very long
+            if len(entries) > 50:
+                result = [header]
+                result.extend(entries[:40])
+                result.append(f"... ({len(entries) - 40} more resources)")
+                return "\n".join(result)
+            return "\n".join([header, *entries])
+
+        # Pod output: separate healthy from unhealthy
+        healthy = []
+        unhealthy = []
+
+        for line in entries:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            # Running + all containers ready = healthy
+            if (re.search(r"\bRunning\b", line) and re.search(r"(\d+)/\1\b", line)) or re.search(
+                r"\bCompleted\b", line
+            ):
+                healthy.append(line)
+            else:
+                unhealthy.append(line)
+
+        result = [header]
+
+        if unhealthy:
+            for line in unhealthy:
+                result.append(line)
+
+        if healthy:
+            if len(healthy) > 5:
+                result.append(f"... ({len(healthy)} pods Running/Ready)")
+            else:
+                result.extend(healthy)
+
+        return "\n".join(result)
+
+    def _process_describe(self, output: str) -> str:
+        """Compress kubectl describe: keep key info, strip noise."""
+        lines = output.splitlines()
+        if len(lines) <= 15:
+            return output
+
+        result = []
+        skip_section = False
+        current_section = ""
+
+        # Top-level keys that are noise
+        noise_keys = {
+            "tolerations",
+            "volumes",
+            "qos class",
+            "node-selectors",
+            "annotations",
+            "managed fields",
+        }
+
+        # Top-level keys worth keeping
+        keep_keys = {
+            "name",
+            "namespace",
+            "status",
+            "state",
+            "containers",
+            "events",
+            "conditions",
+            "type",
+            "reason",
+            "message",
+            "last state",
+            "restart count",
+            "port",
+            "image",
+            "node",
+            "ip",
+            "labels",
+        }
+
+        for line in lines:
+            stripped = line.strip()
+
+            # Top-level key-value lines (no leading whitespace, key: value)
+            if re.match(r"^[A-Z][\w\s-]+:", line) and not line.startswith((" ", "\t")):
+                key = line.split(":")[0].strip().lower()
+
+                # Check if this starts a noise section
+                if key in noise_keys:
+                    skip_section = True
+                    current_section = key
+                    continue
+
+                skip_section = False
+                current_section = key
+
+                if any(k in key for k in keep_keys):
+                    result.append(line)
+                continue
+
+            if skip_section:
+                continue
+
+            # Events section — keep Warning events, skip Normal
+            if current_section == "events":
+                if "Warning" in line or "Error" in line or "Failed" in line:
+                    result.append(line)
+                elif re.match(r"^\s*Type\s+Reason", stripped):
+                    result.append(line)  # Keep header
+                elif "Normal" in line:
+                    continue
+                else:
+                    result.append(line)
+                continue
+
+            # Container state info
+            if re.search(
+                r"(State|Last State|Restart Count|Exit Code|Reason|Ready|Image):", stripped
+            ):
+                result.append(line)
+                continue
+
+            # Indented content under kept sections
+            if line.startswith(("  ", "\t")):
+                result.append(line)
+
+        return "\n".join(result)
+
+    def _process_logs(self, output: str) -> str:
+        """Compress kubectl logs: keep errors, startup, recent lines."""
+        lines = output.splitlines()
+        if len(lines) <= 50:
+            return output
+
+        error_lines = []
+        for i, line in enumerate(lines):
+            if re.search(
+                r"\b(error|Error|ERROR|exception|Exception|"
+                r"fatal|Fatal|FATAL|panic|Panic)\b",
+                line,
+            ):
+                start = max(0, i - 1)
+                end = min(len(lines), i + 2)
+                for el in lines[start:end]:
+                    if el not in error_lines:
+                        error_lines.append(el)
+
+        keep_head = 10
+        keep_tail = 20
+
+        result = lines[:keep_head]
+        if error_lines:
+            result.append(f"\n... ({len(lines)} total lines, showing errors) ...\n")
+            result.extend(error_lines[:40])
+        else:
+            result.append(f"\n... ({len(lines) - keep_head - keep_tail} lines truncated) ...\n")
+        result.extend(lines[-keep_tail:])
+
+        return "\n".join(result)

@@ -1,0 +1,57 @@
+name: Bug Report
+description: Report a bug in Token-Saver
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug. Please fill in the details below.
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: Which AI CLI tool are you using?
+      options:
+        - Claude Code
+        - Gemini CLI
+        - Both
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      placeholder: "e.g. macOS 15.2, Ubuntu 24.04, Windows 11"
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python Version
+      placeholder: "e.g. 3.12.1"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened? What did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command that triggered the issue
+      description: The shell command that was being compressed (if applicable).
+      render: shell
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or error output
+      render: text

@@ -1,0 +1,77 @@
+[project]
+name = "token-saver"
+requires-python = ">=3.10"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "F",      # Pyflakes — unused imports, undefined names, etc.
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "I",      # isort — import ordering
+    "N",      # pep8-naming
+    "UP",     # pyupgrade — modern Python syntax
+    "B",      # flake8-bugbear — common bugs and design issues
+    "A",      # flake8-builtins — shadowing builtins
+    "COM",    # flake8-commas — trailing commas
+    "C4",     # flake8-comprehensions — better comprehensions
+    "T10",    # flake8-debugger — no leftover breakpoints
+    "ISC",    # flake8-implicit-str-concat
+    "PIE",    # flake8-pie — misc lints
+    "PT",     # flake8-pytest-style
+    "RSE",    # flake8-raise
+    "RET",    # flake8-return
+    "SLF",    # flake8-self — private member access
+    "SIM",    # flake8-simplify
+    "TCH",    # flake8-type-checking — move imports to TYPE_CHECKING
+    "ARG",    # flake8-unused-arguments
+    "ERA",    # eradicate — commented-out code
+    "PL",     # Pylint subset
+    "PERF",   # Perflint — performance anti-patterns
+    "RUF",    # Ruff-specific rules
+    "S",      # flake8-bandit — security
+]
+ignore = [
+    "COM812",   # missing trailing comma — conflicts with formatter
+    "ISC001",   # single-line implicit string concat — conflicts with formatter
+    "S101",     # assert in tests is fine
+    "PLR2004",  # magic values in comparisons — too noisy for thresholds/processors
+    "PLR0912",  # too many branches — some processors are inherently complex
+    "PLR0911",  # too many return statements
+    "PLR0915",  # too many statements
+    "SIM108",   # ternary instead of if/else — less readable for multi-line
+    "RET505",   # unnecessary else after return — often clearer with else
+    "RET504",   # unnecessary assignment before return — clearer with named var
+    "PT009",    # use pytest.raises — we use assertEqual style too
+    "ARG002",   # unused method argument — processors have fixed signatures
+    "N802",     # function name should be lowercase — test methods like test_XXX_YYY
+    "SLF001",   # private member access — needed in tests
+    "PERF401",  # list.extend/comprehension — less readable in test data builders
+    "RUF012",   # mutable class var without ClassVar — not using dataclasses
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "S101",     # assert is the point of tests
+    "ARG",      # unused arguments common in test fixtures
+    "PLR",      # complexity rules too strict for test code
+    "SLF001",   # private member access needed in tests
+    "S108",     # /tmp usage in test assertions is fine
+    "PLC0415",  # imports in test functions are intentional
+    "PERF401",  # readability over perf in tests
+]
+"audit_compression.py" = [
+    "E501",     # long lines in test data builders
+    "PERF401",  # readability over perf in data builders
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

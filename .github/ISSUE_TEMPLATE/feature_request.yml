@@ -1,0 +1,37 @@
+name: Feature Request
+description: Suggest a new feature or processor
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for your suggestion. Please describe what you'd like to see.
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      options:
+        - New processor
+        - Improvement to existing processor
+        - Installation / CLI
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Describe the feature and the problem it solves.
+    validations:
+      required: true
+
+  - type: textarea
+    id: example
+    attributes:
+      label: Example
+      description: |
+        If proposing a new processor, show a sample command output
+        and what the compressed version should look like.
+      render: text
