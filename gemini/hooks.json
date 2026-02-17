@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "AfterTool": [
+      {
+        "matcher": "run_shell_command|read_file|list_directory",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${extensionPath}/gemini/hook_aftertool.py",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${extensionPath}/src/hook_session.py",
+            "timeout": 3000
+          }
+        ]
+      }
+    ]
+  }
+}

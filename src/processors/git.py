@@ -1,0 +1,341 @@
+"""Git output processor: status, diff, log, show, push/pull/fetch, reflog, branch."""
+
+import re
+
+from .. import config
+from .base import Processor
+
+
+class GitProcessor(Processor):
+    priority = 20
+    hook_patterns = [
+        r"^git\s+(status|diff|log|show|push|pull|fetch|clone|branch|stash|reflog|remote\s+-v)",
+    ]
+
+    @property
+    def name(self) -> str:
+        return "git"
+
+    def can_handle(self, command: str) -> bool:
+        return bool(
+            re.search(
+                r"\bgit\s+(status|diff|log|show|push|pull|fetch|clone|branch|stash|reflog|remote)\b",
+                command,
+            )
+        )
+
+    def process(self, command: str, output: str) -> str:
+        if not output or not output.strip():
+            return output
+        if re.search(r"\bgit\s+status\b", command):
+            return self._process_status(output)
+        if re.search(r"\bgit\s+diff\b", command):
+            return self._process_diff(output)
+        if re.search(r"\bgit\s+log\b", command):
+            return self._process_log(output)
+        if re.search(r"\bgit\s+show\b", command):
+            return self._process_show(output)
+        if re.search(r"\bgit\s+(push|pull|fetch|clone)\b", command):
+            return self._process_transfer(output)
+        if re.search(r"\bgit\s+branch\b", command):
+            return self._process_branch(output)
+        if re.search(r"\bgit\s+stash\s+list\b", command):
+            return self._process_stash_list(output)
+        if re.search(r"\bgit\s+reflog\b", command):
+            return self._process_reflog(output)
+        return output
+
+    def _process_status(self, output: str) -> str:
+        lines = output.strip().splitlines()
+        counts: dict[str, int] = {}
+        files_by_dir: dict[str, list[str]] = {}
+        header_lines = []
+        in_untracked = False
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            # Header lines
+            if stripped.startswith(("On branch", "Your branch")):
+                header_lines.append(stripped)
+                in_untracked = False
+                continue
+            if stripped.startswith(("nothing to commit", "no changes added")):
+                header_lines.append(stripped)
+                in_untracked = False
+                continue
+
+            # Section headers
+            if stripped.startswith("Untracked files:"):
+                in_untracked = True
+                continue
+            if stripped.startswith(("Changes", "Unmerged")):
+                in_untracked = False
+                continue
+            # Skip hint lines
+            if stripped.startswith("("):
+                continue
+
+            # Parse long-format verbose status
+            if stripped.startswith("modified:"):
+                code, filepath = "M", stripped.split(":", 1)[1].strip()
+            elif stripped.startswith("new file:"):
+                code, filepath = "A", stripped.split(":", 1)[1].strip()
+            elif stripped.startswith("deleted:"):
+                code, filepath = "D", stripped.split(":", 1)[1].strip()
+            elif stripped.startswith("renamed:"):
+                code, filepath = "R", stripped.split(":", 1)[1].strip()
+            elif stripped.startswith("copied:"):
+                code, filepath = "C", stripped.split(":", 1)[1].strip()
+            # Parse short-format status: XY filename
+            elif re.match(r"^([MADRCU?! ]{1,2})\s+(.+)$", stripped):
+                m = re.match(r"^([MADRCU?! ]{1,2})\s+(.+)$", stripped)
+                code_raw = m.group(1).strip()
+                filepath = m.group(2).strip().strip('"')
+                code = code_raw[0] if code_raw[0] != " " else code_raw[-1]
+            # Untracked files section: just bare filenames (tab-indented in raw output)
+            elif in_untracked and not stripped.startswith("("):
+                code, filepath = "?", stripped
+            else:
+                continue
+
+            counts[code] = counts.get(code, 0) + 1
+            parts = filepath.rsplit("/", 1)
+            dir_name = parts[0] if len(parts) > 1 else "."
+            file_name = parts[-1]
+            files_by_dir.setdefault(dir_name, []).append(f"{code} {file_name}")
+
+        result = []
+        if header_lines:
+            result.append(" | ".join(header_lines))
+
+        summary_parts = [f"{k}:{v}" for k, v in sorted(counts.items()) if v > 0]
+        if summary_parts:
+            total = sum(counts.values())
+            result.append(f"Files: {total} ({', '.join(summary_parts)})")
+
+        for dir_name, files in sorted(files_by_dir.items()):
+            if len(files) > 8:
+                codes = {}
+                for f in files:
+                    c = f[0]
+                    codes[c] = codes.get(c, 0) + 1
+                desc = ", ".join(f"{c}:{n}" for c, n in sorted(codes.items()))
+                result.append(f"  {dir_name}/ ({len(files)} files: {desc})")
+            else:
+                for f in files:
+                    result.append(f"  {dir_name}/{f}")
+
+        return "\n".join(result) if result else output
+
+    def _process_diff(self, output: str) -> str:
+        lines = output.splitlines()
+
+        # Detect stat-only format: `git diff --stat`
+        if lines and not any(line.startswith("diff --git") for line in lines):
+            return self._process_diff_stat(lines)
+
+        max_hunk = config.get("max_diff_hunk_lines")
+        max_context = config.get("max_diff_context_lines")
+        result = []
+        hunk_line_count = 0
+        hunk_truncated = False
+        stat_line = ""
+        # Leading context: buffer context lines, flush last N when a change appears
+        leading_buffer: list[str] = []
+        # Trailing context: after a change, emit up to N context lines
+        trailing_remaining = 0
+
+        for line in lines:
+            if line.startswith("diff --git"):
+                leading_buffer = []
+                trailing_remaining = 0
+                if hunk_truncated:
+                    result.append(f"  ... (truncated after {max_hunk} lines)")
+                result.append(line)
+                hunk_line_count = 0
+                hunk_truncated = False
+            elif line.startswith(("index ", "---", "+++")):
+                continue
+            elif line.startswith("@@"):
+                leading_buffer = []
+                trailing_remaining = 0
+                if hunk_truncated:
+                    result.append(f"  ... (truncated after {max_hunk} lines)")
+                result.append(line)
+                hunk_line_count = 0
+                hunk_truncated = False
+            elif line.startswith(("+", "-")):
+                hunk_line_count += 1
+                if hunk_line_count <= max_hunk:
+                    # Flush leading context (last N lines from buffer)
+                    if leading_buffer:
+                        result.extend(leading_buffer[-max_context:])
+                        leading_buffer = []
+                    result.append(line)
+                    trailing_remaining = max_context
+                elif not hunk_truncated:
+                    hunk_truncated = True
+            elif line.startswith(" "):
+                hunk_line_count += 1
+                if hunk_line_count <= max_hunk:
+                    if trailing_remaining > 0:
+                        # Still emitting trailing context after a change
+                        result.append(line)
+                        trailing_remaining -= 1
+                    else:
+                        # Buffer as potential leading context for next change
+                        leading_buffer.append(line)
+                elif not hunk_truncated:
+                    hunk_truncated = True
+            elif re.match(r"^\s*\d+ files? changed", line):
+                stat_line = line
+
+        if hunk_truncated:
+            result.append(f"  ... (truncated after {max_hunk} lines)")
+        if stat_line:
+            result.append(stat_line)
+
+        return "\n".join(result)
+
+    def _process_diff_stat(self, lines: list[str]) -> str:
+        """Compress `git diff --stat` output: strip visual bars."""
+        result = []
+        for line in lines:
+            # Match stat lines: " path/file | 5 ++-" → " path/file | 5"
+            m = re.match(r"^(\s*.+?\s+\|\s+\d+)\s+[+\-]+\s*$", line)
+            if m:
+                result.append(m.group(1))
+            else:
+                result.append(line)
+        return "\n".join(result)
+
+    def _process_log(self, output: str) -> str:
+        max_entries = config.get("max_log_entries")
+        lines = output.splitlines()
+
+        # Detect if already one-line format
+        if lines and not lines[0].startswith("commit "):
+            # Already compact format — just truncate
+            if len(lines) > max_entries:
+                return "\n".join(lines[:max_entries]) + f"\n... ({len(lines) - max_entries} more)"
+            return output
+
+        entries = []
+        current: list[str] = []
+        for line in lines:
+            if line.startswith("commit "):
+                if current:
+                    entries.append(current)
+                current = [line]
+            else:
+                current.append(line)
+        if current:
+            entries.append(current)
+
+        result = []
+        for entry in entries[:max_entries]:
+            commit_hash = ""
+            message = ""
+            for line in entry:
+                if line.startswith("commit "):
+                    commit_hash = line.split()[1][:8]
+                elif (
+                    line.strip()
+                    and not line.startswith(("Author:", "Merge:", "Date:"))
+                    and not message
+                ):
+                    message = line.strip()
+            result.append(f"{commit_hash} {message}")
+
+        if len(entries) > max_entries:
+            result.append(f"... ({len(entries) - max_entries} more commits)")
+
+        return "\n".join(result)
+
+    def _process_show(self, output: str) -> str:
+        # git show is like log + diff — process the diff portion
+        lines = output.splitlines()
+        header = []
+        diff_start = -1
+        for i, line in enumerate(lines):
+            if line.startswith("diff --git"):
+                diff_start = i
+                break
+            header.append(line)
+
+        if diff_start == -1:
+            return output
+
+        diff_output = "\n".join(lines[diff_start:])
+        compressed_diff = self._process_diff(diff_output)
+
+        # Compact the header: keep commit hash + message only
+        compact_header = []
+        for line in header:
+            stripped = line.strip()
+            if stripped and not stripped.startswith(("Merge:", "Author:", "Date:")):
+                compact_header.append(line)
+
+        return "\n".join(compact_header) + "\n" + compressed_diff
+
+    def _process_transfer(self, output: str) -> str:
+        lines = output.splitlines()
+        important = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if re.match(
+                r"^(Receiving|Resolving|Counting|Compressing|"
+                r"remote:\s*(Counting|Compressing|Total|Enumerating))",
+                stripped,
+            ):
+                continue
+            if re.search(r"\d+%", stripped):
+                continue
+            important.append(stripped)
+
+        if important:
+            return "\n".join(important)
+        # All lines were progress — return last non-empty line
+        for line in reversed(lines):
+            if line.strip():
+                return line.strip()
+        return output
+
+    def _process_branch(self, output: str) -> str:
+        lines = output.strip().splitlines()
+        if len(lines) <= 30:
+            return output
+        current = ""
+        branches = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("* "):
+                current = stripped
+            else:
+                branches.append(stripped)
+        result = [current] if current else []
+        result.append(f"({len(branches)} other branches)")
+        # Show first few
+        for b in branches[:5]:
+            result.append(f"  {b}")
+        if len(branches) > 5:
+            result.append(f"  ... ({len(branches) - 5} more)")
+        return "\n".join(result)
+
+    def _process_stash_list(self, output: str) -> str:
+        lines = output.strip().splitlines()
+        if len(lines) <= 10:
+            return output
+        return "\n".join(lines[:10]) + f"\n... ({len(lines) - 10} more stashes)"
+
+    def _process_reflog(self, output: str) -> str:
+        lines = output.strip().splitlines()
+        max_entries = config.get("max_log_entries")
+        if len(lines) <= max_entries:
+            return output
+        return "\n".join(lines[:max_entries]) + f"\n... ({len(lines) - max_entries} more entries)"
