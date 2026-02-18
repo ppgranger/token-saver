@@ -274,8 +274,8 @@ class BuildOutputProcessor(Processor):
             r"^\s*Using\s+(cached|version)\b",
             r"^\s*Collecting\s+\S+",  # pip
             r"^\s*━",  # pip progress bar
-            r"^\s*(Resolution|Fetch|Link)\s+step\b",  # yarn berry v2+ step progress
+            r"^.*(Resolution|Fetch|Link)\s+step\b",  # yarn berry v2+ (prefixed with ➤ YN0000: ┌)
             r"^\s*Progress:\s+resolved\s+\d+",  # pnpm resolved/reused/downloaded stats
-            r"^\s*packages?\s+(are|is)\s+hard linked",  # pnpm content-addressable store
+            r"^\s*[Pp]ackages?\s+(are|is)\s+hard linked",  # pnpm content-addressable store
         ]
         return any(re.match(p, line) for p in patterns)

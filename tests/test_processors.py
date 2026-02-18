@@ -530,13 +530,16 @@ class TestBuildOutputProcessor:
         assert "Build succeeded" in result
 
     def test_yarn_berry_step_progress_skipped(self):
-        """Yarn Berry (v2+) emits Resolution/Fetch/Link step lines as progress."""
+        """Yarn Berry (v2+) outputs step lines prefixed with ➤ YN0000: ┌/└."""
         output = "\n".join(
             [
-                "Resolution step completed in 1.2s",
-                "Fetch step completed in 3.4s",
-                "Link step completed in 2.1s",
-                "Done in 6.7s",
+                "\u27a4 YN0000: \u250c Resolution step",
+                "\u27a4 YN0000: \u2514 Completed in 0s 259ms",
+                "\u27a4 YN0000: \u250c Fetch step",
+                "\u27a4 YN0000: \u2514 Completed in 1s 263ms",
+                "\u27a4 YN0000: \u250c Link step",
+                "\u27a4 YN0000: \u2514 Completed in 0s 218ms",
+                "Done in 1.74s",
             ]
         )
         result = self.p.process("yarn install", output)
@@ -549,9 +552,9 @@ class TestBuildOutputProcessor:
         """pnpm emits 'Progress: resolved N, ...' and hard link messages."""
         output = "\n".join(
             [
+                "Packages are hard linked from the content-addressable store",
                 "Progress: resolved 150, reused 148, downloaded 2, added 150",
-                "Progress: resolved 200, reused 198, downloaded 2, added 200",
-                "packages are hard linked from the content-addressable store",
+                "Progress: resolved 200, reused 198, downloaded 2, added 200, done",
                 "Done in 4.2s",
             ]
         )
