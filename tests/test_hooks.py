@@ -19,6 +19,16 @@ class TestHookPretool:
         assert is_compressible("git fetch --all")
         assert is_compressible("git reflog")
 
+    def test_git_global_options_compressible(self):
+        assert is_compressible("git -C /some/path status")
+        assert is_compressible("git -C /opt/homebrew log --oneline -20")
+        assert is_compressible("git --no-pager diff HEAD~1")
+        assert is_compressible("git -C /path --no-pager log")
+        assert is_compressible("git --no-pager -C /path status")
+        assert is_compressible("git -c core.pager=cat log --oneline")
+        assert is_compressible("git --git-dir=/path/.git status")
+        assert is_compressible("git --work-tree /path status")
+
     def test_test_commands_compressible(self):
         assert is_compressible("pytest tests/")
         assert is_compressible("python -m pytest")
@@ -89,6 +99,11 @@ class TestHookPretool:
         assert is_compressible("docker ps")
         assert is_compressible("docker logs container")
 
+    def test_docker_global_options_compressible(self):
+        assert is_compressible("docker --context remote ps")
+        assert is_compressible("docker -H tcp://host:2375 ps")
+        assert is_compressible("docker --host unix:///var/run/docker.sock images")
+
     def test_network_commands_compressible(self):
         assert is_compressible("curl https://example.com")
         assert is_compressible("curl -v https://api.example.com/data")
@@ -98,6 +113,15 @@ class TestHookPretool:
         assert is_compressible("kubectl get pods")
         assert is_compressible("kubectl describe pod my-pod")
         assert is_compressible("kubectl logs my-pod")
+
+    def test_kubectl_global_options_compressible(self):
+        assert is_compressible("kubectl -n kube-system get pods")
+        assert is_compressible("kubectl --namespace kube-system get pods")
+        assert is_compressible("kubectl --context prod get nodes")
+        assert is_compressible("kubectl -A get pods")
+        assert is_compressible("kubectl --all-namespaces get pods")
+        assert is_compressible("kubectl -n monitoring --context staging describe pod my-pod")
+        assert is_compressible("kubectl --kubeconfig /path/config get svc")
 
     def test_terraform_commands_compressible(self):
         assert is_compressible("terraform plan")

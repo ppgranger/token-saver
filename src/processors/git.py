@@ -5,11 +5,21 @@ import re
 from .. import config
 from .base import Processor
 
+# Optional git global options that may appear between 'git' and the subcommand.
+# Covers: -C <path>, --no-pager, -c <key>=<val>, --git-dir <path>, --work-tree <path>
+_GIT_OPTS = (
+    r"(?:-C\s+\S+\s+|--no-pager\s+|-c\s+\S+\s+"
+    r"|--git-dir(?:=|\s+)\S+\s+|--work-tree(?:=|\s+)\S+\s+)*"
+)
+
+_GIT_SUBCMDS = r"(status|diff|log|show|push|pull|fetch|clone|branch|stash|reflog|remote)"
+_GIT_CMD_RE = re.compile(rf"\bgit\s+{_GIT_OPTS}{_GIT_SUBCMDS}\b")
+
 
 class GitProcessor(Processor):
     priority = 20
     hook_patterns = [
-        r"^git\s+(status|diff|log|show|push|pull|fetch|clone|branch|stash|reflog|remote\s+-v)",
+        rf"^git\s+{_GIT_OPTS}(status|diff|log|show|push|pull|fetch|clone|branch|stash|reflog|remote\s+-v)",
     ]
 
     @property
@@ -17,31 +27,34 @@ class GitProcessor(Processor):
         return "git"
 
     def can_handle(self, command: str) -> bool:
-        return bool(
-            re.search(
-                r"\bgit\s+(status|diff|log|show|push|pull|fetch|clone|branch|stash|reflog|remote)\b",
-                command,
-            )
-        )
+        return bool(_GIT_CMD_RE.search(command))
+
+    def _get_subcmd(self, command: str) -> str | None:
+        """Extract the git subcommand, skipping any global options."""
+        m = _GIT_CMD_RE.search(command)
+        return m.group(1) if m else None
 
     def process(self, command: str, output: str) -> str:
         if not output or not output.strip():
             return output
-        if re.search(r"\bgit\s+status\b", command):
+        subcmd = self._get_subcmd(command)
+        if subcmd == "status":
             return self._process_status(output)
-        if re.search(r"\bgit\s+diff\b", command):
+        if subcmd == "diff":
             return self._process_diff(output)
-        if re.search(r"\bgit\s+log\b", command):
+        if subcmd == "log":
             return self._process_log(output)
-        if re.search(r"\bgit\s+show\b", command):
+        if subcmd == "show":
             return self._process_show(output)
-        if re.search(r"\bgit\s+(push|pull|fetch|clone)\b", command):
+        if subcmd in ("push", "pull", "fetch", "clone"):
             return self._process_transfer(output)
-        if re.search(r"\bgit\s+branch\b", command):
+        if subcmd == "branch":
             return self._process_branch(output)
-        if re.search(r"\bgit\s+stash\s+list\b", command):
-            return self._process_stash_list(output)
-        if re.search(r"\bgit\s+reflog\b", command):
+        if subcmd == "stash":
+            if re.search(r"\bstash\s+list\b", command):
+                return self._process_stash_list(output)
+            return output
+        if subcmd == "reflog":
             return self._process_reflog(output)
         return output
 

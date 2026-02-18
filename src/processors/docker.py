@@ -4,11 +4,22 @@ import re
 
 from .base import Processor
 
+# Optional docker global options that may appear before the subcommand.
+# Covers: --context <ctx>, -H <host>, --host <host>
+_DOCKER_OPTS = (
+    r"(?:--context(?:=|\s+)\S+\s+"
+    r"|-H\s+\S+\s+|--host(?:=|\s+)\S+\s+)*"
+)
+
+_DOCKER_CMD_RE = re.compile(
+    rf"\bdocker\s+{_DOCKER_OPTS}(ps|images|logs|pull|push|compose\s+(?:ps|logs))\b"
+)
+
 
 class DockerProcessor(Processor):
     priority = 31
     hook_patterns = [
-        r"^docker\s+(build|pull|push|images|ps|logs|compose)\b",
+        rf"^docker\s+{_DOCKER_OPTS}(build|pull|push|images|ps|logs|compose)\b",
     ]
 
     @property
@@ -16,24 +27,32 @@ class DockerProcessor(Processor):
         return "docker"
 
     def can_handle(self, command: str) -> bool:
-        return bool(
-            re.search(r"\bdocker\s+(ps|images|logs|pull|push|compose\s+(ps|logs))\b", command)
-        )
+        return bool(_DOCKER_CMD_RE.search(command))
+
+    def _get_subcmd(self, command: str) -> str | None:
+        """Extract the docker subcommand, skipping any global options."""
+        m = _DOCKER_CMD_RE.search(command)
+        return m.group(1) if m else None
 
     def process(self, command: str, output: str) -> str:
         if not output or not output.strip():
             return output
 
-        if re.search(r"\bdocker\s+(compose\s+)?ps\b", command):
+        subcmd = self._get_subcmd(command)
+        if subcmd and subcmd.startswith("compose"):
+            if "ps" in subcmd:
+                return self._process_ps(output)
+            if "logs" in subcmd:
+                return self._process_logs(output)
+            return output
+        if subcmd == "ps":
             return self._process_ps(output)
-        if re.search(r"\bdocker\s+images\b", command):
+        if subcmd == "images":
             return self._process_images(output)
-        if re.search(r"\bdocker\s+(compose\s+)?logs\b", command):
+        if subcmd == "logs":
             return self._process_logs(output)
-        if re.search(r"\bdocker\s+pull\b", command):
+        if subcmd in ("pull", "push"):
             return self._process_pull(output)
-        if re.search(r"\bdocker\s+push\b", command):
-            return self._process_pull(output)  # Same logic
         return output
 
     def _process_ps(self, output: str) -> str:
