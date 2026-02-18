@@ -763,7 +763,7 @@ audit(
 tree_lines = ["."]
 indent_chars = ["├── ", "│   ", "└── ", "    "]
 dirs_tree = {
-    "src": ["engine.py", "config.py", "tracker.py", "platform.py", "__init__.py"],
+    "src": ["engine.py", "config.py", "tracker.py", "platforms.py", "__init__.py"],
     "src/processors": [
         "git.py",
         "test_output.py",

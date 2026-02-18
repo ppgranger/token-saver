@@ -11,7 +11,7 @@ HOOK_MARKER = "token-saver"
 SHARED_FILES = [
     "src/__init__.py",
     "src/config.py",
-    "src/platform.py",
+    "src/platforms.py",
     "src/engine.py",
     "src/hook_session.py",
     "src/tracker.py",
