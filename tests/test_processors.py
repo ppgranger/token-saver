@@ -529,6 +529,37 @@ class TestBuildOutputProcessor:
         assert "Collecting" not in result
         assert "Build succeeded" in result
 
+    def test_yarn_berry_step_progress_skipped(self):
+        """Yarn Berry (v2+) emits Resolution/Fetch/Link step lines as progress."""
+        output = "\n".join(
+            [
+                "Resolution step completed in 1.2s",
+                "Fetch step completed in 3.4s",
+                "Link step completed in 2.1s",
+                "Done in 6.7s",
+            ]
+        )
+        result = self.p.process("yarn install", output)
+        assert "Resolution step" not in result
+        assert "Fetch step" not in result
+        assert "Link step" not in result
+        assert "Build succeeded" in result
+
+    def test_pnpm_progress_lines_skipped(self):
+        """pnpm emits 'Progress: resolved N, ...' and hard link messages."""
+        output = "\n".join(
+            [
+                "Progress: resolved 150, reused 148, downloaded 2, added 150",
+                "Progress: resolved 200, reused 198, downloaded 2, added 200",
+                "packages are hard linked from the content-addressable store",
+                "Done in 4.2s",
+            ]
+        )
+        result = self.p.process("pnpm install", output)
+        assert "Progress:" not in result
+        assert "hard linked" not in result
+        assert "Build succeeded" in result
+
 
 class TestLintOutputProcessor:
     def setup_method(self):
