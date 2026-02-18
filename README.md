@@ -30,6 +30,12 @@ CLI command  -->  Specialized processor  -->  Compressed output
                    env, search, system_info,
                    file_listing, file_content,
                    generic)
+
+Image read   -->  PreToolUse hook  -->  Resized image (if oversized)
+                        |
+                  Automatic resize
+                  (sips on macOS,
+                   ImageMagick on Linux)
 ```
 
 The engine (`CompressionEngine`) maintains a priority-ordered chain of processors.
@@ -39,6 +45,9 @@ compressed output. `GenericProcessor` serves as a fallback and always matches la
 After the specialized processor runs, a lightweight cleanup pass (`clean()`)
 strips residual ANSI codes and collapses consecutive blank lines.
 
+Additionally, the PreToolUse hook intercepts image reads and automatically
+resizes oversized images before the AI model processes them, saving visual tokens.
+
 ### Platform Integration
 
 The two platforms use different mechanisms:
@@ -46,17 +55,28 @@ The two platforms use different mechanisms:
 **Claude Code** (PreToolUse hook):
 
 ```
+Bash commands:
 1. Claude wants to run `git status`
 2. PreToolUse hook intercepts the command
 3. Rewrites to: python3 wrap.py 'git status'
 4. wrap.py executes the original command
 5. Compresses the output
 6. Claude receives the compressed version
+
+Image reads:
+1. Claude wants to read a screenshot (e.g. screenshot.png)
+2. PreToolUse hook intercepts the Read tool call
+3. Checks image dimensions (sips on macOS, ImageMagick on Linux)
+4. If any dimension > 1568px: resizes to fit within 1568x1568
+5. Rewrites file_path to point to the resized temporary file
+6. Claude reads the optimized image (fewer visual tokens)
 ```
 
 Claude Code's PreToolUse hook cannot modify output after execution.
-The only way to reduce tokens is to rewrite the command to go through a wrapper
-that executes, compresses, and returns the result.
+For Bash commands, the only way to reduce tokens is to rewrite the command
+to go through a wrapper that executes, compresses, and returns the result.
+For image reads, the hook rewrites the file path to point to a pre-resized
+copy, reducing visual token consumption without any quality loss.
 
 **Gemini CLI** (AfterTool hook):
 
@@ -75,7 +95,34 @@ Gemini CLI allows direct output replacement through the deny/reason mechanism.
 - Compression is only applied if the gain exceeds 10%
 - All errors, stack traces, and actionable information are **fully preserved**
 - Only "noise" is removed: progress bars, passing tests, installation logs, ANSI codes, platform lines
-- 217 unit tests including 24 precision-specific tests that verify every critical piece of data survives compression
+- 223 unit tests including 24 precision-specific tests that verify every critical piece of data survives compression
+
+### Image Optimization (Visual Token Savings)
+
+Claude's vision API charges tokens proportionally to image resolution:
+`tokens = (width × height) / 750`. A typical retina screenshot (2880×1800) costs
+**~6,912 tokens** — but Claude auto-downscales anything beyond 1568px anyway.
+
+Token-Saver intercepts the `Read` tool on image files (`.png`, `.jpg`, `.jpeg`,
+`.webp`, `.gif`) and resizes oversized images **before** Claude processes them.
+
+| Scenario | Image Size | Tokens | Savings |
+|---|---|---|---|
+| Retina screenshot (raw) | 2880×1800 | ~6,912 | — |
+| After optimization | 1568×980 | ~2,049 | **70%** |
+| 4K screenshot (raw) | 3840×2160 | ~11,059 | — |
+| After optimization | 1568×882 | ~1,844 | **83%** |
+| Small image (< 1568px) | 800×600 | ~640 | Skipped (no resize needed) |
+
+**How it works:**
+
+- Uses `sips` (built-in on macOS) or ImageMagick `convert` (Linux) for resizing
+- Preserves aspect ratio — fits within 1568×1568 bounding box
+- Non-PNG images are converted to JPEG at quality 80 for additional size reduction
+- PNG images stay as PNG (to preserve transparency)
+- **Fail-open**: if resize fails (tool not available, corrupt image, timeout), the original image is read unchanged
+- Resized images are stored as temporary files (auto-cleaned by the OS)
+- Only applies to Claude Code (PreToolUse hook on the `Read` tool)
 
 ## Installation
 
@@ -510,6 +557,7 @@ python3 src/stats.py --json
 - **Signal forwarding**: the wrapper propagates SIGINT/SIGTERM to the child process
 - **Exclusions**: commands with pipes, redirections, sudo, editors, ssh are never intercepted
 - **Self-protection**: commands containing `token-saver` or `wrap.py` are not intercepted (prevents recursion)
+- **Image optimization**: resized images are written to system temp directory with restricted permissions; original files are never modified
 
 ## Project Structure
 
@@ -517,7 +565,7 @@ python3 src/stats.py --json
 extension/
 ├── claude/                          # Claude Code specific files
 │   ├── plugin.json                  # Claude Code plugin metadata
-│   ├── hook_pretool.py              # PreToolUse hook (Claude Code)
+│   ├── hook_pretool.py              # PreToolUse hook (Bash rewrite + image optimization)
 │   └── wrap.py                      # CLI wrapper (Claude Code)
 ├── gemini/                          # Gemini CLI specific files
 │   ├── gemini-extension.json        # Gemini extension metadata
@@ -572,11 +620,11 @@ cd extension
 python3 -m pytest tests/ -v
 ```
 
-217 tests covering:
+223 tests covering:
 
 - **test_engine.py** (26 tests): compression thresholds, processor priority, ANSI cleanup, multiple calls
 - **test_processors.py** (117 tests): each processor with nominal and edge cases, diff context reduction, docker build/ps/images/logs, npm audit, pytest warnings, fuzzy line collapse, progress bar stripping, curl/wget, kubectl, terraform, env, search, system info, package listing, content-aware file compression
-- **test_hooks.py** (27 tests): matching patterns, exclusions, subprocess integration, new command patterns (curl, kubectl, terraform, env, grep, system info, package lists)
+- **test_hooks.py** (30 tests): matching patterns, exclusions, subprocess integration, new command patterns (curl, kubectl, terraform, env, grep, system info, package lists), image optimization (small/large image handling, non-image passthrough)
 - **test_tracker.py** (16 tests): CRUD, concurrency (4 threads), corruption recovery, stats CLI (human + JSON output)
 - **test_config.py** (6 tests): defaults, env overrides, invalid values
 - **test_precision.py** (25 tests): verification that every critical piece of data survives compression (filenames, hashes, error messages, stack traces, line numbers, rule IDs, diff changes, warning types, secret redaction, unhealthy pods, terraform changes, unmet dependencies)

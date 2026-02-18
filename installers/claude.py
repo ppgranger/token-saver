@@ -94,7 +94,21 @@ def _register_hooks(target_dir):
             ],
         }
     )
-    print("  REGISTERED PreToolUse hook in settings.json")
+
+    # PreToolUse hook for Read tool (image optimization)
+    pretool_list.append(
+        {
+            "matcher": "Read",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": hooks_script_pretool,
+                    "timeout": 10000,
+                }
+            ],
+        }
+    )
+    print("  REGISTERED PreToolUse hooks (Bash + Read) in settings.json")
 
     # --- SessionStart hook (new format, no matcher needed) ---
     session_list = hooks.setdefault("SessionStart", [])

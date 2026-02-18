@@ -184,9 +184,91 @@ class TestHookPretoolIntegration:
         assert "git status" in cmd
 
     def test_non_bash_tool_passthrough(self):
-        stdout, code = self._run_hook({"tool_name": "Read", "tool_input": {"path": "/some/file"}})
+        stdout, code = self._run_hook({"tool_name": "Write", "tool_input": {"path": "/some/file"}})
         assert code == 0
         assert stdout == ""
+
+    def test_read_non_image_passthrough(self):
+        """Read tool on non-image files should pass through unchanged."""
+        stdout, code = self._run_hook(
+            {"tool_name": "Read", "tool_input": {"file_path": "/some/file.py"}}
+        )
+        assert code == 0
+        assert stdout == ""
+
+    def test_read_image_small_passthrough(self):
+        """Read tool on small images (below 1568px) should pass through unchanged."""
+        import struct
+        import tempfile
+        import zlib
+
+        # Create a small 100x100 PNG
+        def _make_png(width, height, path):
+            def chunk(ctype, data):
+                c = ctype + data
+                crc = zlib.crc32(c) & 0xFFFFFFFF
+                return struct.pack(">I", len(data)) + c + struct.pack(">I", crc)
+
+            raw = b""
+            for _ in range(height):
+                raw += b"\x00" + b"\xff\x00\x00" * width
+            with open(path, "wb") as f:
+                f.write(b"\x89PNG\r\n\x1a\n")
+                f.write(chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)))
+                f.write(chunk(b"IDAT", zlib.compress(raw)))
+                f.write(chunk(b"IEND", b""))
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            tmp_path = f.name
+        try:
+            _make_png(100, 100, tmp_path)
+            stdout, code = self._run_hook(
+                {"tool_name": "Read", "tool_input": {"file_path": tmp_path}}
+            )
+            assert code == 0
+            # Small image: no optimization needed, no output
+            assert stdout == ""
+        finally:
+            os.unlink(tmp_path)
+
+    def test_read_image_large_optimized(self):
+        """Read tool on large images should return updatedInput with resized path."""
+        import struct
+        import tempfile
+        import zlib
+
+        def _make_png(width, height, path):
+            def chunk(ctype, data):
+                c = ctype + data
+                crc = zlib.crc32(c) & 0xFFFFFFFF
+                return struct.pack(">I", len(data)) + c + struct.pack(">I", crc)
+
+            raw = b""
+            for _ in range(height):
+                raw += b"\x00" + b"\xff\x00\x00" * width
+            with open(path, "wb") as f:
+                f.write(b"\x89PNG\r\n\x1a\n")
+                f.write(chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)))
+                f.write(chunk(b"IDAT", zlib.compress(raw)))
+                f.write(chunk(b"IEND", b""))
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            tmp_path = f.name
+        try:
+            _make_png(2000, 1500, tmp_path)
+            stdout, code = self._run_hook(
+                {"tool_name": "Read", "tool_input": {"file_path": tmp_path}}
+            )
+            assert code == 0
+            if stdout:
+                data = json.loads(stdout)
+                optimized_path = data["hookSpecificOutput"]["updatedInput"]["file_path"]
+                assert optimized_path != tmp_path
+                assert os.path.isfile(optimized_path)
+                # Cleanup optimized file
+                os.unlink(optimized_path)
+        finally:
+            os.unlink(tmp_path)
 
     def test_non_compressible_passthrough(self):
         stdout, code = self._run_hook(
