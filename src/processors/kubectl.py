@@ -4,11 +4,23 @@ import re
 
 from .base import Processor
 
+# Optional kubectl global options that may appear before the subcommand.
+# Covers: -n <ns>, --namespace <ns>, --context <ctx>, --kubeconfig <path>,
+#         -A / --all-namespaces, -o <fmt> (when before subcommand)
+_KUBECTL_OPTS = (
+    r"(?:-n\s+\S+\s+|--namespace(?:=|\s+)\S+\s+"
+    r"|--context(?:=|\s+)\S+\s+|--kubeconfig(?:=|\s+)\S+\s+"
+    r"|-A\s+|--all-namespaces\s+)*"
+)
+
+_KUBECTL_SUBCMDS = r"(get|describe|logs|top)"
+_KUBECTL_CMD_RE = re.compile(rf"\b(kubectl|oc)\s+{_KUBECTL_OPTS}{_KUBECTL_SUBCMDS}\b")
+
 
 class KubectlProcessor(Processor):
     priority = 32
     hook_patterns = [
-        r"^(kubectl|oc)\s+(get|describe|logs|top)\b",
+        rf"^(kubectl|oc)\s+{_KUBECTL_OPTS}(get|describe|logs|top)\b",
     ]
 
     @property
@@ -16,19 +28,23 @@ class KubectlProcessor(Processor):
         return "kubectl"
 
     def can_handle(self, command: str) -> bool:
-        return bool(re.search(r"\b(kubectl|oc)\s+(get|describe|logs|top)\b", command))
+        return bool(_KUBECTL_CMD_RE.search(command))
+
+    def _get_subcmd(self, command: str) -> str | None:
+        """Extract the kubectl subcommand, skipping any global options."""
+        m = _KUBECTL_CMD_RE.search(command)
+        return m.group(2) if m else None
 
     def process(self, command: str, output: str) -> str:
         if not output or not output.strip():
             return output
 
-        if re.search(r"\b(kubectl|oc)\s+describe\b", command):
+        subcmd = self._get_subcmd(command)
+        if subcmd == "describe":
             return self._process_describe(output)
-        if re.search(r"\b(kubectl|oc)\s+logs\b", command):
+        if subcmd == "logs":
             return self._process_logs(output)
-        if re.search(r"\b(kubectl|oc)\s+get\b", command):
-            return self._process_get(output)
-        if re.search(r"\b(kubectl|oc)\s+top\b", command):
+        if subcmd in ("get", "top"):
             return self._process_get(output)
         return output
 

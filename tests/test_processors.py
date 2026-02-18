@@ -37,6 +37,27 @@ class TestGitProcessor:
         assert not self.p.can_handle("grep git")
         assert not self.p.can_handle("ls -la")
 
+    def test_can_handle_git_with_global_options(self):
+        assert self.p.can_handle("git -C /some/path status")
+        assert self.p.can_handle("git -C /opt/homebrew log --oneline")
+        assert self.p.can_handle("git --no-pager diff HEAD~1")
+        assert self.p.can_handle("git -C /path --no-pager log")
+        assert self.p.can_handle("git --no-pager -C /path status")
+        assert self.p.can_handle("git -c core.pager=cat diff")
+        assert self.p.can_handle("git --git-dir=/repo/.git status")
+        assert self.p.can_handle("git --work-tree /repo diff")
+
+    def test_process_routes_with_global_options(self):
+        """Commands with global options should route to the correct processor."""
+        status_output = "On branch main\nnothing to commit, working tree clean"
+        result = self.p.process("git -C /some/path status", status_output)
+        assert "nothing to commit" in result
+
+        log_lines = [f"abc{i:04d} commit message {i}" for i in range(30)]
+        log_output = "\n".join(log_lines)
+        result = self.p.process("git -C /opt/homebrew --no-pager log --oneline", log_output)
+        assert "more" in result
+
     def test_empty_output(self):
         assert self.p.process("git status", "") == ""
         assert self.p.process("git status", "   ") == "   "
@@ -987,6 +1008,11 @@ class TestDockerProcessor:
         assert self.p.can_handle("docker compose ps")
         assert not self.p.can_handle("docker build .")
 
+    def test_can_handle_with_global_options(self):
+        assert self.p.can_handle("docker --context remote ps")
+        assert self.p.can_handle("docker -H tcp://host:2375 images")
+        assert self.p.can_handle("docker --host unix:///var/run/docker.sock logs container")
+
     def test_empty_output(self):
         assert self.p.process("docker ps", "") == ""
 
@@ -1190,6 +1216,15 @@ class TestKubectlProcessor:
         assert self.p.can_handle("kubectl logs my-pod")
         assert self.p.can_handle("oc get pods")
         assert not self.p.can_handle("docker ps")
+
+    def test_can_handle_with_global_options(self):
+        assert self.p.can_handle("kubectl -n kube-system get pods")
+        assert self.p.can_handle("kubectl --namespace=default get svc")
+        assert self.p.can_handle("kubectl --context prod describe pod my-pod")
+        assert self.p.can_handle("kubectl -A get pods")
+        assert self.p.can_handle("kubectl --all-namespaces get pods")
+        assert self.p.can_handle("kubectl -n monitoring --context staging logs my-pod")
+        assert self.p.can_handle("kubectl --kubeconfig /path/config get nodes")
 
     def test_get_pods_summarizes_healthy(self):
         header = "NAME                    READY   STATUS    RESTARTS   AGE"
