@@ -12,7 +12,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.engine import CompressionEngine
-from src.platform import Platform, get_command, get_tool_output
+from src.platforms import Platform, get_command, get_tool_output
 from src.tracker import SavingsTracker
 
 

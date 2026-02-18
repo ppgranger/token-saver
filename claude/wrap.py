@@ -121,7 +121,9 @@ def main():
     if was_compressed:
         _log.debug(
             "Compressed: processor=%s original=%d compressed=%d",
-            processor_name, len(output), len(compressed),
+            processor_name,
+            len(output),
+            len(compressed),
         )
         try:
             tracker = SavingsTracker()
@@ -133,7 +135,7 @@ def main():
                 platform="claude_code",
             )
             tracker.close()
-        except Exception:  # noqa: S110
+        except Exception:
             _log.exception("Tracking failed")
     else:
         _log.debug("Not compressed: processor=%s len=%d", processor_name, len(output))

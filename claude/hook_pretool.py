@@ -110,7 +110,13 @@ def main():
     new_command = f"python3 {shlex.quote(wrap_py)} {shlex.quote(command)}"
     _log.debug("Rewriting: %r -> %r", command, new_command)
 
-    result = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": {"command": new_command}}}
+    result = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "updatedInput": {"command": new_command},
+        },
+    }
 
     json.dump(result, sys.stdout)
     sys.exit(0)

@@ -8,16 +8,61 @@ from .base import Processor
 
 # Extension sets for content type detection
 _CODE_EXTENSIONS = {
-    ".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java", ".kt",
-    ".c", ".cpp", ".h", ".hpp", ".rb", ".php", ".swift", ".scala",
-    ".tf", ".hcl", ".sh", ".bash", ".zsh", ".ps1", ".lua", ".r",
-    ".m", ".cs", ".vb", ".pl", ".pm", ".ex", ".exs", ".hs", ".ml",
-    ".vue", ".svelte", ".dart", ".zig", ".nim", ".v", ".groovy",
+    ".py",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".go",
+    ".rs",
+    ".java",
+    ".kt",
+    ".c",
+    ".cpp",
+    ".h",
+    ".hpp",
+    ".rb",
+    ".php",
+    ".swift",
+    ".scala",
+    ".tf",
+    ".hcl",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".ps1",
+    ".lua",
+    ".r",
+    ".m",
+    ".cs",
+    ".vb",
+    ".pl",
+    ".pm",
+    ".ex",
+    ".exs",
+    ".hs",
+    ".ml",
+    ".vue",
+    ".svelte",
+    ".dart",
+    ".zig",
+    ".nim",
+    ".v",
+    ".groovy",
 }
 
 _CONFIG_EXTENSIONS = {
-    ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".xml",
-    ".env", ".properties", ".plist", ".conf",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".ini",
+    ".cfg",
+    ".xml",
+    ".env",
+    ".properties",
+    ".plist",
+    ".conf",
 }
 
 _CSV_EXTENSIONS = {".csv", ".tsv"}
@@ -69,7 +114,7 @@ _IMPORTANT_MARKERS = re.compile(r"\b(TODO|FIXME|HACK|BUG|XXX|NOQA|SAFETY)\b", re
 _LOG_LEVEL_RE = re.compile(
     r"("
     r"\d{4}[-/]\d{2}[-/]\d{2}"  # date
-    r"|^\d{2}:\d{2}:\d{2}"      # time
+    r"|^\d{2}:\d{2}:\d{2}"  # time
     r"|\[(INFO|DEBUG|WARN|WARNING|ERROR|FATAL|CRITICAL|TRACE)\]"
     r"|\b(INFO|DEBUG|WARN|WARNING|ERROR|FATAL|CRITICAL|TRACE)\s"
     r"|^\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}"  # syslog date
@@ -163,10 +208,8 @@ class FileContentProcessor(Processor):
             return False
         for sep in (",", "\t"):
             counts = [line.count(sep) for line in sample if line.strip()]
-            if len(counts) >= 3 and counts[0] >= 2:
-                # Consistent separator count across lines
-                if all(c == counts[0] for c in counts[:5]):
-                    return True
+            if len(counts) >= 3 and counts[0] >= 2 and all(c == counts[0] for c in counts[:5]):
+                return True
         return False
 
     # ── Code compression ────────────────────────────────────────────
@@ -311,7 +354,7 @@ class FileContentProcessor(Processor):
             stripped = line.lstrip()
             indent = len(line) - len(stripped)
             # Keep XML declaration, top-level and second-level tags
-            if indent <= 4 or stripped.startswith("<?") or stripped.startswith("<!"):
+            if indent <= 4 or stripped.startswith(("<?", "<!")):
                 result.append(line)
             else:
                 nested_count += 1
@@ -327,15 +370,9 @@ class FileContentProcessor(Processor):
         for line in lines:
             stripped = line.strip()
             # Keep section headers, key=value lines at top level, and comments
-            if (
-                stripped.startswith("[")
-                or stripped.startswith("#")
-                or stripped.startswith(";")
-                or "=" in stripped
-                or ":" in stripped
-            ):
+            if stripped.startswith(("[", "#", ";")) or "=" in stripped or ":" in stripped:
                 if len(stripped) > 120:
-                    key_part = re.split(r"[=:]", stripped, 1)[0]
+                    key_part = re.split(r"[=:]", stripped, maxsplit=1)[0]
                     result.append(f"{key_part}= ... (truncated)")
                 else:
                     result.append(line)
@@ -451,6 +488,7 @@ class FileContentProcessor(Processor):
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
 
 def output_start(lines: list[str]) -> str:
     """Return the first non-whitespace character of the output."""

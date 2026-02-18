@@ -1,4 +1,4 @@
-"""Platform detection and I/O format abstraction."""  # noqa: A005
+"""Platform detection and I/O format abstraction."""
 
 from enum import Enum
 

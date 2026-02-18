@@ -37,7 +37,7 @@ class FileListingProcessor(Processor):
     # Regex for ls -l long-format lines (locale-agnostic).
     # We capture: type char, size, and everything after the date as filename.
     # The date field varies by locale (EN: "Jan 12 17:24", FR: "12 janv. 17:24"),
-    # so we match it as: one or more groups of (non-digit-word-chars or digits) ending with HH:MM or year.
+    # so we match it as: groups of (non-digit-word-chars or digits) ending with HH:MM or year.
     _LS_LONG_RE = re.compile(
         r"^([d\-lbcps])"  # 1: type indicator
         r"[rwxsStT\-]{9}[@+.]?\s+"  # permissions
