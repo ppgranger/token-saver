@@ -526,7 +526,7 @@ extension/
 ├── src/                             # Shared source code
 │   ├── __init__.py
 │   ├── config.py                    # Configuration system
-│   ├── platform.py                  # Platform detection + I/O abstraction
+│   ├── platforms.py                 # Platform detection + I/O abstraction
 │   ├── engine.py                    # Compression engine (orchestrator)
 │   ├── hook_session.py              # SessionStart hook (stats, shared)
 │   ├── tracker.py                   # SQLite tracking
