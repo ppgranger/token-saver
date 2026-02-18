@@ -274,5 +274,8 @@ class BuildOutputProcessor(Processor):
             r"^\s*Using\s+(cached|version)\b",
             r"^\s*Collecting\s+\S+",  # pip
             r"^\s*━",  # pip progress bar
+            r"^\s*\u27a4?\s*YN\d+:.*\b(Resolution|Fetch|Link)\s+step\b",  # yarn berry v2+
+            r"^\s*Progress:\s+resolved\s+\d+",  # pnpm resolved/reused/downloaded stats
+            r"^\s*[Pp]ackages?\s+(are|is)\s+hard linked",  # pnpm content-addressable store
         ]
         return any(re.match(p, line) for p in patterns)

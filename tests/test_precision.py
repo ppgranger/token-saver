@@ -281,6 +281,25 @@ class TestBuildPrecision:
         assert "Build succeeded" in compressed
         assert "245 KB" in compressed or "gzip" in compressed
 
+    def test_errors_mentioning_step_keywords_preserved(self):
+        """Errors containing 'Resolution step' or 'Fetch step' must not be stripped."""
+        output = "\n".join(
+            [f"  Resolving dep-{i}" for i in range(50)]
+            + [
+                "error: Resolution step failed: ETIMEDOUT",
+                "  at NetworkManager.fetch (node_modules/yarn/lib/cli.js:123)",
+                "",
+                "error: Fetch step encountered a certificate error",
+                "  UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+            ]
+        )
+        compressed, _, was_compressed = self.engine.compress("yarn install", output)
+        assert was_compressed
+        assert "Resolution step failed" in compressed
+        assert "ETIMEDOUT" in compressed
+        assert "Fetch step encountered" in compressed
+        assert "UNABLE_TO_GET_ISSUER_CERT_LOCALLY" in compressed
+
 
 class TestLintPrecision:
     def setup_method(self):
