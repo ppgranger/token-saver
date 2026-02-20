@@ -16,7 +16,7 @@ import argparse
 import platform
 
 from installers import claude, gemini
-from installers.common import uninstall_data_dir
+from installers.common import install_cli, uninstall_cli, uninstall_data_dir
 
 
 def main():
@@ -62,6 +62,9 @@ Examples:
         target = args.target or "both"
         print(f"Uninstalling token-saver from: {target}")
 
+        print("\n--- CLI ---")
+        uninstall_cli()
+
         if target in ("claude", "both"):
             claude.uninstall()
         if target in ("gemini", "both"):
@@ -83,6 +86,9 @@ Examples:
         claude.install(use_symlink=args.link)
     if target in ("gemini", "both"):
         gemini.install(use_symlink=args.link)
+
+    print("\n--- CLI ---")
+    install_cli(use_symlink=args.link)
 
     print("\nInstallation complete.")
 

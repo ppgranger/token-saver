@@ -10,6 +10,7 @@ from .common import (
     home,
     install_files,
     python_cmd,
+    stamp_version,
     uninstall_dir,
 )
 
@@ -178,6 +179,7 @@ def install(use_symlink=False):
     target_dir = _plugin_dir()
     print(f"\n--- Claude Code ({target_dir}) ---")
     install_files(target_dir, CLAUDE_FILES, use_symlink)
+    stamp_version(target_dir, ["claude/plugin.json"])
     _register_hooks(target_dir)
 
 
