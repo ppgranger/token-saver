@@ -114,6 +114,88 @@ def uninstall_data_dir():
         print(f"  NOT FOUND {data_dir} (already removed)")
 
 
+# ---------------------------------------------------------------------------
+# Legacy cleanup: the project was originally named "token-saving" (with a "g").
+# With v1.0.1 the repo was renamed to "token-saver" and the CLI was introduced.
+# Old installations may have left directories under the former name. This
+# function detects and removes them so only "token-saver" directories remain.
+# ---------------------------------------------------------------------------
+
+_LEGACY_NAME = "token-saving"
+
+
+def _legacy_dirs():
+    """Return all possible legacy "token-saving" directories across platforms."""
+    h = home()
+    dirs = []
+
+    # Claude Code plugin: ~/.claude/plugins/token-saving
+    if IS_WINDOWS:
+        appdata = os.environ.get("APPDATA", os.path.join(h, "AppData", "Roaming"))
+        dirs.append(os.path.join(appdata, "claude", "plugins", _LEGACY_NAME))
+        dirs.append(os.path.join(appdata, "gemini", "extensions", _LEGACY_NAME))
+        dirs.append(os.path.join(appdata, _LEGACY_NAME))
+    else:
+        dirs.append(os.path.join(h, ".claude", "plugins", _LEGACY_NAME))
+        dirs.append(os.path.join(h, ".gemini", "extensions", _LEGACY_NAME))
+        dirs.append(os.path.join(h, f".{_LEGACY_NAME}"))
+
+    return dirs
+
+
+def migrate_from_legacy():
+    """Remove any leftover "token-saving" directories from a previous install.
+
+    Called before installing so the old name doesn't coexist with the new one.
+    Also cleans up settings.json hooks that reference the old path.
+    """
+    found = False
+    for legacy_dir in _legacy_dirs():
+        if os.path.exists(legacy_dir):
+            shutil.rmtree(legacy_dir)
+            print(f"  REMOVED legacy {legacy_dir}")
+            found = True
+
+    # Clean old "token-saving" references from Claude Code settings.json
+    if IS_WINDOWS:
+        appdata = os.environ.get("APPDATA", os.path.join(home(), "AppData", "Roaming"))
+        settings_path = os.path.join(appdata, "claude", "settings.json")
+    else:
+        settings_path = os.path.join(home(), ".claude", "settings.json")
+
+    if os.path.exists(settings_path):
+        try:
+            with open(settings_path) as f:
+                settings = json.load(f)
+            hooks = settings.get("hooks", {})
+            changed = False
+            for event in list(hooks):
+                if not isinstance(hooks[event], list):
+                    continue
+                original_len = len(hooks[event])
+                hooks[event] = [
+                    entry for entry in hooks[event] if _LEGACY_NAME not in json.dumps(entry)
+                ]
+                if len(hooks[event]) != original_len:
+                    changed = True
+                if not hooks[event]:
+                    del hooks[event]
+            if changed:
+                if not hooks:
+                    settings.pop("hooks", None)
+                with open(settings_path, "w") as f:
+                    json.dump(settings, f, indent=2)
+                    f.write("\n")
+                print("  REMOVED legacy hooks from settings.json")
+                found = True
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    if found:
+        print('  Legacy "token-saving" installation cleaned up.')
+    return found
+
+
 def _read_version():
     """Read __version__ from src/__init__.py using regex."""
     init_path = os.path.join(EXTENSION_DIR, "src", "__init__.py")

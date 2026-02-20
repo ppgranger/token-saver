@@ -16,7 +16,7 @@ import argparse
 import platform
 
 from installers import claude, gemini
-from installers.common import install_cli, uninstall_cli, uninstall_data_dir
+from installers.common import install_cli, migrate_from_legacy, uninstall_cli, uninstall_data_dir
 
 
 def main():
@@ -81,6 +81,10 @@ Examples:
     print(f"Installing token-saver for: {target}")
     print(f"Platform: {platform.system()}")
     print(f"Mode: {'symlink' if args.link else 'copy'}")
+
+    # Clean up any leftover "token-saving" installation before proceeding
+    print("\n--- Legacy cleanup ---")
+    migrate_from_legacy()
 
     if target in ("claude", "both"):
         claude.install(use_symlink=args.link)
