@@ -235,6 +235,26 @@ class TestInstallCli:
             content = f.read()
         assert "old content" not in content
 
+    def test_copy_does_not_corrupt_symlink_target(self):
+        """Switching from --link to copy should not overwrite the original source."""
+        # First install with symlink
+        with mock.patch("installers.common._cli_install_dir", return_value=self.tmp_dir):
+            install_cli(use_symlink=True)
+
+        dst = os.path.join(self.tmp_dir, "token-saver")
+        assert os.path.islink(dst)
+        target_before = os.path.realpath(dst)
+        with open(target_before) as f:
+            original_content = f.read()
+
+        # Reinstall with copy — should NOT overwrite the symlink target
+        with mock.patch("installers.common._cli_install_dir", return_value=self.tmp_dir):
+            install_cli(use_symlink=False)
+
+        assert not os.path.islink(dst)  # should be a real file now
+        with open(target_before) as f:
+            assert f.read() == original_content  # original source untouched
+
 
 class TestInstallCore:
     def setup_method(self):

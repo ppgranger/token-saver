@@ -75,9 +75,12 @@ def install_files(target_dir, file_list, use_symlink=False):
 
         os.makedirs(os.path.dirname(dst), exist_ok=True)
 
+        # Remove existing file/symlink before writing to avoid overwriting
+        # through symlinks (which would corrupt the symlink target).
+        if os.path.exists(dst) or os.path.islink(dst):
+            os.remove(dst)
+
         if use_symlink:
-            if os.path.exists(dst) or os.path.islink(dst):
-                os.remove(dst)
             os.symlink(src, dst)
             print(f"  LINK {rel_path}")
         else:
@@ -311,9 +314,12 @@ def install_cli(use_symlink=False):
         src_path = os.path.join(EXTENSION_DIR, "bin", src_name)
         dst_path = os.path.join(install_dir, src_name)
 
+    # Remove existing file/symlink before writing to avoid overwriting
+    # through symlinks (which would corrupt the symlink target).
+    if os.path.exists(dst_path) or os.path.islink(dst_path):
+        os.remove(dst_path)
+
     if use_symlink:
-        if os.path.exists(dst_path) or os.path.islink(dst_path):
-            os.remove(dst_path)
         os.symlink(src_path, dst_path)
         print(f"  LINK {src_name} -> {dst_path}")
     else:
@@ -325,12 +331,12 @@ def install_cli(use_symlink=False):
         print(f"  COPY {src_name} -> {dst_path}")
 
     if IS_WINDOWS:
-        if not use_symlink:
-            shutil.copy2(py_src, py_dst)
-        else:
-            if os.path.exists(py_dst) or os.path.islink(py_dst):
-                os.remove(py_dst)
+        if os.path.exists(py_dst) or os.path.islink(py_dst):
+            os.remove(py_dst)
+        if use_symlink:
             os.symlink(py_src, py_dst)
+        else:
+            shutil.copy2(py_src, py_dst)
 
     # Check if install_dir is in PATH
     path_dirs = os.environ.get("PATH", "").split(os.pathsep)

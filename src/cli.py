@@ -46,7 +46,7 @@ def cmd_update(_args):
 
     print("Checking for updates...")
     try:
-        latest = _fetch_latest_version()
+        latest = _fetch_latest_version(timeout=10)
     except urllib.error.HTTPError as e:
         if e.code == 404:
             print("No releases found on GitHub. Is the repository public with releases?")
@@ -137,16 +137,33 @@ def _update_via_git(repo_dir, version):
 def _update_via_tarball(repo_dir, version):
     """Update by downloading and extracting release tarball."""
     print("Downloading update...")
-    url = f"https://github.com/ppgranger/token-saver/archive/refs/tags/v{version}.tar.gz"
-    req = urllib.request.Request(url, headers={"User-Agent": "token-saver"})  # noqa: S310
+
+    # Try both tag formats: v1.2.0 and 1.2.0 (mirrors _update_via_git behavior)
+    urls = [
+        f"https://github.com/ppgranger/token-saver/archive/refs/tags/v{version}.tar.gz",
+        f"https://github.com/ppgranger/token-saver/archive/refs/tags/{version}.tar.gz",
+    ]
+
+    tarball_data = None
+    for url in urls:
+        req = urllib.request.Request(url, headers={"User-Agent": "token-saver"})  # noqa: S310
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
+                tarball_data = resp.read()
+            break
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                continue
+            raise
+
+    if tarball_data is None:
+        print(f"Error: could not download release v{version} from GitHub")
+        sys.exit(1)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tarball_path = os.path.join(tmpdir, "release.tar.gz")
-        with (
-            urllib.request.urlopen(req, timeout=30) as resp,  # noqa: S310
-            open(tarball_path, "wb") as f,
-        ):
-            f.write(resp.read())
+        with open(tarball_path, "wb") as f:
+            f.write(tarball_data)
 
         with tarfile.open(tarball_path, "r:gz") as tar:
             tar.extractall(tmpdir)  # noqa: S202

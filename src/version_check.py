@@ -19,8 +19,13 @@ def _parse_version(version_str):
     return tuple(int(x) for x in v.split("."))
 
 
-def _fetch_latest_version(fetch_fn=None):
-    """Fetch latest version string from GitHub API."""
+def _fetch_latest_version(fetch_fn=None, timeout=1):
+    """Fetch latest version string from GitHub API.
+
+    Args:
+        fetch_fn: Override fetch function (for testing). Should return version string.
+        timeout: HTTP timeout in seconds (default 1s for hooks, use higher for CLI).
+    """
     if fetch_fn is not None:
         return fetch_fn()
 
@@ -28,7 +33,7 @@ def _fetch_latest_version(fetch_fn=None):
         _GITHUB_API_URL,
         headers={"Accept": "application/vnd.github.v3+json", "User-Agent": "token-saver"},
     )
-    with urllib.request.urlopen(req, timeout=1) as resp:  # noqa: S310
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
         data = json.loads(resp.read().decode())
     tag = data.get("tag_name", "")
     if not tag:

@@ -54,13 +54,12 @@ def _register_hooks(target_dir):
     settings_path = _settings_path()
     python = python_cmd()
 
-    hooks_script_pretool = f"{python} {target_dir}/claude/hook_pretool.py"
-    hooks_script_session = f"{python} {target_dir}/src/hook_session.py"
+    pretool_path = os.path.join(target_dir, "claude", "hook_pretool.py")
+    session_path = os.path.join(target_dir, "src", "hook_session.py")
 
-    # On Windows, use backslashes in paths
-    if IS_WINDOWS:
-        hooks_script_pretool = hooks_script_pretool.replace("/", "\\")
-        hooks_script_session = hooks_script_session.replace("/", "\\")
+    # Quote paths to handle directories with spaces (e.g. /Users/John Smith/...)
+    hooks_script_pretool = f'{python} "{pretool_path}"'
+    hooks_script_session = f'{python} "{session_path}"'
 
     settings = {}
     if os.path.exists(settings_path):
