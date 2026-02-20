@@ -49,6 +49,9 @@ _CODE_EXTENSIONS = {
     ".nim",
     ".v",
     ".groovy",
+    ".sql",
+    ".md",
+    ".rst",
 }
 
 _CONFIG_EXTENSIONS = {
@@ -94,8 +97,13 @@ _DEFINITION_PATTERNS = [
         r"^\s*(public|private|protected|internal)"
         r"\s+(static\s+)?(async\s+)?\w+[\w<>\[\],\s]*\s+\w+\s*\("
     ),
-    # C/C++
-    re.compile(r"^\s*(\w+[\w\s\*&:<>]*)\s+\w+\s*\([^;]*$"),
+    # C/C++ -- require a return type keyword or modifier before the function name
+    re.compile(
+        r"^\s*(static\s+|extern\s+|inline\s+|virtual\s+|const\s+)*"
+        r"(void|int|char|float|double|long|short|unsigned|signed|bool|auto|size_t|"
+        r"std::\w+|struct\s+\w+|enum\s+\w+|class\s+\w+|\w+_t)"
+        r"[\s\*&]+\w+\s*\("
+    ),
     # Ruby
     re.compile(r"^\s*def\s+\w+"),
     re.compile(r"^\s*class\s+\w+"),
