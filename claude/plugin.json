@@ -1,6 +1,6 @@
 {
   "name": "token-saver",
   "version": "1.0.0",
-  "description": "Universal token-saving extension for AI CLI tools (Claude Code, Gemini CLI)",
+  "description": "Universal token-saver extension for AI CLI tools (Claude Code, Gemini CLI)",
   "author": "Token-Saver"
 }

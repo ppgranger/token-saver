@@ -12,7 +12,12 @@ class TestConfig:
     def setup_method(self):
         config.reload()
 
-    def test_default_values(self):
+    def test_default_values(self, monkeypatch):
+        # Clear any TOKEN_SAVER_* env vars so defaults are not overridden
+        for key in list(os.environ):
+            if key.startswith("TOKEN_SAVER_"):
+                monkeypatch.delenv(key)
+        config.reload()
         assert config.get("min_input_length") == 200
         assert config.get("min_compression_ratio") == 0.10
         assert config.get("wrap_timeout") == 300
