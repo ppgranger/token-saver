@@ -46,7 +46,9 @@ def _load_config() -> dict:
     config = dict(_DEFAULTS)
 
     # Load from config file if it exists
-    config_path = os.path.expanduser("~/.token-saver/config.json")
+    from src import data_dir  # noqa: PLC0415
+
+    config_path = os.path.join(data_dir(), "config.json")
     if os.path.exists(config_path):
         try:
             with open(config_path) as f:

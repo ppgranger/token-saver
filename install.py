@@ -16,7 +16,14 @@ import argparse
 import platform
 
 from installers import claude, gemini
-from installers.common import uninstall_data_dir
+from installers.common import (
+    install_cli,
+    install_core,
+    migrate_from_legacy,
+    uninstall_cli,
+    uninstall_core,
+    uninstall_data_dir,
+)
 
 
 def main():
@@ -62,10 +69,20 @@ Examples:
         target = args.target or "both"
         print(f"Uninstalling token-saver from: {target}")
 
+        print("\n--- Legacy cleanup ---")
+        migrate_from_legacy()
+
+        print("\n--- CLI ---")
+        uninstall_cli()
+
         if target in ("claude", "both"):
             claude.uninstall()
         if target in ("gemini", "both"):
             gemini.uninstall()
+
+        print("\n--- Core ---")
+        uninstall_core()
+
         if not args.keep_data:
             print("\n--- Data ---")
             uninstall_data_dir()
@@ -79,10 +96,19 @@ Examples:
     print(f"Platform: {platform.system()}")
     print(f"Mode: {'symlink' if args.link else 'copy'}")
 
+    # Clean up any leftover "token-saving" installation before proceeding
+    print("\n--- Legacy cleanup ---")
+    migrate_from_legacy()
+
     if target in ("claude", "both"):
         claude.install(use_symlink=args.link)
     if target in ("gemini", "both"):
         gemini.install(use_symlink=args.link)
+
+    install_core(use_symlink=args.link)
+
+    print("\n--- CLI ---")
+    install_cli(use_symlink=args.link)
 
     print("\nInstallation complete.")
 
