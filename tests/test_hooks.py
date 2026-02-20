@@ -153,6 +153,72 @@ class TestHookPretool:
         assert is_compressible("wc -l *.py")
         assert is_compressible("df -h")
 
+    def test_new_test_runners_compressible(self):
+        assert is_compressible("pnpm test")
+        assert is_compressible("yarn test")
+        assert is_compressible("dotnet test")
+        assert is_compressible("swift test")
+        assert is_compressible("mix test")
+        assert is_compressible("vitest")
+        assert is_compressible("bun test")
+
+    def test_new_git_subcommands_compressible(self):
+        assert is_compressible("git blame src/main.py")
+        assert is_compressible("git cherry-pick abc123")
+        assert is_compressible("git rebase main")
+        assert is_compressible("git merge feature/branch")
+        assert is_compressible("git stash list")
+
+    def test_new_lint_commands_compressible(self):
+        assert is_compressible("mypy src/")
+        assert is_compressible("shellcheck script.sh")
+        assert is_compressible("hadolint Dockerfile")
+        assert is_compressible("cargo clippy")
+        assert is_compressible("prettier --check src/")
+        assert is_compressible("biome check src/")
+        assert is_compressible("biome lint src/")
+
+    def test_new_docker_subcommands_compressible(self):
+        assert is_compressible("docker inspect container")
+        assert is_compressible("docker stats")
+        assert is_compressible("docker compose up -d")
+        assert is_compressible("docker compose down")
+        assert is_compressible("docker compose build")
+        assert is_compressible("docker compose ps")
+        assert is_compressible("docker compose logs web")
+
+    def test_new_kubectl_subcommands_compressible(self):
+        assert is_compressible("kubectl apply -f deployment.yaml")
+        assert is_compressible("kubectl delete pod my-pod")
+        assert is_compressible("kubectl create namespace test")
+
+    def test_new_terraform_subcommands_compressible(self):
+        assert is_compressible("terraform init")
+        assert is_compressible("terraform output")
+        assert is_compressible("terraform state list")
+        assert is_compressible("terraform state show aws_instance.web")
+        assert is_compressible("tofu init")
+        assert is_compressible("tofu output")
+
+    def test_new_build_commands_compressible(self):
+        assert is_compressible("turbo run build")
+        assert is_compressible("turbo build")
+        assert is_compressible("nx run build")
+        assert is_compressible("nx build")
+        assert is_compressible("docker compose build")
+
+    def test_new_search_commands_compressible(self):
+        assert is_compressible("fd -e py")
+        assert is_compressible("fdfind pattern")
+
+    def test_new_file_listing_commands_compressible(self):
+        assert is_compressible("exa -la")
+        assert is_compressible("eza --long")
+
+    def test_httpie_compressible(self):
+        assert is_compressible("http GET https://api.example.com")
+        assert is_compressible("https POST https://api.example.com")
+
 
 class TestHookPretoolIntegration:
     """Test the full hook script behavior via subprocess."""
