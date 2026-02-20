@@ -7,6 +7,7 @@ from .common import (
     SHARED_FILES,
     home,
     install_files,
+    stamp_version,
     uninstall_dir,
 )
 
@@ -31,6 +32,7 @@ def install(use_symlink=False):
     target_dir = _extension_dir()
     print(f"\n--- Gemini CLI ({target_dir}) ---")
     install_files(target_dir, GEMINI_FILES, use_symlink)
+    stamp_version(target_dir, ["gemini/gemini-extension.json"])
 
 
 def uninstall():

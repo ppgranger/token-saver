@@ -23,12 +23,14 @@ from src import config
 from src.engine import CompressionEngine
 from src.tracker import SavingsTracker
 
-# --- Debug logging (writes to ~/.token-saver/hook.log when TOKEN_SAVER_DEBUG=true) ---
+# --- Debug logging (writes to data_dir/hook.log when TOKEN_SAVER_DEBUG=true) ---
 _log = logging.getLogger("token-saver.wrap")
 _log.setLevel(logging.DEBUG)
 _debug = os.environ.get("TOKEN_SAVER_DEBUG", "").lower() in ("1", "true", "yes")
 if _debug:
-    _log_dir = os.path.join(os.path.expanduser("~"), ".token-saver")
+    from src import data_dir as _data_dir
+
+    _log_dir = _data_dir()
     os.makedirs(_log_dir, exist_ok=True)
     _handler = logging.FileHandler(os.path.join(_log_dir, "hook.log"))
     _handler.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s"))

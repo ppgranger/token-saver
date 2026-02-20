@@ -15,8 +15,19 @@ class SavingsTracker:
     Automatically prunes old records on startup.
     """
 
-    DB_DIR = os.path.expanduser("~/.token-saver")
-    DB_PATH = os.path.join(DB_DIR, "savings.db")
+    @staticmethod
+    def _default_db_dir():
+        from src import data_dir  # noqa: PLC0415
+
+        return data_dir()
+
+    @staticmethod
+    def _default_db_path():
+        return os.path.join(SavingsTracker._default_db_dir(), "savings.db")
+
+    # Class-level defaults — can be overridden (e.g. by stats.py for testing)
+    DB_DIR = None
+    DB_PATH = None
 
     _lock = threading.RLock()
 
@@ -25,6 +36,11 @@ class SavingsTracker:
             "TOKEN_SAVER_SESSION", str(uuid.uuid4())[:12]
         )
         self.prune_days = prune_days
+        # Resolve DB paths — use overridden class vars if set, else compute from data_dir()
+        if self.DB_DIR is None:
+            SavingsTracker.DB_DIR = self._default_db_dir()
+        if self.DB_PATH is None:
+            SavingsTracker.DB_PATH = self._default_db_path()
         os.makedirs(self.DB_DIR, exist_ok=True)
         self._open_connection()
         self._init_db()

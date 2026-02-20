@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${extensionPath}/gemini/hook_aftertool.py",
+            "command": "python3 \"${extensionPath}/gemini/hook_aftertool.py\"",
             "timeout": 5000
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${extensionPath}/src/hook_session.py",
+            "command": "python3 \"${extensionPath}/src/hook_session.py\"",
             "timeout": 3000
           }
         ]

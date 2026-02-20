@@ -1,6 +1,6 @@
 # Token-Saver
 
-Universal token-saving extension for AI CLI tools.
+Universal token-saver extension for AI CLI tools.
 Compresses verbose command outputs (git, tests, builds, lint, ls...)
 without losing any critical information.
 
@@ -75,7 +75,7 @@ Gemini CLI allows direct output replacement through the deny/reason mechanism.
 - Compression is only applied if the gain exceeds 10%
 - All errors, stack traces, and actionable information are **fully preserved**
 - Only "noise" is removed: progress bars, passing tests, installation logs, ANSI codes, platform lines
-- 217 unit tests including 24 precision-specific tests that verify every critical piece of data survives compression
+- 254 unit tests including 24 precision-specific tests that verify every critical piece of data survives compression
 
 ## Installation
 
@@ -87,11 +87,13 @@ Gemini CLI allows direct output replacement through the deny/reason mechanism.
 ### Quick Install
 
 ```bash
-cd extension
 python3 install.py --target claude    # For Claude Code
 python3 install.py --target gemini    # For Gemini CLI
 python3 install.py --target both      # For both
 ```
+
+The repo/zip can be deleted after installation. Token-Saver copies everything
+it needs to `~/.token-saver/` and the platform plugin directories.
 
 ### Development Mode
 
@@ -100,20 +102,38 @@ python3 install.py --target claude --link   # Symlinks instead of copies
 ```
 
 Changes in the source directory are immediately applied.
+Do **not** delete the repo in this mode.
 
 ### Uninstall
 
 ```bash
-python3 install.py --uninstall --target claude
+python3 install.py --uninstall              # Remove from all platforms
+python3 install.py --uninstall --keep-data  # Keep stats DB
 ```
 
 ### What the Installer Does
 
 1. Copies (or symlinks) files to:
+   - Core: `~/.token-saver/` (CLI, updater, shared source)
    - Claude Code: `~/.claude/plugins/token-saver/`
    - Gemini CLI: `~/.gemini/extensions/token-saver/`
-2. Replaces `{{EXTENSION_DIR}}` in `hooks.json` with the actual path
-3. Registers hooks in `~/.claude/settings.json` (Claude Code only)
+2. Registers hooks in `~/.claude/settings.json` (Claude Code only)
+3. Installs `token-saver` CLI to `~/.local/bin/`
+4. Stamps the current version into plugin manifests
+5. Cleans up any legacy `token-saving` installation
+
+### CLI
+
+After installation, the `token-saver` command is available:
+
+```bash
+token-saver version              # Print current version
+token-saver stats                # Show savings statistics
+token-saver stats --json         # JSON output for scripting
+token-saver update               # Check for and apply updates
+```
+
+If `~/.local/bin` is not in your PATH, the installer prints instructions.
 
 ## Processors
 
@@ -454,12 +474,17 @@ On every session start, the `SessionStart` hook displays a summary:
 [token-saver] Lifetime: 342 cmds, 1.2 MB saved (67.3%) | Session: 5 cmds, 45.2 KB saved (72.1%)
 ```
 
+If a newer version is available, the notification is appended:
+
+```
+[token-saver] Lifetime: 342 cmds, 1.2 MB saved (67.3%) | Update available: v1.0.1 -> v1.1.0 -- Run: token-saver update
+```
+
 ### Manual Stats
 
-You can check your savings at any time with the `stats.py` command:
-
 ```bash
-python3 src/stats.py
+token-saver stats
+token-saver stats --json
 ```
 
 ```
@@ -514,7 +539,7 @@ python3 src/stats.py --json
 ## Project Structure
 
 ```
-extension/
+token-saver/
 ├── claude/                          # Claude Code specific files
 │   ├── plugin.json                  # Claude Code plugin metadata
 │   ├── hook_pretool.py              # PreToolUse hook (Claude Code)
@@ -523,14 +548,19 @@ extension/
 │   ├── gemini-extension.json        # Gemini extension metadata
 │   ├── hooks.json                   # Gemini hook definitions
 │   └── hook_aftertool.py            # AfterTool hook (Gemini CLI)
+├── bin/                             # CLI executables
+│   ├── token-saver                  # Unix CLI wrapper
+│   └── token-saver.cmd              # Windows CLI wrapper
 ├── src/                             # Shared source code
-│   ├── __init__.py
+│   ├── __init__.py                  # Version (__version__)
+│   ├── cli.py                       # CLI entry point (version/stats/update)
+│   ├── version_check.py             # GitHub update check
 │   ├── config.py                    # Configuration system
 │   ├── platforms.py                 # Platform detection + I/O abstraction
 │   ├── engine.py                    # Compression engine (orchestrator)
-│   ├── hook_session.py              # SessionStart hook (stats, shared)
+│   ├── hook_session.py              # SessionStart hook (stats + update notif)
 │   ├── tracker.py                   # SQLite tracking
-│   ├── stats.py                     # Stats CLI
+│   ├── stats.py                     # Stats display
 │   └── processors/
 │       ├── __init__.py
 │       ├── base.py                  # Abstract Processor class
@@ -553,7 +583,7 @@ extension/
 │   ├── common.py                    # Shared constants + utilities
 │   ├── claude.py                    # Claude Code installer
 │   └── gemini.py                    # Gemini CLI installer
-├── install.py                       # CLI entry point
+├── install.py                       # Installer entry point
 ├── tests/
 │   ├── __init__.py
 │   ├── test_engine.py               # Engine tests
@@ -561,18 +591,20 @@ extension/
 │   ├── test_hooks.py                # Hook tests
 │   ├── test_tracker.py              # SQLite + concurrency tests
 │   ├── test_config.py               # Configuration tests
-│   └── test_precision.py            # Precision preservation tests
+│   ├── test_precision.py            # Precision preservation tests
+│   ├── test_version_check.py        # Version check + fail-open tests
+│   ├── test_cli.py                  # CLI subcommand tests
+│   └── test_installers.py           # Installer utility tests
 └── README.md
 ```
 
 ## Tests
 
 ```bash
-cd extension
 python3 -m pytest tests/ -v
 ```
 
-217 tests covering:
+254 tests covering:
 
 - **test_engine.py** (26 tests): compression thresholds, processor priority, ANSI cleanup, multiple calls
 - **test_processors.py** (117 tests): each processor with nominal and edge cases, diff context reduction, docker build/ps/images/logs, npm audit, pytest warnings, fuzzy line collapse, progress bar stripping, curl/wget, kubectl, terraform, env, search, system info, package listing, content-aware file compression
@@ -580,6 +612,9 @@ python3 -m pytest tests/ -v
 - **test_tracker.py** (16 tests): CRUD, concurrency (4 threads), corruption recovery, stats CLI (human + JSON output)
 - **test_config.py** (6 tests): defaults, env overrides, invalid values
 - **test_precision.py** (25 tests): verification that every critical piece of data survives compression (filenames, hashes, error messages, stack traces, line numbers, rule IDs, diff changes, warning types, secret redaction, unhealthy pods, terraform changes, unmet dependencies)
+- **test_version_check.py** (7 tests): version parsing, comparison, fail-open on errors/empty/None
+- **test_cli.py** (7 tests): version/stats/help subcommands, bin script execution
+- **test_installers.py** (15 tests): version stamping, legacy migration, CLI install/uninstall
 
 ## Debugging
 
@@ -593,7 +628,10 @@ python3 claude/wrap.py --dry-run 'git status'
 export TOKEN_SAVER_DEBUG=true
 
 # Check stats
-python3 src/stats.py
+token-saver stats
+
+# Check version
+token-saver version
 ```
 
 ## Known Limitations
