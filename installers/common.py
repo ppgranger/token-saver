@@ -73,6 +73,14 @@ def install_files(target_dir, file_list, use_symlink=False):
             print(f"  WARNING: Source file missing: {src}")
             continue
 
+        # Skip when source and destination resolve to the same file (core
+        # install running from ~/.token-saver/ would otherwise delete then
+        # copy).  realpath resolves symlinks; normcase handles Windows
+        # case-insensitive paths.
+        if os.path.normcase(os.path.realpath(src)) == os.path.normcase(os.path.realpath(dst)):
+            print(f"  OK   {rel_path}")
+            continue
+
         os.makedirs(os.path.dirname(dst), exist_ok=True)
 
         # Remove existing file/symlink before writing to avoid overwriting
