@@ -188,7 +188,7 @@ def migrate_from_legacy():
                     f.write("\n")
                 print("  REMOVED legacy hooks from settings.json")
                 found = True
-        except (OSError, json.JSONDecodeError):
+        except Exception:  # noqa: S110
             pass
 
     if found:
@@ -273,10 +273,12 @@ def uninstall_core():
         if os.path.exists(full_path) or os.path.islink(full_path):
             os.remove(full_path)
     # Clean up empty directories (but leave data_dir itself for DB/config)
-    for dirpath, dirnames, filenames in os.walk(data_dir, topdown=False):
+    for dirpath, _dirnames, _filenames in os.walk(data_dir, topdown=False):
         if dirpath == data_dir:
             continue
-        if not filenames and not dirnames:
+        # Check the actual filesystem — os.walk's dirnames/filenames can be stale
+        # after we removed child directories in earlier iterations.
+        if not os.listdir(dirpath):
             os.rmdir(dirpath)
 
 

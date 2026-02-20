@@ -57,7 +57,13 @@ def cmd_update(_args):
         print(f"Failed to check for updates: {e}")
         sys.exit(1)
 
-    if _parse_version(latest) <= _parse_version(__version__):
+    try:
+        is_newer = _parse_version(latest) > _parse_version(__version__)
+    except (ValueError, TypeError):
+        print(f"Could not compare versions: local={__version__}, remote={latest}")
+        sys.exit(1)
+
+    if not is_newer:
         print(f"Already up to date (v{__version__}).")
         return
 
