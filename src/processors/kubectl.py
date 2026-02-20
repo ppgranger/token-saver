@@ -270,14 +270,12 @@ class KubectlProcessor(Processor):
         result = []
         for line in lines:
             stripped = line.strip()
-            # Resource mutation results: "deployment.apps/foo created"
-            if re.search(r"\b(created|configured|unchanged|deleted|patched)\b", stripped):
-                result.append(stripped)
-            # Errors and warnings
-            elif re.search(r"\b(error|Error|ERROR|warning|Warning)\b", stripped):
-                result.append(stripped)
-            # Summary lines
-            elif re.search(r"\d+\s+resource", stripped):
+            # Resource mutation results, errors, warnings, summaries
+            if (
+                re.search(r"\b(created|configured|unchanged|deleted|patched)\b", stripped)
+                or re.search(r"\b(error|Error|ERROR|warning|Warning)\b", stripped)
+                or re.search(r"\d+\s+resource", stripped)
+            ):
                 result.append(stripped)
 
         if not result:
