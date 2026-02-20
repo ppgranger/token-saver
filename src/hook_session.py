@@ -11,27 +11,30 @@ from src.tracker import SavingsTracker
 
 
 def main():
+    message = None
+
     try:
         tracker = SavingsTracker()
         message = tracker.format_stats_message()
         tracker.close()
-
-        # Append update notification if available
-        try:
-            from src.version_check import check_for_update  # noqa: PLC0415
-
-            update_msg = check_for_update()
-            if update_msg:
-                message = f"{message} | {update_msg}"
-        except Exception:  # noqa: S110
-            pass
-
-        result = {"systemMessage": message}
-        json.dump(result, sys.stdout)
     except Exception:  # noqa: S110
-        # Never break session start
         pass
 
+    if message is None:
+        sys.exit(0)
+
+    # Best-effort update notification — uses a 1s HTTP timeout so the
+    # total hook time stays well under Claude's 3s hook timeout.
+    try:
+        from src.version_check import check_for_update  # noqa: PLC0415
+
+        update_msg = check_for_update()
+        if update_msg:
+            message = f"{message} | {update_msg}"
+    except Exception:  # noqa: S110
+        pass
+
+    json.dump({"systemMessage": message}, sys.stdout)
     sys.exit(0)
 
 

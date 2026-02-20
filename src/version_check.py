@@ -9,8 +9,13 @@ _GITHUB_API_URL = "https://api.github.com/repos/ppgranger/token-saver/releases/l
 
 
 def _parse_version(version_str):
-    """Parse 'X.Y.Z' or 'vX.Y.Z' into a tuple of ints."""
+    """Parse 'X.Y.Z' or 'vX.Y.Z' into a tuple of ints.
+
+    Pre-release suffixes (e.g. '1.0.0-beta') are stripped.
+    """
     v = version_str.strip().lstrip("v")
+    # Strip pre-release suffix: "1.0.0-beta.1" -> "1.0.0"
+    v = v.split("-")[0]
     return tuple(int(x) for x in v.split("."))
 
 
@@ -23,7 +28,7 @@ def _fetch_latest_version(fetch_fn=None):
         _GITHUB_API_URL,
         headers={"Accept": "application/vnd.github.v3+json", "User-Agent": "token-saver"},
     )
-    with urllib.request.urlopen(req, timeout=2) as resp:  # noqa: S310
+    with urllib.request.urlopen(req, timeout=1) as resp:  # noqa: S310
         data = json.loads(resp.read().decode())
     tag = data.get("tag_name", "")
     if not tag:

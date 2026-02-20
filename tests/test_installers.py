@@ -165,6 +165,22 @@ class TestMigrateFromLegacy:
 
         assert found is False
 
+    def test_survives_malformed_hooks_in_settings(self):
+        """settings.json with non-dict hooks value should not crash."""
+        settings_dir = os.path.join(self.tmp_home, ".claude")
+        os.makedirs(settings_dir)
+        settings_path = os.path.join(settings_dir, "settings.json")
+
+        # hooks is a string instead of a dict
+        with open(settings_path, "w") as f:
+            json.dump({"hooks": "invalid"}, f)
+
+        with mock.patch("installers.common.home", return_value=self.tmp_home):
+            # Should not raise
+            found = migrate_from_legacy()
+
+        assert found is False
+
 
 class TestInstallCli:
     def setup_method(self):
@@ -261,3 +277,15 @@ class TestInstallCore:
         assert not os.path.exists(os.path.join(self.tmp_dir, "install.py"))
         # DB should still be there
         assert os.path.isfile(db_path)
+
+    def test_uninstall_core_cleans_empty_parent_dirs(self):
+        """Verify that nested empty directories (e.g. src/) are removed after children."""
+        with mock.patch("installers.common.token_saver_data_dir", return_value=self.tmp_dir):
+            install_core(use_symlink=False)
+            uninstall_core()
+
+        # src/ and src/processors/ should both be removed (empty after file deletion)
+        assert not os.path.exists(os.path.join(self.tmp_dir, "src", "processors"))
+        assert not os.path.exists(os.path.join(self.tmp_dir, "src"))
+        # data_dir itself should still exist
+        assert os.path.isdir(self.tmp_dir)

@@ -26,6 +26,11 @@ class TestParseVersion:
         assert _parse_version("2.0.0") > _parse_version("1.99.99")
         assert _parse_version("1.0.0") == _parse_version("v1.0.0")
 
+    def test_prerelease_suffix_stripped(self):
+        assert _parse_version("1.0.0-beta") == (1, 0, 0)
+        assert _parse_version("2.1.0-rc.1") == (2, 1, 0)
+        assert _parse_version("v1.2.3-alpha") == (1, 2, 3)
+
 
 class TestCheckForUpdate:
     def test_update_available(self):
