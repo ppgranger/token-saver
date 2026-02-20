@@ -12,12 +12,14 @@ import re
 import shlex
 import sys
 
-# --- Debug logging (writes to ~/.token-saver/hook.log when TOKEN_SAVER_DEBUG=true) ---
+# --- Debug logging (writes to data_dir/hook.log when TOKEN_SAVER_DEBUG=true) ---
 _log = logging.getLogger("token-saver.hook_pretool")
 _log.setLevel(logging.DEBUG)
 _debug = os.environ.get("TOKEN_SAVER_DEBUG", "").lower() in ("1", "true", "yes")
 if _debug:
-    _log_dir = os.path.join(os.path.expanduser("~"), ".token-saver")
+    from src import data_dir as _data_dir
+
+    _log_dir = _data_dir()
     os.makedirs(_log_dir, exist_ok=True)
     _handler = logging.FileHandler(os.path.join(_log_dir, "hook.log"))
     _handler.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s"))
@@ -107,7 +109,8 @@ def main():
         sys.exit(0)  # Fail open — don't break the command
 
     # Rewrite: pass the original command as a single quoted argument to avoid injection
-    new_command = f"python3 {shlex.quote(wrap_py)} {shlex.quote(command)}"
+    python = "python" if os.name == "nt" else "python3"
+    new_command = f"{python} {shlex.quote(wrap_py)} {shlex.quote(command)}"
     _log.debug("Rewriting: %r -> %r", command, new_command)
 
     result = {
