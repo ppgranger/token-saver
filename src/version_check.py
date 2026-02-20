@@ -23,9 +23,11 @@ def _fetch_latest_version(fetch_fn=None):
         _GITHUB_API_URL,
         headers={"Accept": "application/vnd.github.v3+json", "User-Agent": "token-saver"},
     )
-    with urllib.request.urlopen(req, timeout=3) as resp:  # noqa: S310
+    with urllib.request.urlopen(req, timeout=2) as resp:  # noqa: S310
         data = json.loads(resp.read().decode())
     tag = data.get("tag_name", "")
+    if not tag:
+        raise ValueError("No tag_name in GitHub API response")
     return tag.lstrip("v")
 
 

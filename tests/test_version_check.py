@@ -57,3 +57,14 @@ class TestCheckForUpdate:
 
         result = check_for_update(fetch_fn=bad_version_fetch)
         assert result is None
+
+    def test_fail_open_on_empty_version(self):
+        result = check_for_update(fetch_fn=lambda: "")
+        assert result is None
+
+    def test_fail_open_on_none_version(self):
+        def none_fetch():
+            return None
+
+        result = check_for_update(fetch_fn=none_fetch)
+        assert result is None
