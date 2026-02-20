@@ -100,7 +100,7 @@ def _update_via_git(repo_dir, version):
 def _update_via_tarball(repo_dir, version):
     """Update by downloading and extracting release tarball."""
     print("Downloading update...")
-    url = f"https://github.com/ppgranger/token-saving/archive/refs/tags/v{version}.tar.gz"
+    url = f"https://github.com/ppgranger/token-saver/archive/refs/tags/v{version}.tar.gz"
     req = urllib.request.Request(url, headers={"User-Agent": "token-saver"})  # noqa: S310
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -114,7 +114,7 @@ def _update_via_tarball(repo_dir, version):
         with tarfile.open(tarball_path, "r:gz") as tar:
             tar.extractall(tmpdir)  # noqa: S202
 
-        # Find the extracted directory (e.g., token-saving-1.2.0/)
+        # Find the extracted directory (e.g., token-saver-1.2.0/)
         extracted = [
             d
             for d in os.listdir(tmpdir)

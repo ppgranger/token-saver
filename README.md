@@ -1,6 +1,6 @@
 # Token-Saver
 
-Universal token-saving extension for AI CLI tools.
+Universal token-saver extension for AI CLI tools.
 Compresses verbose command outputs (git, tests, builds, lint, ls...)
 without losing any critical information.
 

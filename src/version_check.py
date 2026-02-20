@@ -5,7 +5,7 @@ import urllib.request
 
 from src import __version__
 
-_GITHUB_API_URL = "https://api.github.com/repos/ppgranger/token-saving/releases/latest"
+_GITHUB_API_URL = "https://api.github.com/repos/ppgranger/token-saver/releases/latest"
 
 
 def _parse_version(version_str):
