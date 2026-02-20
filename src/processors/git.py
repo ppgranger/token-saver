@@ -1,4 +1,4 @@
-"""Git output processor: status, diff, log, show, push/pull/fetch, reflog, branch."""
+"""Git output processor: status, diff, log, show, push/pull/fetch, reflog, branch, blame."""
 
 import re
 
@@ -12,14 +12,17 @@ _GIT_OPTS = (
     r"|--git-dir(?:=|\s+)\S+\s+|--work-tree(?:=|\s+)\S+\s+)*"
 )
 
-_GIT_SUBCMDS = r"(status|diff|log|show|push|pull|fetch|clone|branch|stash|reflog|remote)"
+_GIT_SUBCMDS = (
+    r"(status|diff|log|show|push|pull|fetch|clone|branch|stash|reflog|remote"
+    r"|blame|cherry-pick|rebase|merge)"
+)
 _GIT_CMD_RE = re.compile(rf"\bgit\s+{_GIT_OPTS}{_GIT_SUBCMDS}\b")
 
 
 class GitProcessor(Processor):
     priority = 20
     hook_patterns = [
-        rf"^git\s+{_GIT_OPTS}(status|diff|log|show|push|pull|fetch|clone|branch|stash|reflog|remote\s+-v)",
+        rf"^git\s+{_GIT_OPTS}(status|diff|log|show|push|pull|fetch|clone|branch|stash|reflog|remote|blame|cherry-pick|rebase|merge)\b",
     ]
 
     @property
@@ -41,9 +44,9 @@ class GitProcessor(Processor):
         if subcmd == "status":
             return self._process_status(output)
         if subcmd == "diff":
-            return self._process_diff(output)
+            return self._process_diff(output, command)
         if subcmd == "log":
-            return self._process_log(output)
+            return self._process_log(output, command)
         if subcmd == "show":
             return self._process_show(output)
         if subcmd in ("push", "pull", "fetch", "clone"):
@@ -56,6 +59,10 @@ class GitProcessor(Processor):
             return output
         if subcmd == "reflog":
             return self._process_reflog(output)
+        if subcmd == "blame":
+            return self._process_blame(output)
+        if subcmd in ("cherry-pick", "rebase", "merge"):
+            return self._process_transfer(output)
         return output
 
     def _process_status(self, output: str) -> str:
@@ -71,7 +78,7 @@ class GitProcessor(Processor):
                 continue
 
             # Header lines
-            if stripped.startswith(("On branch", "Your branch")):
+            if stripped.startswith(("On branch", "Your branch", "HEAD detached")):
                 header_lines.append(stripped)
                 in_untracked = False
                 continue
@@ -102,9 +109,24 @@ class GitProcessor(Processor):
                 code, filepath = "R", stripped.split(":", 1)[1].strip()
             elif stripped.startswith("copied:"):
                 code, filepath = "C", stripped.split(":", 1)[1].strip()
+            elif stripped.startswith("both modified:"):
+                code, filepath = "UU", stripped.split(":", 1)[1].strip()
+            elif stripped.startswith("both added:"):
+                code, filepath = "AA", stripped.split(":", 1)[1].strip()
+            elif stripped.startswith("both deleted:"):
+                code, filepath = "DD", stripped.split(":", 1)[1].strip()
+            elif stripped.startswith("added by us:"):
+                code, filepath = "AU", stripped.split(":", 1)[1].strip()
+            elif stripped.startswith("added by them:"):
+                code, filepath = "UA", stripped.split(":", 1)[1].strip()
+            elif stripped.startswith("deleted by us:"):
+                code, filepath = "DU", stripped.split(":", 1)[1].strip()
+            elif stripped.startswith("deleted by them:"):
+                code, filepath = "UD", stripped.split(":", 1)[1].strip()
             # Parse short-format status: XY filename
-            elif re.match(r"^([MADRCU?! ]{1,2})\s+(.+)$", stripped):
-                m = re.match(r"^([MADRCU?! ]{1,2})\s+(.+)$", stripped)
+            # Supports all status codes: M, A, D, R, C, U, ?, !
+            elif re.match(r"^([MADRCTU?! ]{1,2})\s+(.+)$", stripped):
+                m = re.match(r"^([MADRCTU?! ]{1,2})\s+(.+)$", stripped)
                 code_raw = m.group(1).strip()
                 filepath = m.group(2).strip().strip('"')
                 code = code_raw[0] if code_raw[0] != " " else code_raw[-1]
@@ -133,7 +155,7 @@ class GitProcessor(Processor):
             if len(files) > 8:
                 codes = {}
                 for f in files:
-                    c = f[0]
+                    c = f.split(" ", 1)[0]
                     codes[c] = codes.get(c, 0) + 1
                 desc = ", ".join(f"{c}:{n}" for c, n in sorted(codes.items()))
                 result.append(f"  {dir_name}/ ({len(files)} files: {desc})")
@@ -143,8 +165,14 @@ class GitProcessor(Processor):
 
         return "\n".join(result) if result else output
 
-    def _process_diff(self, output: str) -> str:
+    def _process_diff(self, output: str, command: str = "") -> str:
         lines = output.splitlines()
+
+        # Detect --name-only or --name-status format
+        if re.search(r"--name-only\b", command):
+            return self._process_name_list(lines)
+        if re.search(r"--name-status\b", command):
+            return self._process_name_list(lines)
 
         # Detect stat-only format: `git diff --stat`
         if lines and not any(line.startswith("diff --git") for line in lines):
@@ -213,11 +241,41 @@ class GitProcessor(Processor):
 
         return "\n".join(result)
 
+    def _process_name_list(self, lines: list[str]) -> str:
+        """Compress --name-only or --name-status output: group by directory."""
+        if len(lines) <= 20:
+            return "\n".join(lines)
+
+        by_dir: dict[str, list[str]] = {}
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            # --name-status: "M\tpath/file" or "M  path/file"
+            m = re.match(r"^([MADRCTU])\d*\s+(.+)$", stripped)
+            if m:
+                filepath = m.group(2)
+            else:
+                filepath = stripped
+            parts = filepath.rsplit("/", 1)
+            dir_name = parts[0] if len(parts) > 1 else "."
+            by_dir.setdefault(dir_name, []).append(stripped)
+
+        total = len([l for l in lines if l.strip()])
+        result = [f"{total} files changed:"]
+        for dir_name, files in sorted(by_dir.items()):
+            if len(files) > 5:
+                result.append(f"  {dir_name}/ ({len(files)} files)")
+            else:
+                for f in files:
+                    result.append(f"  {f}")
+        return "\n".join(result)
+
     def _process_diff_stat(self, lines: list[str]) -> str:
         """Compress `git diff --stat` output: strip visual bars."""
         result = []
         for line in lines:
-            # Match stat lines: " path/file | 5 ++-" → " path/file | 5"
+            # Match stat lines: " path/file | 5 ++-" -> " path/file | 5"
             m = re.match(r"^(\s*.+?\s+\|\s+\d+)\s+[+\-]+\s*$", line)
             if m:
                 result.append(m.group(1))
@@ -225,13 +283,29 @@ class GitProcessor(Processor):
                 result.append(line)
         return "\n".join(result)
 
-    def _process_log(self, output: str) -> str:
+    def _process_log(self, output: str, command: str = "") -> str:
         max_entries = config.get("max_log_entries")
         lines = output.splitlines()
 
+        # Detect --graph format (ASCII art: |, *, /, \)
+        # Only match lines that contain graph chars (not just spaces)
+        has_graph = re.search(r"--graph\b", command) or (
+            lines and any(
+                re.match(r"^[|*/\\ ]*[|*/\\]", line)
+                for line in lines[:10]
+            )
+        )
+        if has_graph:
+            # Graph format: truncate but preserve structure
+            if len(lines) > max_entries * 4:
+                kept = lines[: max_entries * 4]
+                kept.append(f"... ({len(lines) - max_entries * 4} more lines)")
+                return "\n".join(kept)
+            return output
+
         # Detect if already one-line format
         if lines and not lines[0].startswith("commit "):
-            # Already compact format — just truncate
+            # Already compact format -- just truncate
             if len(lines) > max_entries:
                 return "\n".join(lines[:max_entries]) + f"\n... ({len(lines) - max_entries} more)"
             return output
@@ -269,7 +343,7 @@ class GitProcessor(Processor):
         return "\n".join(result)
 
     def _process_show(self, output: str) -> str:
-        # git show is like log + diff — process the diff portion
+        # git show is like log + diff -- process the diff portion
         lines = output.splitlines()
         header = []
         diff_start = -1
@@ -313,7 +387,7 @@ class GitProcessor(Processor):
 
         if important:
             return "\n".join(important)
-        # All lines were progress — return last non-empty line
+        # All lines were progress -- return last non-empty line
         for line in reversed(lines):
             if line.strip():
                 return line.strip()
@@ -321,7 +395,8 @@ class GitProcessor(Processor):
 
     def _process_branch(self, output: str) -> str:
         lines = output.strip().splitlines()
-        if len(lines) <= 30:
+        threshold = config.get("git_branch_threshold")
+        if len(lines) <= threshold:
             return output
         current = ""
         branches = []
@@ -342,9 +417,10 @@ class GitProcessor(Processor):
 
     def _process_stash_list(self, output: str) -> str:
         lines = output.strip().splitlines()
-        if len(lines) <= 10:
+        threshold = config.get("git_stash_threshold")
+        if len(lines) <= threshold:
             return output
-        return "\n".join(lines[:10]) + f"\n... ({len(lines) - 10} more stashes)"
+        return "\n".join(lines[:threshold]) + f"\n... ({len(lines) - threshold} more stashes)"
 
     def _process_reflog(self, output: str) -> str:
         lines = output.strip().splitlines()
@@ -352,3 +428,45 @@ class GitProcessor(Processor):
         if len(lines) <= max_entries:
             return output
         return "\n".join(lines[:max_entries]) + f"\n... ({len(lines) - max_entries} more entries)"
+
+    def _process_blame(self, output: str) -> str:
+        """Compress git blame: group by author, show line counts."""
+        lines = output.strip().splitlines()
+        if len(lines) <= 20:
+            return output
+
+        by_author: dict[str, int] = {}
+        recent_lines: list[str] = []
+
+        for line in lines:
+            # Standard blame format: hash (Author YYYY-MM-DD HH:MM:SS +TZ  linenum) content
+            m = re.match(r"^[0-9a-f]+\s+\((.+?)\s+\d{4}-\d{2}-\d{2}\s+", line)
+            if m:
+                author = m.group(1).strip()
+                by_author[author] = by_author.get(author, 0) + 1
+            # Short blame: ^hash (Author date linenum)
+            elif re.match(r"^\^?[0-9a-f]+\s+\(", line):
+                m2 = re.match(r"^\^?[0-9a-f]+\s+\((.+?)\s+\d{4}", line)
+                if m2:
+                    author = m2.group(1).strip()
+                    by_author[author] = by_author.get(author, 0) + 1
+
+        if not by_author:
+            # Porcelain or unrecognized format -- truncate
+            if len(lines) > 50:
+                return "\n".join(lines[:40]) + f"\n... ({len(lines) - 40} more lines)"
+            return output
+
+        # Show last 10 lines for recent context
+        recent_lines = lines[-10:]
+
+        result = [f"{len(lines)} lines, {len(by_author)} authors:"]
+        for author, count in sorted(by_author.items(), key=lambda x: -x[1]):
+            pct = count * 100 // len(lines)
+            result.append(f"  {author}: {count} lines ({pct}%)")
+
+        result.append("")
+        result.append("Last 10 lines:")
+        result.extend(recent_lines)
+
+        return "\n".join(result)

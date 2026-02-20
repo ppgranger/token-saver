@@ -1,7 +1,8 @@
-"""Kubernetes output processor: kubectl get, describe, logs."""
+"""Kubernetes output processor: kubectl get, describe, logs, apply, delete."""
 
 import re
 
+from .. import config
 from .base import Processor
 
 # Optional kubectl global options that may appear before the subcommand.
@@ -13,14 +14,17 @@ _KUBECTL_OPTS = (
     r"|-A\s+|--all-namespaces\s+)*"
 )
 
-_KUBECTL_SUBCMDS = r"(get|describe|logs|top)"
+_KUBECTL_SUBCMDS = r"(get|describe|logs|top|apply|delete|create)"
 _KUBECTL_CMD_RE = re.compile(rf"\b(kubectl|oc)\s+{_KUBECTL_OPTS}{_KUBECTL_SUBCMDS}\b")
+
+# Regex to detect "all containers ready": e.g. 1/1, 2/2, 3/3, 10/10
+_READY_RE = re.compile(r"\b(\d+)/(\d+)\b")
 
 
 class KubectlProcessor(Processor):
     priority = 32
     hook_patterns = [
-        rf"^(kubectl|oc)\s+{_KUBECTL_OPTS}(get|describe|logs|top)\b",
+        rf"^(kubectl|oc)\s+{_KUBECTL_OPTS}(get|describe|logs|top|apply|delete|create)\b",
     ]
 
     @property
@@ -46,7 +50,16 @@ class KubectlProcessor(Processor):
             return self._process_logs(output)
         if subcmd in ("get", "top"):
             return self._process_get(output)
+        if subcmd in ("apply", "delete", "create"):
+            return self._process_mutate(output)
         return output
+
+    def _is_all_ready(self, line: str) -> bool:
+        """Check if a pod line shows all containers ready (e.g. 2/2, 10/10)."""
+        m = _READY_RE.search(line)
+        if m:
+            return m.group(1) == m.group(2)
+        return False
 
     def _strip_column(self, header: str, lines: list[str], col_name: str) -> tuple[str, list[str]]:
         """Remove a column by name from tabular output."""
@@ -55,7 +68,7 @@ class KubectlProcessor(Processor):
             return header, lines
         col_start = m.start()
         # Find end: next column start or end of line
-        rest = header[m.end() :]
+        rest = header[m.end():]
         next_col = re.search(r"\S", rest)
         col_end = m.end() + next_col.start() if next_col else len(header)
 
@@ -87,7 +100,7 @@ class KubectlProcessor(Processor):
         is_pods = "STATUS" in header and "READY" in header
 
         if not is_pods:
-            # Generic tabular output — just truncate if very long
+            # Generic tabular output -- just truncate if very long
             if len(entries) > 50:
                 result = [header]
                 result.extend(entries[:40])
@@ -104,9 +117,11 @@ class KubectlProcessor(Processor):
             if not stripped:
                 continue
             # Running + all containers ready = healthy
-            if (re.search(r"\bRunning\b", line) and re.search(r"(\d+)/\1\b", line)) or re.search(
-                r"\bCompleted\b", line
-            ):
+            is_running = re.search(r"\bRunning\b", line)
+            is_completed = re.search(r"\bCompleted\b", line)
+            all_ready = self._is_all_ready(line)
+
+            if (is_running and all_ready) or is_completed:
                 healthy.append(line)
             else:
                 unhealthy.append(line)
@@ -145,7 +160,7 @@ class KubectlProcessor(Processor):
             "managed fields",
         }
 
-        # Top-level keys worth keeping
+        # Top-level keys worth keeping -- use exact matching
         keep_keys = {
             "name",
             "namespace",
@@ -162,7 +177,6 @@ class KubectlProcessor(Processor):
             "port",
             "image",
             "node",
-            "ip",
             "labels",
         }
 
@@ -182,14 +196,15 @@ class KubectlProcessor(Processor):
                 skip_section = False
                 current_section = key
 
-                if any(k in key for k in keep_keys):
+                # Exact match against keep_keys
+                if key in keep_keys:
                     result.append(line)
                 continue
 
             if skip_section:
                 continue
 
-            # Events section — keep Warning events, skip Normal
+            # Events section -- keep Warning events, skip Normal
             if current_section == "events":
                 if "Warning" in line or "Error" in line or "Failed" in line:
                     result.append(line)
@@ -217,7 +232,10 @@ class KubectlProcessor(Processor):
     def _process_logs(self, output: str) -> str:
         """Compress kubectl logs: keep errors, startup, recent lines."""
         lines = output.splitlines()
-        if len(lines) <= 50:
+        keep_head = config.get("kubectl_keep_head")
+        keep_tail = config.get("kubectl_keep_tail")
+
+        if len(lines) <= keep_head + keep_tail:
             return output
 
         error_lines = []
@@ -233,9 +251,6 @@ class KubectlProcessor(Processor):
                     if el not in error_lines:
                         error_lines.append(el)
 
-        keep_head = 10
-        keep_tail = 20
-
         result = lines[:keep_head]
         if error_lines:
             result.append(f"\n... ({len(lines)} total lines, showing errors) ...\n")
@@ -244,4 +259,27 @@ class KubectlProcessor(Processor):
             result.append(f"\n... ({len(lines) - keep_head - keep_tail} lines truncated) ...\n")
         result.extend(lines[-keep_tail:])
 
+        return "\n".join(result)
+
+    def _process_mutate(self, output: str) -> str:
+        """Compress kubectl apply/delete/create: keep result lines, skip verbose details."""
+        lines = output.splitlines()
+        if len(lines) <= 20:
+            return output
+
+        result = []
+        for line in lines:
+            stripped = line.strip()
+            # Resource mutation results: "deployment.apps/foo created"
+            if re.search(r"\b(created|configured|unchanged|deleted|patched)\b", stripped):
+                result.append(stripped)
+            # Errors and warnings
+            elif re.search(r"\b(error|Error|ERROR|warning|Warning)\b", stripped):
+                result.append(stripped)
+            # Summary lines
+            elif re.search(r"\d+\s+resource", stripped):
+                result.append(stripped)
+
+        if not result:
+            return output
         return "\n".join(result)

@@ -1,14 +1,15 @@
-"""Test runner output processor: pytest, jest, mocha, cargo test, go test, rspec."""
+"""Test runner output processor: pytest, jest, mocha, cargo test, go test, rspec, dotnet test."""
 
 import re
 
+from .. import config
 from .base import Processor
 
 
 class TestOutputProcessor(Processor):
     priority = 21
     hook_patterns = [
-        r"^(pytest|py\.test|python3?\s+-m\s+pytest|jest|mocha|vitest|cargo\s+test|go\s+test|rspec|phpunit|bun\s+test)\b",
+        r"^(pytest|py\.test|python3?\s+-m\s+pytest|jest|mocha|vitest|cargo\s+test|go\s+test|rspec|phpunit|bun\s+test|dotnet\s+test|swift\s+test|mix\s+test)\b",
         r"^(npm\s+test|yarn\s+test|pnpm\s+test)\b",
     ]
 
@@ -21,7 +22,8 @@ class TestOutputProcessor(Processor):
             re.search(
                 r"\b(pytest|py\.test|python3?\s+-m\s+pytest|jest|mocha|"
                 r"cargo\s+test|go\s+test|rspec|phpunit|vitest|bun\s+test|"
-                r"npm\s+test|yarn\s+test|pnpm\s+test)\b",
+                r"npm\s+test|yarn\s+test|pnpm\s+test|"
+                r"dotnet\s+test|swift\s+test|mix\s+test)\b",
                 command,
             )
         )
@@ -34,7 +36,7 @@ class TestOutputProcessor(Processor):
 
         if re.search(r"\bpytest\b|py\.test|python3?\s+-m\s+pytest", command):
             return self._process_pytest(lines)
-        if re.search(r"\bjest\b|\bvitest\b|\bnpm\s+test\b|\byarn\s+test\b", command):
+        if re.search(r"\bjest\b|\bvitest\b|\bnpm\s+test\b|\byarn\s+test\b|\bpnpm\s+test\b", command):
             return self._process_jest(lines)
         if re.search(r"\bcargo\s+test\b", command):
             return self._process_cargo_test(lines)
@@ -42,7 +44,28 @@ class TestOutputProcessor(Processor):
             return self._process_go_test(lines)
         if re.search(r"\brspec\b", command):
             return self._process_rspec(lines)
+        if re.search(r"\bdotnet\s+test\b", command):
+            return self._process_dotnet_test(lines)
+        if re.search(r"\bswift\s+test\b", command):
+            return self._process_swift_test(lines)
+        if re.search(r"\bmix\s+test\b", command):
+            return self._process_mix_test(lines)
         return self._process_generic_test(lines)
+
+    def _truncate_traceback(self, block: list[str]) -> list[str]:
+        """Truncate a failure/traceback block to max_traceback_lines."""
+        max_lines = config.get("max_traceback_lines")
+        if len(block) <= max_lines:
+            return block
+        # Keep first half and last half, insert truncation marker
+        keep_head = max_lines // 2
+        keep_tail = max_lines - keep_head
+        omitted = len(block) - keep_head - keep_tail
+        return [
+            *block[:keep_head],
+            f"    ... ({omitted} traceback lines truncated)",
+            *block[-keep_tail:],
+        ]
 
     def _process_pytest(self, lines: list[str]) -> str:
         result = []
@@ -73,7 +96,7 @@ class TestOutputProcessor(Processor):
                 in_warnings = True
                 in_failure = False
                 if failure_block:
-                    result.extend(failure_block)
+                    result.extend(self._truncate_traceback(failure_block))
                     failure_block = []
                 continue
 
@@ -93,13 +116,22 @@ class TestOutputProcessor(Processor):
                 continue
 
             if in_failure:
+                # New test failure header within FAILURES section
+                if re.match(r"^_+ .+ _+$", line):
+                    # Flush previous failure block
+                    if failure_block:
+                        result.extend(self._truncate_traceback(failure_block))
+                        failure_block = []
+                    result.append(line)
+                    continue
+
                 # End of failures block
                 if re.match(
                     r"^=+ (short test summary|warnings summary|\d+ (failed|passed|error))", line
                 ):
                     in_failure = False
                     if failure_block:
-                        result.extend(failure_block)
+                        result.extend(self._truncate_traceback(failure_block))
                         failure_block = []
                     if "warnings summary" in line:
                         in_warnings = True
@@ -108,7 +140,7 @@ class TestOutputProcessor(Processor):
                 elif re.match(r"^=+.*=+$", line) and "FAILURES" not in line:
                     in_failure = False
                     if failure_block:
-                        result.extend(failure_block)
+                        result.extend(self._truncate_traceback(failure_block))
                         failure_block = []
                     result.append(line)
                 else:
@@ -137,6 +169,9 @@ class TestOutputProcessor(Processor):
         # Handle unclosed warnings section
         if warning_lines:
             result.extend(self._collapse_warnings(warning_lines))
+        # Handle unclosed failure block
+        if failure_block:
+            result.extend(self._truncate_traceback(failure_block))
 
         if passed_count > 0:
             result.insert(0, f"[{passed_count} tests passed]")
@@ -154,7 +189,7 @@ class TestOutputProcessor(Processor):
                 wtype = m.group(1)
                 by_type.setdefault(wtype, []).append(line)
             elif re.match(r"^\s*/", line) or re.match(r"^\s+\w+", line):
-                # Source location lines — associate with last warning type
+                # Source location lines -- associate with last warning type
                 continue
             else:
                 by_type.setdefault("other", []).append(line)
@@ -183,6 +218,7 @@ class TestOutputProcessor(Processor):
         passed_suites = 0
         passed_tests = 0
         failure_buffer: list[str] = []
+        consecutive_blanks = 0
 
         for line in lines:
             stripped = line.strip()
@@ -190,16 +226,22 @@ class TestOutputProcessor(Processor):
             # Capture failure blocks
             if re.search(r"\bFAIL\b", line) and not re.match(r"^(Tests?|Test Suites?):", stripped):
                 in_failure = True
+                consecutive_blanks = 0
                 result.append(line)
                 continue
 
             if in_failure:
                 failure_buffer.append(line)
-                # End of failure block on empty line after content
-                if not stripped and failure_buffer:
-                    result.extend(failure_buffer)
-                    failure_buffer = []
-                    in_failure = False
+                if not stripped:
+                    consecutive_blanks += 1
+                    # End of failure block after 2 consecutive blank lines
+                    if consecutive_blanks >= 2:
+                        result.extend(self._truncate_traceback(failure_buffer))
+                        failure_buffer = []
+                        in_failure = False
+                        consecutive_blanks = 0
+                else:
+                    consecutive_blanks = 0
                 continue
 
             if re.search(r"\bPASS\b", line) and not re.match(r"^(Tests?|Test Suites?):", stripped):
@@ -214,7 +256,7 @@ class TestOutputProcessor(Processor):
                 result.append(line)
 
         if failure_buffer:
-            result.extend(failure_buffer)
+            result.extend(self._truncate_traceback(failure_buffer))
 
         if passed_suites > 0:
             msg = f"[{passed_suites} suites passed"
@@ -318,13 +360,127 @@ class TestOutputProcessor(Processor):
                     in_failure = False
                 continue
 
-            if re.search(r"(\.+|✓|✔)", stripped) and "fail" not in stripped.lower():
-                # Dots or checkmarks = passed tests
-                passed += stripped.count(".") + stripped.count("✓") + stripped.count("✔")
+            # Dots-only progress line: count only dots, not other chars
+            if re.match(r"^[.FE*P]+$", stripped):
+                passed += stripped.count(".")
+                continue
+
+            # Checkmark lines
+            if re.match(r"^\s*(✓|✔)", stripped):
+                passed += 1
                 continue
 
         if passed > 0:
             result.insert(0, f"[{passed} examples passed]")
+
+        return "\n".join(result) if result else "\n".join(lines)
+
+    def _process_dotnet_test(self, lines: list[str]) -> str:
+        """Compress dotnet test output."""
+        result = []
+        passed = 0
+        in_failure = False
+
+        for line in lines:
+            stripped = line.strip()
+
+            # Skip build output
+            if re.match(r"^\s*(Build|Restore|Determining|Microsoft)", stripped):
+                continue
+
+            if stripped.startswith("Passed!") or re.search(r"\bPassed\b", stripped):
+                if "test" not in stripped.lower():
+                    passed += 1
+                    continue
+
+            if re.search(r"\bFailed\b", stripped):
+                in_failure = True
+                result.append(line)
+                continue
+
+            if in_failure:
+                result.append(line)
+                if not stripped or re.match(r"^(Total|Passed|Failed|Skipped)\s", stripped):
+                    in_failure = False
+                continue
+
+            # Summary lines
+            if re.match(r"^(Total tests|Passed|Failed|Skipped|Test Run)", stripped):
+                result.append(line)
+
+        if passed > 0:
+            result.insert(0, f"[{passed} tests passed]")
+
+        return "\n".join(result) if result else "\n".join(lines)
+
+    def _process_swift_test(self, lines: list[str]) -> str:
+        """Compress swift test output."""
+        result = []
+        passed = 0
+
+        for line in lines:
+            stripped = line.strip()
+
+            # Skip build/compile lines
+            if re.match(r"^\s*(Build|Compile|Link|Fetch|Creating)", stripped):
+                continue
+
+            if "passed" in stripped.lower() and "test" not in stripped.lower():
+                passed += 1
+                continue
+
+            if re.search(r"\bfailed\b|\bFailed\b|\berror\b", stripped):
+                result.append(line)
+                continue
+
+            # Test suite summary
+            if re.match(r"^Test Suite", stripped) or re.match(r"^Executed \d+", stripped):
+                result.append(line)
+
+        if passed > 0:
+            result.insert(0, f"[{passed} tests passed]")
+
+        return "\n".join(result) if result else "\n".join(lines)
+
+    def _process_mix_test(self, lines: list[str]) -> str:
+        """Compress Elixir mix test output."""
+        result = []
+        passed = 0
+        in_failure = False
+
+        for line in lines:
+            stripped = line.strip()
+
+            # Skip compilation
+            if re.match(r"^\s*(Compiling|Generated)\s", stripped):
+                continue
+
+            # Dots progress line
+            if re.match(r"^\.+$", stripped):
+                passed += len(stripped)
+                continue
+
+            if re.search(r"\bfailure\b|\bFailed\b", stripped, re.IGNORECASE):
+                in_failure = True
+                result.append(line)
+                continue
+
+            if in_failure:
+                result.append(line)
+                if not stripped:
+                    in_failure = False
+                continue
+
+            # Summary line
+            if re.match(r"^\d+\s+(tests?|doctests?)", stripped):
+                result.append(line)
+
+            # Finished line
+            if re.match(r"^Finished in", stripped):
+                result.append(line)
+
+        if passed > 0:
+            result.insert(0, f"[{passed} tests passed]")
 
         return "\n".join(result) if result else "\n".join(lines)
 
@@ -336,7 +492,9 @@ class TestOutputProcessor(Processor):
             lower = line.lower()
             if any(kw in lower for kw in ["fail", "error", "assert", "exception", "traceback"]):
                 result.append(line)
-            elif any(kw in lower for kw in ["pass", "ok ", "success", "✓", "✔"]):
+            elif any(kw in lower for kw in ["pass", "ok ", "success"]):
+                passed += 1
+            elif re.match(r"^\s*(✓|✔)", line.strip()):
                 passed += 1
             elif re.match(r"^\d+\s+(tests?|specs?|examples?)", line.strip()):
                 result.append(line)

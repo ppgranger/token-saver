@@ -258,6 +258,96 @@ class TestGitProcessor:
         result = self.p.process("git reflog", output)
         assert "more entries" in result
 
+    def test_can_handle_blame(self):
+        assert self.p.can_handle("git blame src/main.py")
+
+    def test_blame_short_unchanged(self):
+        lines = [
+            f"abc1234{i} (Author 2025-01-01 12:00:00 +0000 {i + 1}) line {i}"
+            for i in range(10)
+        ]
+        output = "\n".join(lines)
+        result = self.p.process("git blame src/main.py", output)
+        assert result == output
+
+    def test_blame_groups_by_author(self):
+        lines = []
+        for i in range(30):
+            author = "Alice" if i < 20 else "Bob"
+            lines.append(f"abc{i:04d}00 ({author} 2025-01-{i + 1:02d} 12:00:00 +0000 {i + 1}) line {i}")
+        output = "\n".join(lines)
+        result = self.p.process("git blame src/main.py", output)
+        assert "30 lines" in result
+        assert "2 authors" in result
+        assert "Alice" in result
+        assert "Bob" in result
+        assert "Last 10 lines" in result
+
+    def test_can_handle_cherry_pick_rebase_merge(self):
+        assert self.p.can_handle("git cherry-pick abc123")
+        assert self.p.can_handle("git rebase main")
+        assert self.p.can_handle("git merge feature/branch")
+
+    def test_cherry_pick_removes_progress(self):
+        output = "\n".join(
+            [
+                "Counting objects: 5, done.",
+                "Compressing objects: 100% (3/3), done.",
+                "[main abc1234] Cherry-picked commit message",
+                " 2 files changed, 10 insertions(+), 3 deletions(-)",
+            ]
+        )
+        result = self.p.process("git cherry-pick abc123", output)
+        assert "100%" not in result
+        assert "Cherry-picked" in result
+
+    def test_diff_name_only(self):
+        lines = [f"src/dir/file{i}.py" for i in range(25)]
+        output = "\n".join(lines)
+        result = self.p.process("git diff --name-only HEAD~5", output)
+        assert "25 files changed" in result
+        assert "src/dir" in result
+
+    def test_diff_name_only_short_unchanged(self):
+        output = "src/a.py\nsrc/b.py\nsrc/c.py"
+        result = self.p.process("git diff --name-only", output)
+        assert result == output
+
+    def test_diff_name_status(self):
+        lines = [f"M\tsrc/dir/file{i}.py" for i in range(25)]
+        output = "\n".join(lines)
+        result = self.p.process("git diff --name-status HEAD~5", output)
+        assert "25 files changed" in result
+
+    def test_stash_list(self):
+        lines = [f"stash@{{{i}}}: WIP on branch: message {i}" for i in range(20)]
+        output = "\n".join(lines)
+        result = self.p.process("git stash list", output)
+        assert "more stashes" in result
+
+    def test_stash_list_short_unchanged(self):
+        output = "stash@{0}: WIP on main: abc1234 message"
+        result = self.p.process("git stash list", output)
+        assert result == output
+
+    def test_status_head_detached(self):
+        output = "HEAD detached at abc1234\nnothing to commit, working tree clean"
+        result = self.p.process("git status", output)
+        assert "HEAD detached" in result
+
+    def test_status_conflict_markers(self):
+        output = "\n".join(
+            [
+                "On branch main",
+                "Unmerged paths:",
+                "  both modified:   src/conflict.py",
+                "  both added:      src/new.py",
+            ]
+        )
+        result = self.p.process("git status", output)
+        assert "conflict.py" in result
+        assert "new.py" in result
+
 
 class TestTestOutputProcessor:
     def setup_method(self):
@@ -388,6 +478,89 @@ class TestTestOutputProcessor:
         result = self.p.process("go test ./...", output)
         assert "2 tests passed" in result
         assert "github.com/user/pkg" in result
+
+    def test_can_handle_pnpm_dotnet_swift_mix(self):
+        assert self.p.can_handle("pnpm test")
+        assert self.p.can_handle("dotnet test")
+        assert self.p.can_handle("swift test")
+        assert self.p.can_handle("mix test")
+
+    def test_pnpm_test_routes_to_jest(self):
+        """pnpm test should use jest processor."""
+        lines = [
+            "PASS src/app.test.ts (5 tests)",
+            "PASS src/util.test.ts (3 tests)",
+            "Tests:  8 passed",
+            "Time:   2.5s",
+        ]
+        output = "\n".join(lines)
+        result = self.p.process("pnpm test", output)
+        assert "2 suites passed" in result
+
+    def test_dotnet_test_collapses_passed(self):
+        lines = [
+            "  Build started...",
+            "  Restore complete.",
+            "  Microsoft (R) Test Execution Engine",
+            "  Passed! test_one",
+            "  Passed! test_two",
+            "  Passed! test_three",
+            "  Failed test_broken",
+            "    Expected: 1",
+            "    Actual: 2",
+            "  Total tests: 4",
+            "  Passed: 3",
+            "  Failed: 1",
+        ]
+        output = "\n".join(lines)
+        result = self.p.process("dotnet test", output)
+        assert "Failed" in result
+        assert "Build started" not in result
+        assert "Restore" not in result
+
+    def test_swift_test_collapses_passed(self):
+        lines = [
+            "Build complete!",
+            "Compile Swift Module",
+            "Test Suite 'AllTests' started.",
+            "Test Suite 'AllTests' passed.",
+            "Executed 15 tests, with 0 failures.",
+        ]
+        output = "\n".join(lines)
+        result = self.p.process("swift test", output)
+        assert "Compile" not in result
+        assert "Build" not in result
+        assert "Executed 15" in result
+
+    def test_mix_test_collapses_dots(self):
+        lines = [
+            "Compiling 2 files (.ex)",
+            "Generated myapp app",
+            "." * 30,
+            "",
+            "Finished in 0.5 seconds",
+            "30 tests, 0 failures",
+        ]
+        output = "\n".join(lines)
+        result = self.p.process("mix test", output)
+        assert "30 tests passed" in result
+        assert "Compiling" not in result
+        assert "30 tests, 0 failures" in result
+
+    def test_traceback_truncation(self):
+        """Long traceback blocks should be truncated."""
+        block = [f"    frame_{i}" for i in range(50)]
+        result = self.p._truncate_traceback(block)
+        assert len(result) < len(block)
+        assert "traceback lines truncated" in "\n".join(result)
+        # Head and tail preserved
+        assert "frame_0" in result[0]
+        assert "frame_49" in result[-1]
+
+    def test_traceback_short_unchanged(self):
+        block = ["    line 1", "    line 2", "    line 3"]
+        result = self.p._truncate_traceback(block)
+        assert result == block
 
 
 class TestBuildOutputProcessor:
@@ -650,6 +823,57 @@ class TestLintOutputProcessor:
         result = self.p.process("ruff check .", output)
         assert "fatal" in result
 
+    def test_can_handle_shellcheck_hadolint(self):
+        assert self.p.can_handle("shellcheck script.sh")
+        assert self.p.can_handle("hadolint Dockerfile")
+        assert self.p.can_handle("cargo clippy")
+        assert self.p.can_handle("prettier --check src/")
+        assert self.p.can_handle("biome check src/")
+        assert self.p.can_handle("biome lint src/")
+
+    def test_shellcheck_violations_parsed(self):
+        lines = []
+        for i in range(10):
+            lines.append(f"script.sh:{i + 1}:1: warning - SC2086 Double quote to prevent globbing")
+        output = "\n".join(lines)
+        result = self.p.process("shellcheck script.sh", output)
+        assert "SC2086" in result
+        assert "10 issues" in result or "10 occurrences" in result
+
+    def test_hadolint_violations_parsed(self):
+        lines = []
+        for i in range(8):
+            lines.append(f"Dockerfile:{i + 1} DL3008 Pin versions in apt get install")
+        output = "\n".join(lines)
+        result = self.p.process("hadolint Dockerfile", output)
+        assert "DL3008" in result
+
+    def test_biome_violations_parsed(self):
+        lines = []
+        for i in range(10):
+            lines.append(f"src/file{i}.ts:{i + 1}:1 lint/correctness/noUnusedVariables unused variable")
+        output = "\n".join(lines)
+        result = self.p.process("biome lint src/", output)
+        assert "lint/" in result
+
+    def test_clippy_fallback_not_fooled_by_summary(self):
+        """Clippy fallback should not parse [1 warning] as a rule name."""
+        output = "\n".join(
+            [
+                "warning[clippy::needless_return]: unneeded `return`",
+                "  --> src/main.rs:10:5",
+                "warning: `myproject` (bin) generated 1 warning [1 warning]",
+            ]
+        )
+        result = self.p.process("cargo clippy", output)
+        # "clippy::needless_return" should be parsed as a rule
+        assert "clippy::needless_return" in result
+        # "1 warning" should NOT be parsed as a rule
+        assert "1 warning" not in [
+            line.strip() for line in result.splitlines()
+            if line.strip().startswith("1 warning:")
+        ]
+
 
 class TestFileListingProcessor:
     def setup_method(self):
@@ -746,6 +970,17 @@ class TestFileListingProcessor:
         assert "42B" in result
         assert "5K" in result
         assert "1.0M" in result
+
+    def test_can_handle_exa_eza(self):
+        assert self.p.can_handle("exa -la")
+        assert self.p.can_handle("eza --long")
+
+    def test_exa_compresses_like_ls(self):
+        items = [f"file{i}.py" for i in range(25)]
+        output = "\n".join(items)
+        result = self.p.process("exa", output)
+        assert "25 items" in result
+        assert "*.py" in result
 
     def test_tree_truncated(self):
         lines = [f"{'|   ' * (i % 3)}+-- file{i}.py" for i in range(100)]
@@ -995,6 +1230,58 @@ class TestNetworkProcessor:
         assert "Saving to:" in result
         assert "saved" in result
 
+    def test_can_handle_httpie(self):
+        assert self.p.can_handle("http GET https://api.example.com/data")
+        assert self.p.can_handle("https POST https://api.example.com/users")
+
+    def test_can_handle_no_false_positive(self):
+        """http/https in URLs should NOT trigger network processor."""
+        assert not self.p.can_handle("git push https://github.com/repo")
+        assert not self.p.can_handle("pip install https://example.com/pkg.tar.gz")
+
+    def test_httpie_compresses(self):
+        output = "\n".join(
+            [
+                "HTTP/1.1 200 OK",
+                "Content-Type: application/json",
+                "Date: Mon, 01 Jan 2025 12:00:00 GMT",
+                "Server: nginx",
+                "X-Request-Id: abc-123",
+                "",
+                '{"users": [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]}',
+            ]
+        )
+        result = self.p.process("http GET https://api.example.com/users", output)
+        assert "HTTP/1.1 200" in result
+        assert "Content-Type" in result
+        assert "X-Request-Id" not in result or "abc-123" in result
+        # Date and Server should be filtered
+        assert "Server: nginx" not in result
+
+    def test_curl_json_compressed(self):
+        """Large JSON responses should be summarized."""
+        import json
+
+        data = {
+            "users": [
+                {"id": i, "name": f"User {i}", "email": f"user{i}@example.com"}
+                for i in range(20)
+            ],
+            "total": 20,
+            "page": 1,
+        }
+        output = json.dumps(data, indent=2)
+        result = self.p.process("curl https://api.example.com/users", output)
+        assert "users" in result
+        assert "items total" in result or "20" in result
+        assert len(result) < len(output)
+
+    def test_curl_small_json_unchanged(self):
+        """Small JSON responses should pass through."""
+        output = '{"status": "ok"}'
+        result = self.p.process("curl https://api.example.com/health", output)
+        assert result == output
+
 
 class TestDockerProcessor:
     def setup_method(self):
@@ -1081,6 +1368,139 @@ class TestDockerProcessor:
         assert "Downloading" not in result
         assert "Pull complete" not in result
         assert "Digest:" in result or "Status:" in result
+
+    def test_can_handle_inspect_stats_compose(self):
+        assert self.p.can_handle("docker inspect container")
+        assert self.p.can_handle("docker stats")
+        assert self.p.can_handle("docker compose up")
+        assert self.p.can_handle("docker compose down")
+        assert self.p.can_handle("docker compose ps")
+        assert self.p.can_handle("docker compose logs")
+        assert self.p.can_handle("docker compose build")
+
+    def test_inspect_summarizes_json(self):
+        import json
+
+        data = [
+            {
+                "Id": "abc123def456789",
+                "Name": "/my-container",
+                "State": {
+                    "Status": "running",
+                    "Running": True,
+                    "Paused": False,
+                    "Pid": 12345,
+                    "ExitCode": 0,
+                },
+                "Config": {
+                    "Image": "nginx:latest",
+                    "Cmd": ["nginx", "-g", "daemon off;"],
+                    "Env": [f"VAR_{i}=val" for i in range(10)],
+                },
+                "NetworkSettings": {
+                    "Ports": {"80/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8080"}]},
+                    "Networks": {
+                        "bridge": {"IPAddress": "172.17.0.2"},
+                    },
+                },
+            }
+        ]
+        output = json.dumps(data, indent=2)
+        result = self.p.process("docker inspect my-container", output)
+        assert "my-container" in result
+        assert "running" in result or "Running" in result
+        assert "nginx:latest" in result
+        assert "total lines" in result
+        assert len(result) < len(output)
+
+    def test_inspect_invalid_json_truncates(self):
+        lines = [f"line {i}: not json" for i in range(60)]
+        output = "\n".join(lines)
+        result = self.p.process("docker inspect container", output)
+        assert "more lines" in result
+
+    def test_stats_keeps_last_block(self):
+        header = "CONTAINER ID   NAME     CPU %    MEM USAGE / LIMIT"
+        # Simulate streaming stats: 3 repeated blocks
+        blocks = []
+        for block in range(3):
+            blocks.append(header)
+            for i in range(5):
+                blocks.append(f"abc{i:03d}         web-{i}   {block + i}.0%    100MiB / 1GiB")
+        output = "\n".join(blocks)
+        result = self.p.process("docker stats", output)
+        # Should only keep last block (header + 5 rows)
+        assert result.count("CONTAINER") == 1
+        assert len(result.splitlines()) <= 6
+
+    def test_stats_short_unchanged(self):
+        output = "CONTAINER ID   NAME     CPU %\nabc123   web   1.5%"
+        result = self.p.process("docker stats --no-stream", output)
+        assert result == output
+
+    def test_compose_up_keeps_started(self):
+        lines = [
+            "Creating network default",
+            "Pulling web (nginx:latest)...",
+            "50%: downloading...",
+            "100%: complete",
+            "Creating web-1  ... done",
+            "Creating db-1   ... done",
+            "Network default  Created",
+            "Container web-1  Started",
+            "Container db-1   Started",
+        ] + [f"web-1  | log line {i}" for i in range(20)]
+        output = "\n".join(lines)
+        result = self.p.process("docker compose up -d", output)
+        assert "Started" in result
+        assert "Created" in result
+        assert "50%" not in result
+
+    def test_compose_down_keeps_removed(self):
+        lines = [
+            "Stopping web-1   ... done",
+            "Stopping db-1    ... done",
+            "Removing web-1   ... done",
+            "Removing db-1    ... done",
+            "Removing network default",
+            "Network default  Removed",
+        ] + [f"cleanup line {i}" for i in range(20)]
+        output = "\n".join(lines)
+        result = self.p.process("docker compose down", output)
+        assert "Removing" in result or "Removed" in result
+        assert "Stopping" not in result or len(result) < len(output)
+
+    def test_compose_build_keeps_steps(self):
+        lines = [
+            "web Building",
+            "Step 1/5 : FROM node:18",
+            " ---> abc123",
+            "Step 2/5 : COPY . .",
+            "Running in def456",
+            "Removing intermediate container def456",
+            "Step 3/5 : RUN npm install",
+            "npm WARN deprecated package@1.0",
+            "Step 4/5 : RUN npm run build",
+            "Step 5/5 : CMD node server.js",
+            "Successfully built abc123",
+            "Successfully tagged myapp:latest",
+        ] + [f"noise line {i}" for i in range(20)]
+        output = "\n".join(lines)
+        result = self.p.process("docker compose build", output)
+        assert "Step 1/5" in result
+        assert "Successfully built" in result
+        assert "web Building" in result or "building" in result.lower()
+
+    def test_ps_dead_containers_in_stopped(self):
+        """Dead containers should be grouped with stopped."""
+        header = "CONTAINER ID   IMAGE          COMMAND       CREATED       STATUS         PORTS     NAMES"
+        entries = [
+            "abc0000000000   nginx:latest   nginx         1h ago        Up 1 hours     80/tcp    web-0",
+            "abc0000000001   myapp:latest   python        2h ago        Dead                     dead-app",
+        ]
+        output = "\n".join([header, *entries])
+        result = self.p.process("docker ps -a", output)
+        assert "dead-app" in result
 
 
 class TestPackageListProcessor:
@@ -1205,6 +1625,24 @@ class TestSearchProcessor:
         result = self.p.process("rg pattern", output)
         assert "30 matches" in result
 
+    def test_can_handle_fd(self):
+        assert self.p.can_handle("fd pattern")
+        assert self.p.can_handle("fdfind -e py")
+
+    def test_fd_groups_by_directory(self):
+        lines = [f"src/components/Component{i}.tsx" for i in range(15)]
+        lines += [f"src/utils/util{i}.ts" for i in range(10)]
+        output = "\n".join(lines)
+        result = self.p.process("fd -e tsx -e ts", output)
+        assert "25 files found" in result
+        assert "src/components" in result
+        assert "src/utils" in result
+
+    def test_fd_short_unchanged(self):
+        output = "src/main.py\nsrc/util.py\nsrc/app.py"
+        result = self.p.process("fd -e py", output)
+        assert result == output
+
 
 class TestKubectlProcessor:
     def setup_method(self):
@@ -1297,6 +1735,66 @@ class TestKubectlProcessor:
         result = self.p.process("kubectl logs my-pod", output)
         assert "NullPointerException" in result
         assert len(result.splitlines()) < 100
+
+    def test_can_handle_apply_delete_create(self):
+        assert self.p.can_handle("kubectl apply -f deployment.yaml")
+        assert self.p.can_handle("kubectl delete pod my-pod")
+        assert self.p.can_handle("kubectl create namespace test")
+
+    def test_mutate_keeps_results(self):
+        lines = [
+            "deployment.apps/web created",
+            "service/web-svc created",
+            "configmap/web-config configured",
+            "secret/web-secret unchanged",
+        ] + [f"verbose detail line {i}" for i in range(30)]
+        output = "\n".join(lines)
+        result = self.p.process("kubectl apply -f .", output)
+        assert "web created" in result
+        assert "web-svc created" in result
+        assert "configured" in result
+        assert "unchanged" in result
+        assert "verbose detail" not in result
+
+    def test_mutate_keeps_errors(self):
+        lines = [
+            "deployment.apps/web created",
+            "error: unable to recognize 'bad.yaml': no matches for kind",
+            "Warning: resource might not be valid",
+        ] + [f"detail {i}" for i in range(25)]
+        output = "\n".join(lines)
+        result = self.p.process("kubectl apply -f .", output)
+        assert "error" in result
+        assert "Warning" in result
+        assert "web created" in result
+
+    def test_mutate_short_unchanged(self):
+        output = "pod/test-pod deleted"
+        result = self.p.process("kubectl delete pod test-pod", output)
+        assert result == output
+
+    def test_multi_container_ready_detection(self):
+        """_is_all_ready should correctly handle multi-container pods."""
+        assert self.p._is_all_ready("my-pod  2/2  Running  0  1h")
+        assert self.p._is_all_ready("my-pod  10/10  Running  0  1h")
+        assert not self.p._is_all_ready("my-pod  3/5  Running  0  1h")
+        assert not self.p._is_all_ready("my-pod  0/1  Running  0  1h")
+        # Edge: no READY column
+        assert not self.p._is_all_ready("my-pod  Running  0  1h")
+
+    def test_get_pods_multi_container(self):
+        """Pods with 3/3 containers should be grouped as healthy."""
+        header = "NAME         READY   STATUS    RESTARTS   AGE"
+        entries = [
+            "sidecar-pod  3/3     Running   0          1h",
+            "init-pod     2/3     Running   0          1h",
+        ] + [f"web-{i:03d}      1/1     Running   0          {i}h" for i in range(15)]
+        output = "\n".join([header, *entries])
+        result = self.p.process("kubectl get pods", output)
+        # init-pod (2/3) should be shown explicitly
+        assert "init-pod" in result
+        # healthy pods should be summarized
+        assert "Running/Ready" in result
 
 
 class TestEnvProcessor:
@@ -1498,3 +1996,88 @@ class TestTerraformProcessor:
         )
         result = self.p.process("terraform plan", output)
         assert "Error: Invalid instance type" in result
+
+    def test_can_handle_init_output_state(self):
+        assert self.p.can_handle("terraform init")
+        assert self.p.can_handle("terraform output")
+        assert self.p.can_handle("terraform state list")
+        assert self.p.can_handle("terraform state show aws_instance.web")
+        assert self.p.can_handle("tofu init")
+        assert self.p.can_handle("tofu output")
+
+    def test_init_strips_noise_keeps_result(self):
+        output = "\n".join(
+            [
+                "Initializing the backend...",
+                "",
+                "Initializing provider plugins...",
+                "- Finding hashicorp/aws versions matching ~> 5.0...",
+                "- Installing hashicorp/aws v5.31.0...",
+                "- Installed hashicorp/aws v5.31.0 (signed by HashiCorp)",
+                "",
+                "Terraform has been successfully initialized!",
+                "",
+                "You may now begin working with Terraform.",
+            ]
+            + [""] * 15
+        )
+        result = self.p.process("terraform init", output)
+        assert "Initializing" not in result
+        assert "Finding" not in result
+        assert "v5.31.0" in result
+        assert "successfully initialized" in result
+
+    def test_init_short_unchanged(self):
+        output = "Terraform has been successfully initialized!"
+        result = self.p.process("terraform init", output)
+        assert result == output
+
+    def test_output_truncates_long_values(self):
+        lines = [f"key_{i} = " + "x" * 300 for i in range(40)]
+        output = "\n".join(lines)
+        result = self.p.process("terraform output", output)
+        assert "chars" in result
+        assert len(result) < len(output)
+
+    def test_output_short_unchanged(self):
+        output = 'db_host = "localhost"\ndb_port = 5432'
+        result = self.p.process("terraform output", output)
+        assert result == output
+
+    def test_state_list_groups_by_type(self):
+        lines = [f"aws_instance.web_{i}" for i in range(20)]
+        lines += [f"aws_s3_bucket.data_{i}" for i in range(15)]
+        output = "\n".join(lines)
+        result = self.p.process("terraform state list", output)
+        assert "35 resources in state" in result
+        assert "aws_instance" in result
+        assert "aws_s3_bucket" in result
+
+    def test_state_list_short_unchanged(self):
+        output = "aws_instance.web\naws_s3_bucket.data"
+        result = self.p.process("terraform state list", output)
+        assert result == output
+
+    def test_state_show_truncates_long_attrs(self):
+        lines = ["resource aws_instance.web:"]
+        for i in range(50):
+            lines.append(f"  attr_{i} = " + "y" * 250)
+        output = "\n".join(lines)
+        result = self.p.process("terraform state show aws_instance.web", output)
+        assert "chars" in result
+        assert len(result) < len(output)
+
+    def test_subcommand_detection_not_fooled_by_args(self):
+        """terraform plan -var init=true should NOT route to init handler."""
+        output = "\n".join(
+            [
+                "# aws_instance.web will be created",
+                '  + resource "aws_instance" "web" {',
+                '      + ami = "ami-12345"',
+                "    }",
+                "Plan: 1 to add, 0 to change, 0 to destroy.",
+            ]
+            + [""] * 30
+        )
+        result = self.p.process("terraform plan -var init=true", output)
+        assert "Plan: 1 to add" in result

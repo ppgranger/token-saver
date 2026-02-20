@@ -44,6 +44,21 @@ class CompressionEngine:
 
                 if gain >= min_ratio:
                     return compressed, processor.name, True
+
+                # Specialized processor didn't compress enough — try the
+                # generic processor as fallback (dedup, truncation, etc.)
+                if processor is not self._generic:
+                    generic_compressed = self._generic.process(command, output)
+                    generic_compressed = self._generic.clean(generic_compressed)
+                    generic_len = len(generic_compressed)
+                    generic_gain = (
+                        (original_len - generic_len) / original_len
+                        if original_len > 0
+                        else 0
+                    )
+                    if generic_gain >= min_ratio:
+                        return generic_compressed, "generic", True
+
                 return output, processor.name, False
 
         return output, "none", False

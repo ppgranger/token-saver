@@ -1,4 +1,4 @@
-"""Lint output processor: eslint, ruff, flake8, pylint, clippy, rubocop."""
+"""Lint output processor: eslint, ruff, flake8, pylint, clippy, rubocop, shellcheck, hadolint."""
 
 import re
 from collections import defaultdict
@@ -12,6 +12,7 @@ class LintOutputProcessor(Processor):
     hook_patterns = [
         r"^(eslint|ruff(\s+check)?|flake8|pylint|clippy|rubocop|golangci-lint|stylelint|biome\s+(check|lint))\b",
         r"^python3?\s+-m\s+(flake8|pylint|ruff|mypy)\b",
+        r"^(mypy|prettier\s+--check|shellcheck|hadolint|tflint|ktlint|swiftlint|cargo\s+clippy)\b",
     ]
 
     @property
@@ -23,7 +24,8 @@ class LintOutputProcessor(Processor):
             re.search(
                 r"\b(eslint|ruff(\s+check)?|flake8|pylint|clippy|rubocop|"
                 r"golangci-lint|stylelint|prettier\s+--check|biome\s+(check|lint)|"
-                r"python3?\s+-m\s+(flake8|pylint|ruff|mypy)|mypy)\b",
+                r"python3?\s+-m\s+(flake8|pylint|ruff|mypy)|mypy|"
+                r"shellcheck|hadolint|tflint|ktlint|swiftlint|cargo\s+clippy)\b",
                 command,
             )
         )
@@ -45,7 +47,7 @@ class LintOutputProcessor(Processor):
             if not stripped:
                 continue
 
-            # Detect ESLint file header line (path without colon/digits — not a violation)
+            # Detect ESLint file header line (path without colon/digits -- not a violation)
             if re.match(r"^/?[\w./_-]+\.\w+$", stripped) and not re.search(r":\d+", stripped):
                 current_file = stripped
                 continue
@@ -142,8 +144,27 @@ class LintOutputProcessor(Processor):
             return m.group(2), ""
 
         # Clippy/Rust fallback: warning: message [rule-name]
-        m = re.search(r"\[(\S+)\]\s*$", line)
+        # Exclude summary brackets like [1 warning], [3 errors]
+        m = re.search(r"\[([a-z][a-z0-9_-]+)\]\s*$", line)
         if m and re.match(r"^(warning|error):", line):
             return m.group(1), ""
+
+        # shellcheck: In file.sh line N: SC2086 ...
+        m = re.match(r"^In (.+?) line (\d+):", line)
+        if m:
+            return "shellcheck", m.group(1)
+        m = re.match(r"^(.+?):(\d+):\d+:\s+(warning|error|info|style)\s*-\s*(SC\d+)", line)
+        if m:
+            return m.group(4), m.group(1)
+
+        # hadolint: file:line DL3008 ...
+        m = re.match(r"^(.+?):(\d+)\s+(DL\d+|SC\d+)\s+", line)
+        if m:
+            return m.group(3), m.group(1)
+
+        # biome: file.ts:10:5 lint/rule message
+        m = re.match(r"^(.+?):(\d+):\d+\s+(lint/\S+)\s+", line)
+        if m:
+            return m.group(3), m.group(1)
 
         return None

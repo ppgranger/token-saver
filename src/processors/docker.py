@@ -1,7 +1,9 @@
-"""Docker output processor: ps, images, logs, pull, push."""
+"""Docker output processor: ps, images, logs, pull, push, inspect, stats, compose."""
 
+import json
 import re
 
+from .. import config
 from .base import Processor
 
 # Optional docker global options that may appear before the subcommand.
@@ -12,14 +14,16 @@ _DOCKER_OPTS = (
 )
 
 _DOCKER_CMD_RE = re.compile(
-    rf"\bdocker\s+{_DOCKER_OPTS}(ps|images|logs|pull|push|compose\s+(?:ps|logs))\b"
+    rf"\bdocker\s+{_DOCKER_OPTS}"
+    r"(ps|images|logs|pull|push|inspect|stats|"
+    r"compose\s+(?:ps|logs|up|down|build))\b"
 )
 
 
 class DockerProcessor(Processor):
     priority = 31
     hook_patterns = [
-        rf"^docker\s+{_DOCKER_OPTS}(build|pull|push|images|ps|logs|compose)\b",
+        rf"^docker\s+{_DOCKER_OPTS}(pull|push|images|ps|logs|inspect|stats|compose)\b",
     ]
 
     @property
@@ -44,6 +48,12 @@ class DockerProcessor(Processor):
                 return self._process_ps(output)
             if "logs" in subcmd:
                 return self._process_logs(output)
+            if "up" in subcmd:
+                return self._process_compose_up(output)
+            if "down" in subcmd:
+                return self._process_compose_down(output)
+            if "build" in subcmd:
+                return self._process_compose_build(output)
             return output
         if subcmd == "ps":
             return self._process_ps(output)
@@ -53,6 +63,10 @@ class DockerProcessor(Processor):
             return self._process_logs(output)
         if subcmd in ("pull", "push"):
             return self._process_pull(output)
+        if subcmd == "inspect":
+            return self._process_inspect(output)
+        if subcmd == "stats":
+            return self._process_stats(output)
         return output
 
     def _process_ps(self, output: str) -> str:
@@ -91,7 +105,7 @@ class DockerProcessor(Processor):
 
         # Group by status
         running = [e for e in result_entries if "Up " in e]
-        stopped = [e for e in result_entries if "Exited" in e or "Created" in e]
+        stopped = [e for e in result_entries if re.search(r"\b(Exited|Created|Dead)\b", e)]
         other = [e for e in result_entries if e not in running and e not in stopped]
 
         result = [f"{len(entries)} containers:"]
@@ -154,7 +168,10 @@ class DockerProcessor(Processor):
     def _process_logs(self, output: str) -> str:
         """Compress docker logs: keep errors, first/last lines, collapse repetitions."""
         lines = output.splitlines()
-        if len(lines) <= 50:
+        keep_head = config.get("docker_log_keep_head")
+        keep_tail = config.get("docker_log_keep_tail")
+
+        if len(lines) <= keep_head + keep_tail:
             return output
 
         # Collect error lines and their indices
@@ -179,9 +196,6 @@ class DockerProcessor(Processor):
             if line not in seen:
                 unique_errors.append(line)
                 seen.add(line)
-
-        keep_head = 10
-        keep_tail = 20
 
         result = lines[:keep_head]
         if unique_errors:
@@ -213,6 +227,181 @@ class DockerProcessor(Processor):
             result.append(stripped)
 
         return "\n".join(result) if result else output
+
+    def _process_inspect(self, output: str) -> str:
+        """Compress docker inspect: summarize JSON structure."""
+        lines = output.splitlines()
+        raw = "\n".join(lines)
+
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            # Not valid JSON -- truncate
+            if len(lines) > 50:
+                return "\n".join(lines[:40]) + f"\n... ({len(lines) - 40} more lines)"
+            return output
+
+        if isinstance(data, list) and len(data) == 1:
+            data = data[0]
+
+        if not isinstance(data, dict):
+            if len(lines) > 50:
+                return "\n".join(lines[:40]) + f"\n... ({len(lines) - 40} more lines)"
+            return output
+
+        result = []
+        # Extract key fields
+        important_keys = [
+            "Id", "Name", "State", "Config", "NetworkSettings",
+            "Image", "Created", "Platform", "Status",
+        ]
+
+        for key in important_keys:
+            if key not in data:
+                continue
+            val = data[key]
+            if isinstance(val, dict):
+                # Show top-level keys within the nested dict
+                sub_keys = list(val.keys())
+                if key == "State":
+                    # State is always important -- show all
+                    result.append(f"{key}:")
+                    for sk, sv in val.items():
+                        if isinstance(sv, (str, int, float, bool)):
+                            result.append(f"  {sk}: {sv}")
+                elif key == "Config":
+                    result.append(f"{key}:")
+                    for sk in ["Image", "Cmd", "Env", "ExposedPorts", "Labels"]:
+                        if sk in val:
+                            sv = val[sk]
+                            if isinstance(sv, list) and len(sv) > 5:
+                                result.append(f"  {sk}: [{len(sv)} items]")
+                            elif isinstance(sv, dict) and len(sv) > 5:
+                                result.append(f"  {sk}: {{{len(sv)} keys}}")
+                            else:
+                                sv_str = str(sv)
+                                if len(sv_str) > 120:
+                                    sv_str = sv_str[:100] + "..."
+                                result.append(f"  {sk}: {sv_str}")
+                elif key == "NetworkSettings":
+                    result.append(f"{key}:")
+                    if "Ports" in val:
+                        result.append(f"  Ports: {val['Ports']}")
+                    if "Networks" in val and isinstance(val["Networks"], dict):
+                        for net_name, net_info in val["Networks"].items():
+                            ip = net_info.get("IPAddress", "")
+                            result.append(f"  {net_name}: {ip}")
+                else:
+                    result.append(f"{key}: {{{len(sub_keys)} keys}}")
+            elif isinstance(val, str):
+                if len(val) > 100:
+                    result.append(f"{key}: {val[:80]}...")
+                else:
+                    result.append(f"{key}: {val}")
+            else:
+                result.append(f"{key}: {val}")
+
+        if not result:
+            # No recognized keys -- show top-level structure
+            result.append(f"docker inspect: {len(data)} top-level keys")
+            for k in list(data.keys())[:15]:
+                v = data[k]
+                if isinstance(v, dict):
+                    result.append(f"  {k}: {{{len(v)} keys}}")
+                elif isinstance(v, list):
+                    result.append(f"  {k}: [{len(v)} items]")
+                else:
+                    sv = str(v)
+                    if len(sv) > 80:
+                        sv = sv[:60] + "..."
+                    result.append(f"  {k}: {sv}")
+
+        result.append(f"\n({len(lines)} total lines)")
+        return "\n".join(result)
+
+    def _process_stats(self, output: str) -> str:
+        """Compress docker stats: keep header + data, strip decoration."""
+        lines = output.splitlines()
+        if len(lines) <= 15:
+            return output
+
+        # docker stats --no-stream produces a header + rows
+        # docker stats (streaming) produces repeated blocks
+        # Keep only the last block
+        header_indices = [
+            i for i, line in enumerate(lines) if "CONTAINER" in line and "CPU" in line
+        ]
+        if header_indices:
+            last_header = header_indices[-1]
+            return "\n".join(lines[last_header:])
+
+        return output
+
+    def _process_compose_up(self, output: str) -> str:
+        """Compress docker compose up: keep created/started/error lines."""
+        lines = output.splitlines()
+        if len(lines) <= 20:
+            return output
+
+        result = []
+        for line in lines:
+            stripped = line.strip()
+            if re.search(r"(Created|Started|Running|Healthy|Error|error|failed)", stripped, re.I):
+                result.append(stripped)
+            elif re.search(r"(Network|Volume)\s+\S+\s+(Created|Found)", stripped):
+                result.append(stripped)
+            elif re.search(r"(Pulling|Building|Creating|Starting)", stripped) and not re.search(
+                r"\d+%", stripped
+            ):
+                result.append(stripped)
+
+        if not result:
+            return "\n".join(lines[-10:])
+        return "\n".join(result)
+
+    def _process_compose_down(self, output: str) -> str:
+        """Compress docker compose down: keep stopped/removed lines."""
+        lines = output.splitlines()
+        if len(lines) <= 15:
+            return output
+
+        result = []
+        for line in lines:
+            stripped = line.strip()
+            if re.search(r"(Stopped|Removed|Removing|removed)", stripped, re.I):
+                result.append(stripped)
+            elif re.search(r"(Network|Volume)\s+\S+\s+(Removed|removed)", stripped):
+                result.append(stripped)
+
+        if not result:
+            return "\n".join(lines[-10:])
+        return "\n".join(result)
+
+    def _process_compose_build(self, output: str) -> str:
+        """Compress docker compose build: keep step headers and results."""
+        lines = output.splitlines()
+        if len(lines) <= 20:
+            return output
+
+        result = []
+        for line in lines:
+            stripped = line.strip()
+            # Service headers
+            if re.match(r"^\S+\s+(Building|building)", stripped):
+                result.append(stripped)
+            # Build steps
+            elif re.match(r"^(Step \d+/\d+|#\d+\s|\[\d+/\d+\])", stripped):
+                result.append(stripped)
+            # Errors
+            elif re.search(r"\b(error|Error|ERROR|failed|FAILED)\b", stripped):
+                result.append(stripped)
+            # Final result
+            elif re.search(r"(Successfully|naming to |writing image|DONE)", stripped, re.I):
+                result.append(stripped)
+
+        if not result:
+            return "\n".join(lines[-10:])
+        return "\n".join(result)
 
     def _parse_columns(self, header: str) -> dict[str, int]:
         """Parse column start positions from a tabular header line."""

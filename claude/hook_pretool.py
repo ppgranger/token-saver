@@ -12,6 +12,9 @@ import re
 import shlex
 import sys
 
+# Ensure the extension root is importable (claude/ -> extension/)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 # --- Debug logging (writes to data_dir/hook.log when TOKEN_SAVER_DEBUG=true) ---
 _log = logging.getLogger("token-saver.hook_pretool")
 _log.setLevel(logging.DEBUG)
