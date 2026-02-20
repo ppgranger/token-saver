@@ -84,8 +84,16 @@ def cmd_update(_args):
 def _detect_installed_targets():
     """Detect which platforms are currently installed and return the --target value."""
     h = os.path.expanduser("~")
-    claude_installed = os.path.isdir(os.path.join(h, ".claude", "plugins", "token-saver"))
-    gemini_installed = os.path.isdir(os.path.join(h, ".gemini", "extensions", "token-saver"))
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA", os.path.join(h, "AppData", "Roaming"))
+        claude_dir = os.path.join(appdata, "claude", "plugins", "token-saver")
+        gemini_dir = os.path.join(appdata, "gemini", "extensions", "token-saver")
+    else:
+        claude_dir = os.path.join(h, ".claude", "plugins", "token-saver")
+        gemini_dir = os.path.join(h, ".gemini", "extensions", "token-saver")
+
+    claude_installed = os.path.isdir(claude_dir)
+    gemini_installed = os.path.isdir(gemini_dir)
 
     if claude_installed and gemini_installed:
         return "both"

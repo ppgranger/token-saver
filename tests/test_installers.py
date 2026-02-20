@@ -1,4 +1,4 @@
-"""Tests for installer utility functions: migration, version stamping, CLI install."""
+"""Tests for installer utility functions: migration, version stamping, CLI/core install."""
 
 import json
 import os
@@ -13,9 +13,11 @@ from unittest import mock
 from installers.common import (
     _read_version,
     install_cli,
+    install_core,
     migrate_from_legacy,
     stamp_version,
     uninstall_cli,
+    uninstall_core,
 )
 
 
@@ -216,3 +218,46 @@ class TestInstallCli:
         with open(dst) as f:
             content = f.read()
         assert "old content" not in content
+
+
+class TestInstallCore:
+    def setup_method(self):
+        self.tmp_dir = tempfile.mkdtemp()
+
+    def teardown_method(self):
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def test_copies_core_files(self):
+        with mock.patch("installers.common.token_saver_data_dir", return_value=self.tmp_dir):
+            install_core(use_symlink=False)
+
+        # Verify key files exist
+        assert os.path.isfile(os.path.join(self.tmp_dir, "src", "cli.py"))
+        assert os.path.isfile(os.path.join(self.tmp_dir, "src", "__init__.py"))
+        assert os.path.isfile(os.path.join(self.tmp_dir, "install.py"))
+        assert os.path.isfile(os.path.join(self.tmp_dir, "installers", "common.py"))
+        assert os.path.isfile(os.path.join(self.tmp_dir, "bin", "token-saver"))
+
+    def test_bin_is_executable(self):
+        with mock.patch("installers.common.token_saver_data_dir", return_value=self.tmp_dir):
+            install_core(use_symlink=False)
+
+        bin_path = os.path.join(self.tmp_dir, "bin", "token-saver")
+        assert os.access(bin_path, os.X_OK)
+
+    def test_uninstall_core_removes_files_keeps_db(self):
+        # Simulate a DB file that should survive
+        os.makedirs(self.tmp_dir, exist_ok=True)
+        db_path = os.path.join(self.tmp_dir, "savings.db")
+        with open(db_path, "w") as f:
+            f.write("database")
+
+        with mock.patch("installers.common.token_saver_data_dir", return_value=self.tmp_dir):
+            install_core(use_symlink=False)
+            uninstall_core()
+
+        # Core files should be gone
+        assert not os.path.exists(os.path.join(self.tmp_dir, "src", "cli.py"))
+        assert not os.path.exists(os.path.join(self.tmp_dir, "install.py"))
+        # DB should still be there
+        assert os.path.isfile(db_path)
