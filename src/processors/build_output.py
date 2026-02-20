@@ -9,9 +9,11 @@ class BuildOutputProcessor(Processor):
     priority = 25
     hook_patterns = [
         r"^(npm\s+(run|install|build|ci|audit)|yarn\s+(run|install|build|add|audit)|pnpm\s+(run|install|build|add|audit))\b",
-        r"^(cargo\s+(build|check|clippy)|make\b|cmake\b|gradle\b|mvn\b|ant\b)",
+        r"^(cargo\s+(build|check)|make\b|cmake\b|gradle\b|mvn\b|ant\b)",
         r"^(pip3?\s+install|poetry\s+(install|update)|uv\s+(pip|sync))\b",
         r"^(tsc|webpack|vite(\s+build)?|esbuild|rollup|next\s+build|nuxt\s+build)\b",
+        r"^(turbo\s+run|turbo\s+build|nx\s+(run|build)|bazel\s+build|sbt\s|mix\s+compile)\b",
+        r"^docker\s+(build|compose\s+build)\b",
     ]
 
     @property
@@ -22,13 +24,17 @@ class BuildOutputProcessor(Processor):
         # Exclude package listing commands (handled by PackageListProcessor)
         if re.search(r"\b(pip3?\s+(list|freeze)|npm\s+(ls|list)|conda\s+list)\b", command):
             return False
+        # Exclude cargo clippy (handled by LintOutputProcessor)
+        if re.search(r"\bcargo\s+clippy\b", command):
+            return False
         return bool(
             re.search(
                 r"\b(npm\s+(run|install|ci|build|audit)|yarn\s+(install|build|add|audit)|pnpm\s+(install|build|add|audit)|"
                 r"cargo\s+(build|check)|make\b|cmake\b|gradle\b|mvn\b|ant\b|"
                 r"pip3?\s+install|poetry\s+(install|update)|uv\s+(pip|sync)|"
                 r"tsc\b|webpack\b|vite(\s+build)?|esbuild\b|rollup\b|next\s+build|nuxt\s+build|"
-                r"docker\s+(build|compose\s+build))\b",
+                r"docker\s+(build|compose\s+build)|"
+                r"turbo\s+(run|build)|nx\s+(run|build)|bazel\s+build|sbt\b|mix\s+compile)\b",
                 command,
             )
         )
@@ -78,6 +84,8 @@ class BuildOutputProcessor(Processor):
             if in_error_block:
                 if not stripped:
                     blank_count += 1
+                    # For TypeScript/multi-file errors: tolerate single blank lines,
+                    # end block only after 2+ consecutive blanks
                     if blank_count >= 2:
                         in_error_block = False
                     else:
@@ -139,6 +147,9 @@ class BuildOutputProcessor(Processor):
                     "size",
                     "gzip",
                     "chunk",
+                    "cached",
+                    "remote:",
+                    "tasks",
                 ]
             ):
                 output_lines.append(stripped)
@@ -234,7 +245,7 @@ class BuildOutputProcessor(Processor):
                 summary_lines.append(stripped)
 
         if not severities:
-            # Could not parse — fall through to generic
+            # Could not parse -- fall through to generic
             return "\n".join(lines)
 
         result = []
