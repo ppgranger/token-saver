@@ -166,7 +166,11 @@ class TerraformProcessor(Processor):
                 continue
 
             # Keep final result
-            if re.search(r"(successfully initialized|has been successfully|Terraform has been)", stripped, re.I):
+            if re.search(
+                r"(successfully initialized|has been successfully|Terraform has been)",
+                stripped,
+                re.I,
+            ):
                 result.append(stripped)
                 continue
 

@@ -274,7 +274,9 @@ class TestGitProcessor:
         lines = []
         for i in range(30):
             author = "Alice" if i < 20 else "Bob"
-            lines.append(f"abc{i:04d}00 ({author} 2025-01-{i + 1:02d} 12:00:00 +0000 {i + 1}) line {i}")
+            lines.append(
+                f"abc{i:04d}00 ({author} 2025-01-{i + 1:02d} 12:00:00 +0000 {i + 1}) line {i}"
+            )
         output = "\n".join(lines)
         result = self.p.process("git blame src/main.py", output)
         assert "30 lines" in result
@@ -851,7 +853,9 @@ class TestLintOutputProcessor:
     def test_biome_violations_parsed(self):
         lines = []
         for i in range(10):
-            lines.append(f"src/file{i}.ts:{i + 1}:1 lint/correctness/noUnusedVariables unused variable")
+            lines.append(
+                f"src/file{i}.ts:{i + 1}:1 lint/correctness/noUnusedVariables unused variable"
+            )
         output = "\n".join(lines)
         result = self.p.process("biome lint src/", output)
         assert "lint/" in result
@@ -1398,7 +1402,7 @@ class TestDockerProcessor:
                     "Env": [f"VAR_{i}=val" for i in range(10)],
                 },
                 "NetworkSettings": {
-                    "Ports": {"80/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8080"}]},
+                    "Ports": {"80/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8080"}]},
                     "Networks": {
                         "bridge": {"IPAddress": "172.17.0.2"},
                     },
@@ -1493,10 +1497,15 @@ class TestDockerProcessor:
 
     def test_ps_dead_containers_in_stopped(self):
         """Dead containers should be grouped with stopped."""
-        header = "CONTAINER ID   IMAGE          COMMAND       CREATED       STATUS         PORTS     NAMES"
+        header = (
+            "CONTAINER ID   IMAGE          COMMAND   CREATED"
+            "   STATUS         PORTS     NAMES"
+        )
         entries = [
-            "abc0000000000   nginx:latest   nginx         1h ago        Up 1 hours     80/tcp    web-0",
-            "abc0000000001   myapp:latest   python        2h ago        Dead                     dead-app",
+            "abc0000000000   nginx:latest   nginx     1h ago "
+            "   Up 1 hours     80/tcp    web-0",
+            "abc0000000001   myapp:latest   python    2h ago "
+            "   Dead                     dead-app",
         ]
         output = "\n".join([header, *entries])
         result = self.p.process("docker ps -a", output)

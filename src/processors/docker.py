@@ -346,12 +346,13 @@ class DockerProcessor(Processor):
         result = []
         for line in lines:
             stripped = line.strip()
-            if re.search(r"(Created|Started|Running|Healthy|Error|error|failed)", stripped, re.I):
-                result.append(stripped)
-            elif re.search(r"(Network|Volume)\s+\S+\s+(Created|Found)", stripped):
-                result.append(stripped)
-            elif re.search(r"(Pulling|Building|Creating|Starting)", stripped) and not re.search(
-                r"\d+%", stripped
+            if (
+                re.search(r"(Created|Started|Running|Healthy|Error|error|failed)", stripped, re.I)
+                or re.search(r"(Network|Volume)\s+\S+\s+(Created|Found)", stripped)
+                or (
+                    re.search(r"(Pulling|Building|Creating|Starting)", stripped)
+                    and not re.search(r"\d+%", stripped)
+                )
             ):
                 result.append(stripped)
 
@@ -368,9 +369,10 @@ class DockerProcessor(Processor):
         result = []
         for line in lines:
             stripped = line.strip()
-            if re.search(r"(Stopped|Removed|Removing|removed)", stripped, re.I):
-                result.append(stripped)
-            elif re.search(r"(Network|Volume)\s+\S+\s+(Removed|removed)", stripped):
+            if (
+                re.search(r"(Stopped|Removed|Removing|removed)", stripped, re.I)
+                or re.search(r"(Network|Volume)\s+\S+\s+(Removed|removed)", stripped)
+            ):
                 result.append(stripped)
 
         if not result:
@@ -386,17 +388,12 @@ class DockerProcessor(Processor):
         result = []
         for line in lines:
             stripped = line.strip()
-            # Service headers
-            if re.match(r"^\S+\s+(Building|building)", stripped):
-                result.append(stripped)
-            # Build steps
-            elif re.match(r"^(Step \d+/\d+|#\d+\s|\[\d+/\d+\])", stripped):
-                result.append(stripped)
-            # Errors
-            elif re.search(r"\b(error|Error|ERROR|failed|FAILED)\b", stripped):
-                result.append(stripped)
-            # Final result
-            elif re.search(r"(Successfully|naming to |writing image|DONE)", stripped, re.I):
+            if (
+                re.match(r"^\S+\s+(Building|building)", stripped)
+                or re.match(r"^(Step \d+/\d+|#\d+\s|\[\d+/\d+\])", stripped)
+                or re.search(r"\b(error|Error|ERROR|failed|FAILED)\b", stripped)
+                or re.search(r"(Successfully|naming to |writing image|DONE)", stripped, re.I)
+            ):
                 result.append(stripped)
 
         if not result:
