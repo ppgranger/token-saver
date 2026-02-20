@@ -16,7 +16,14 @@ import argparse
 import platform
 
 from installers import claude, gemini
-from installers.common import install_cli, migrate_from_legacy, uninstall_cli, uninstall_data_dir
+from installers.common import (
+    install_cli,
+    install_core,
+    migrate_from_legacy,
+    uninstall_cli,
+    uninstall_core,
+    uninstall_data_dir,
+)
 
 
 def main():
@@ -72,6 +79,10 @@ Examples:
             claude.uninstall()
         if target in ("gemini", "both"):
             gemini.uninstall()
+
+        print("\n--- Core ---")
+        uninstall_core()
+
         if not args.keep_data:
             print("\n--- Data ---")
             uninstall_data_dir()
@@ -93,6 +104,8 @@ Examples:
         claude.install(use_symlink=args.link)
     if target in ("gemini", "both"):
         gemini.install(use_symlink=args.link)
+
+    install_core(use_symlink=args.link)
 
     print("\n--- CLI ---")
     install_cli(use_symlink=args.link)
