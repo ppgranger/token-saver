@@ -263,8 +263,7 @@ class TestGitProcessor:
 
     def test_blame_short_unchanged(self):
         lines = [
-            f"abc1234{i} (Author 2025-01-01 12:00:00 +0000 {i + 1}) line {i}"
-            for i in range(10)
+            f"abc1234{i} (Author 2025-01-01 12:00:00 +0000 {i + 1}) line {i}" for i in range(10)
         ]
         output = "\n".join(lines)
         result = self.p.process("git blame src/main.py", output)
@@ -874,8 +873,7 @@ class TestLintOutputProcessor:
         assert "clippy::needless_return" in result
         # "1 warning" should NOT be parsed as a rule
         assert "1 warning" not in [
-            line.strip() for line in result.splitlines()
-            if line.strip().startswith("1 warning:")
+            line.strip() for line in result.splitlines() if line.strip().startswith("1 warning:")
         ]
 
 
@@ -1268,8 +1266,7 @@ class TestNetworkProcessor:
 
         data = {
             "users": [
-                {"id": i, "name": f"User {i}", "email": f"user{i}@example.com"}
-                for i in range(20)
+                {"id": i, "name": f"User {i}", "email": f"user{i}@example.com"} for i in range(20)
             ],
             "total": 20,
             "page": 1,
@@ -1497,15 +1494,10 @@ class TestDockerProcessor:
 
     def test_ps_dead_containers_in_stopped(self):
         """Dead containers should be grouped with stopped."""
-        header = (
-            "CONTAINER ID   IMAGE          COMMAND   CREATED"
-            "   STATUS         PORTS     NAMES"
-        )
+        header = "CONTAINER ID   IMAGE          COMMAND   CREATED   STATUS         PORTS     NAMES"
         entries = [
-            "abc0000000000   nginx:latest   nginx     1h ago "
-            "   Up 1 hours     80/tcp    web-0",
-            "abc0000000001   myapp:latest   python    2h ago "
-            "   Dead                     dead-app",
+            "abc0000000000   nginx:latest   nginx     1h ago    Up 1 hours     80/tcp    web-0",
+            "abc0000000001   myapp:latest   python    2h ago    Dead                     dead-app",
         ]
         output = "\n".join([header, *entries])
         result = self.p.process("docker ps -a", output)

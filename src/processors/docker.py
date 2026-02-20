@@ -252,8 +252,15 @@ class DockerProcessor(Processor):
         result = []
         # Extract key fields
         important_keys = [
-            "Id", "Name", "State", "Config", "NetworkSettings",
-            "Image", "Created", "Platform", "Status",
+            "Id",
+            "Name",
+            "State",
+            "Config",
+            "NetworkSettings",
+            "Image",
+            "Created",
+            "Platform",
+            "Status",
         ]
 
         for key in important_keys:
@@ -369,9 +376,8 @@ class DockerProcessor(Processor):
         result = []
         for line in lines:
             stripped = line.strip()
-            if (
-                re.search(r"(Stopped|Removed|Removing|removed)", stripped, re.I)
-                or re.search(r"(Network|Volume)\s+\S+\s+(Removed|removed)", stripped)
+            if re.search(r"(Stopped|Removed|Removing|removed)", stripped, re.I) or re.search(
+                r"(Network|Volume)\s+\S+\s+(Removed|removed)", stripped
             ):
                 result.append(stripped)
 

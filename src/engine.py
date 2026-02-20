@@ -52,9 +52,7 @@ class CompressionEngine:
                     generic_compressed = self._generic.clean(generic_compressed)
                     generic_len = len(generic_compressed)
                     generic_gain = (
-                        (original_len - generic_len) / original_len
-                        if original_len > 0
-                        else 0
+                        (original_len - generic_len) / original_len if original_len > 0 else 0
                     )
                     if generic_gain >= min_ratio:
                         return generic_compressed, "generic", True

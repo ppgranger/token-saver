@@ -68,7 +68,7 @@ class KubectlProcessor(Processor):
             return header, lines
         col_start = m.start()
         # Find end: next column start or end of line
-        rest = header[m.end():]
+        rest = header[m.end() :]
         next_col = re.search(r"\S", rest)
         col_end = m.end() + next_col.start() if next_col else len(header)
 

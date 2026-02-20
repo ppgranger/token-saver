@@ -290,10 +290,7 @@ class GitProcessor(Processor):
         # Detect --graph format (ASCII art: |, *, /, \)
         # Only match lines that contain graph chars (not just spaces)
         has_graph = re.search(r"--graph\b", command) or (
-            lines and any(
-                re.match(r"^[|*/\\ ]*[|*/\\]", line)
-                for line in lines[:10]
-            )
+            lines and any(re.match(r"^[|*/\\ ]*[|*/\\]", line) for line in lines[:10])
         )
         if has_graph:
             # Graph format: truncate but preserve structure

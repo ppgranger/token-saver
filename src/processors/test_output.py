@@ -391,9 +391,8 @@ class TestOutputProcessor(Processor):
                 continue
 
             if (
-                (stripped.startswith("Passed!") or re.search(r"\bPassed\b", stripped))
-                and "test" not in stripped.lower()
-            ):
+                stripped.startswith("Passed!") or re.search(r"\bPassed\b", stripped)
+            ) and "test" not in stripped.lower():
                 passed += 1
                 continue
 
@@ -496,9 +495,8 @@ class TestOutputProcessor(Processor):
             lower = line.lower()
             if any(kw in lower for kw in ["fail", "error", "assert", "exception", "traceback"]):
                 result.append(line)
-            elif (
-                any(kw in lower for kw in ["pass", "ok ", "success"])
-                or re.match(r"^\s*(✓|✔)", line.strip())
+            elif any(kw in lower for kw in ["pass", "ok ", "success"]) or re.match(
+                r"^\s*(✓|✔)", line.strip()
             ):
                 passed += 1
             elif re.match(r"^\d+\s+(tests?|specs?|examples?)", line.strip()):

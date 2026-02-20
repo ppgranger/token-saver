@@ -20,8 +20,7 @@ class NetworkProcessor(Processor):
         # Match curl, wget, or httpie (http/https commands at start of line)
         # Avoid false positives: only match http/https as standalone commands, not as URLs
         return bool(
-            re.search(r"\b(curl|wget)\b", command)
-            or re.match(r"^\s*(http|https)\s+", command)
+            re.search(r"\b(curl|wget)\b", command) or re.match(r"^\s*(http|https)\s+", command)
         )
 
     def process(self, command: str, output: str) -> str:
@@ -263,8 +262,12 @@ class NetworkProcessor(Processor):
                 header_name = stripped.split(":")[0].lower()
                 # Keep important headers
                 important = {
-                    "content-type", "location", "set-cookie", "www-authenticate",
-                    "content-length", "x-request-id",
+                    "content-type",
+                    "location",
+                    "set-cookie",
+                    "www-authenticate",
+                    "content-length",
+                    "x-request-id",
                 }
                 if any(header_name.startswith(h) for h in important):
                     result.append(line)

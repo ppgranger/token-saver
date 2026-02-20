@@ -82,7 +82,7 @@ class SearchProcessor(Processor):
                     # Strip the filepath prefix to avoid repetition
                     display = m
                     if display.startswith(filepath + ":"):
-                        display = "  " + display[len(filepath) + 1:]
+                        display = "  " + display[len(filepath) + 1 :]
                     else:
                         display = "  " + display
                     result.append(display)
