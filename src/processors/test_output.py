@@ -36,7 +36,9 @@ class TestOutputProcessor(Processor):
 
         if re.search(r"\bpytest\b|py\.test|python3?\s+-m\s+pytest", command):
             return self._process_pytest(lines)
-        if re.search(r"\bjest\b|\bvitest\b|\bnpm\s+test\b|\byarn\s+test\b|\bpnpm\s+test\b", command):
+        if re.search(
+            r"\bjest\b|\bvitest\b|\bnpm\s+test\b|\byarn\s+test\b|\bpnpm\s+test\b", command
+        ):
             return self._process_jest(lines)
         if re.search(r"\bcargo\s+test\b", command):
             return self._process_cargo_test(lines)
@@ -388,10 +390,12 @@ class TestOutputProcessor(Processor):
             if re.match(r"^\s*(Build|Restore|Determining|Microsoft)", stripped):
                 continue
 
-            if stripped.startswith("Passed!") or re.search(r"\bPassed\b", stripped):
-                if "test" not in stripped.lower():
-                    passed += 1
-                    continue
+            if (
+                (stripped.startswith("Passed!") or re.search(r"\bPassed\b", stripped))
+                and "test" not in stripped.lower()
+            ):
+                passed += 1
+                continue
 
             if re.search(r"\bFailed\b", stripped):
                 in_failure = True
@@ -492,9 +496,10 @@ class TestOutputProcessor(Processor):
             lower = line.lower()
             if any(kw in lower for kw in ["fail", "error", "assert", "exception", "traceback"]):
                 result.append(line)
-            elif any(kw in lower for kw in ["pass", "ok ", "success"]):
-                passed += 1
-            elif re.match(r"^\s*(✓|✔)", line.strip()):
+            elif (
+                any(kw in lower for kw in ["pass", "ok ", "success"])
+                or re.match(r"^\s*(✓|✔)", line.strip())
+            ):
                 passed += 1
             elif re.match(r"^\d+\s+(tests?|specs?|examples?)", line.strip()):
                 result.append(line)

@@ -261,7 +261,7 @@ class GitProcessor(Processor):
             dir_name = parts[0] if len(parts) > 1 else "."
             by_dir.setdefault(dir_name, []).append(stripped)
 
-        total = len([l for l in lines if l.strip()])
+        total = sum(1 for line in lines if line.strip())
         result = [f"{total} files changed:"]
         for dir_name, files in sorted(by_dir.items()):
             if len(files) > 5:
