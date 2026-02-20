@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import urllib.error
 import urllib.request
 
 from src import __version__
@@ -46,6 +47,12 @@ def cmd_update(_args):
     print("Checking for updates...")
     try:
         latest = _fetch_latest_version()
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            print("No releases found on GitHub. Is the repository public with releases?")
+        else:
+            print(f"Failed to check for updates: HTTP {e.code}")
+        sys.exit(1)
     except Exception as e:
         print(f"Failed to check for updates: {e}")
         sys.exit(1)
@@ -62,35 +69,51 @@ def cmd_update(_args):
     else:
         _update_via_tarball(repo_dir, latest)
 
-    # Re-run installer
-    print("Re-running installer...")
+    # Re-run installer — detect which platforms are currently installed
+    targets = _detect_installed_targets()
+    print(f"Re-running installer for: {targets}...")
     install_script = os.path.join(repo_dir, "install.py")
     subprocess.run(  # noqa: S603
-        [sys.executable, install_script, "--target", "both"],
+        [sys.executable, install_script, "--target", targets],
         check=True,
     )
 
     print(f"Update complete! Now running v{latest}.")
 
 
+def _detect_installed_targets():
+    """Detect which platforms are currently installed and return the --target value."""
+    h = os.path.expanduser("~")
+    claude_installed = os.path.isdir(os.path.join(h, ".claude", "plugins", "token-saver"))
+    gemini_installed = os.path.isdir(os.path.join(h, ".gemini", "extensions", "token-saver"))
+
+    if claude_installed and gemini_installed:
+        return "both"
+    if gemini_installed:
+        return "gemini"
+    # Default to claude (most common, and safe even if dir was just cleaned)
+    return "claude"
+
+
 def _update_via_git(repo_dir, version):
-    """Update using git fetch + checkout."""
+    """Update using git fetch + merge tag into current branch."""
     print("Updating via git...")
     subprocess.run(  # noqa: S603
-        ["git", "-C", repo_dir, "fetch", "--tags"],  # noqa: S607
+        ["git", "-C", repo_dir, "fetch", "--tags", "origin"],  # noqa: S607
         check=True,
     )
-    # Try tag with 'v' prefix first, then without
+    # Try to merge the tag into the current branch (avoids detached HEAD)
     for tag in (f"v{version}", version):
         result = subprocess.run(  # noqa: S603
-            ["git", "-C", repo_dir, "checkout", tag],  # noqa: S607
+            ["git", "-C", repo_dir, "merge", tag, "--ff-only"],  # noqa: S607
             capture_output=True,
             check=False,
         )
         if result.returncode == 0:
-            print(f"Checked out {tag}")
+            print(f"Merged {tag} into current branch.")
             return
-    print(f"Warning: could not checkout tag for v{version}, pulling latest main")
+    # Fallback: pull latest main
+    print(f"Warning: could not fast-forward to v{version}, pulling latest main")
     subprocess.run(  # noqa: S603
         ["git", "-C", repo_dir, "pull", "origin", "main"],  # noqa: S607
         check=True,
@@ -126,9 +149,20 @@ def _update_via_tarball(repo_dir, version):
 
         src_dir = os.path.join(tmpdir, extracted[0])
 
-        # Overlay files into repo_dir
-        for item in os.listdir(src_dir):
+        # Overlay known source directories only (preserve .git, local config, etc.)
+        overlay_items = (
+            "src",
+            "installers",
+            "claude",
+            "gemini",
+            "bin",
+            "install.py",
+            "pyproject.toml",
+        )
+        for item in overlay_items:
             s = os.path.join(src_dir, item)
+            if not os.path.exists(s):
+                continue
             d = os.path.join(repo_dir, item)
             if os.path.isdir(s):
                 if os.path.exists(d):

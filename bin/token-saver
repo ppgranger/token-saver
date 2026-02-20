@@ -1,14 +1,50 @@
 #!/usr/bin/env python3
-"""Token-Saver CLI wrapper. Resolves symlinks to find the repo directory."""
+"""Token-Saver CLI wrapper.
+
+Works in two scenarios:
+1. Running from the repo (development): resolves to repo_dir/src/cli.py
+2. Running from ~/.local/bin/ (installed copy): finds src/cli.py in the
+   installed plugin directory (~/.claude/plugins/token-saver/ or
+   ~/.gemini/extensions/token-saver/).
+"""
 
 import os
 import sys
 
-# Resolve symlinks to find the real repo location
-script_path = os.path.realpath(__file__)
-repo_dir = os.path.dirname(os.path.dirname(script_path))
-sys.path.insert(0, repo_dir)
 
-from src.cli import main
+def _find_src_dir():
+    """Find the directory containing the src/ package."""
+    # First: try the repo (parent of bin/)
+    script_path = os.path.realpath(__file__)
+    repo_dir = os.path.dirname(os.path.dirname(script_path))
+    if os.path.isfile(os.path.join(repo_dir, "src", "cli.py")):
+        return repo_dir
+
+    # Second: look in known plugin install locations
+    home = os.path.expanduser("~")
+    candidates = [
+        os.path.join(home, ".claude", "plugins", "token-saver"),
+        os.path.join(home, ".gemini", "extensions", "token-saver"),
+    ]
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA", os.path.join(home, "AppData", "Roaming"))
+        candidates = [
+            os.path.join(appdata, "claude", "plugins", "token-saver"),
+            os.path.join(appdata, "gemini", "extensions", "token-saver"),
+        ]
+
+    for candidate in candidates:
+        if os.path.isfile(os.path.join(candidate, "src", "cli.py")):
+            return candidate
+
+    print("Error: could not find token-saver installation.", file=sys.stderr)
+    print("Re-run: python3 install.py --target claude", file=sys.stderr)
+    sys.exit(1)
+
+
+src_dir = _find_src_dir()
+sys.path.insert(0, src_dir)
+
+from src.cli import main  # noqa: E402
 
 main()

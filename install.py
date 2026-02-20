@@ -62,6 +62,9 @@ Examples:
         target = args.target or "both"
         print(f"Uninstalling token-saver from: {target}")
 
+        print("\n--- Legacy cleanup ---")
+        migrate_from_legacy()
+
         print("\n--- CLI ---")
         uninstall_cli()
 
