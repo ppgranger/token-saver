@@ -230,6 +230,56 @@ def stamp_version(target_dir, manifest_paths):
         print(f"  STAMPED version {version} in {rel_path}")
 
 
+# ---------------------------------------------------------------------------
+# Core install: copy src/, installers/, install.py, bin/ into ~/.token-saver/
+# so the CLI and update work even after the repo/zip is deleted.
+# ---------------------------------------------------------------------------
+
+CORE_FILES = [
+    *SHARED_FILES,
+    "installers/__init__.py",
+    "installers/common.py",
+    "installers/claude.py",
+    "installers/gemini.py",
+    "install.py",
+    "bin/token-saver",
+    "bin/token-saver.cmd",
+    "claude/plugin.json",
+    "claude/hook_pretool.py",
+    "claude/wrap.py",
+    "gemini/gemini-extension.json",
+    "gemini/hooks.json",
+    "gemini/hook_aftertool.py",
+]
+
+
+def install_core(use_symlink=False):
+    """Install core files to ~/.token-saver/ so CLI and update work standalone."""
+    data_dir = token_saver_data_dir()
+    print(f"\n--- Core ({data_dir}) ---")
+    install_files(data_dir, CORE_FILES, use_symlink)
+    # Ensure bin/token-saver is executable in the core install
+    bin_path = os.path.join(data_dir, "bin", "token-saver")
+    if os.path.exists(bin_path) and not os.path.islink(bin_path):
+        st = os.stat(bin_path)
+        os.chmod(bin_path, st.st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def uninstall_core():
+    """Remove core files from ~/.token-saver/ (keeps DB and config)."""
+    data_dir = token_saver_data_dir()
+    for rel_path in CORE_FILES:
+        full_path = os.path.join(data_dir, rel_path)
+        if os.path.exists(full_path) or os.path.islink(full_path):
+            os.remove(full_path)
+    # Clean up empty directories (but leave data_dir itself for DB/config)
+    for dirpath, dirnames, filenames in os.walk(data_dir, topdown=False):
+        if dirpath == data_dir:
+            continue
+        if not filenames and not dirnames:
+            os.rmdir(dirpath)
+
+
 def _cli_install_dir():
     """Return the directory for CLI executable installation."""
     if IS_WINDOWS:
