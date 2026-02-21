@@ -42,6 +42,7 @@ _DEFAULTS = {
     "git_stash_threshold": 10,
     "max_traceback_lines": 30,
     "db_prune_days": 90,
+    "chars_per_token": 4,
     "debug": False,
 }
 

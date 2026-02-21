@@ -256,13 +256,13 @@ Token-Saver records every compression in a local SQLite database:
 On every session start, the `SessionStart` hook displays a summary:
 
 ```
-[token-saver] Lifetime: 342 cmds, 1.2 MB saved (67.3%) | Session: 5 cmds, 45.2 KB saved (72.1%)
+[token-saver] Lifetime: 342 cmds, 307.2k tokens saved (67.3%) | Session: 5 cmds, 11.3k tokens saved (72.1%)
 ```
 
 If a newer version is available, the notification is appended:
 
 ```
-[token-saver] Lifetime: 342 cmds, 1.2 MB saved (67.3%) | Update available: v1.0.1 -> v1.1.0 -- Run: token-saver update
+[token-saver] Lifetime: 342 cmds, 307.2k tokens saved (67.3%) | Update available: v1.0.1 -> v1.1.0 -- Run: token-saver update
 ```
 
 ### Manual Stats
@@ -279,23 +279,23 @@ Token-Saver Statistics
 Session
 ----------------------------------------
   Commands compressed:  12
-  Original size:        245.3 KB
-  Compressed size:      62.1 KB
-  Saved:                183.2 KB (74.7%)
+  Original tokens:      61.3k tokens
+  Compressed tokens:    15.5k tokens
+  Saved:                45.8k tokens (74.7%)
 
 Lifetime
 ----------------------------------------
   Sessions:             47
   Commands compressed:  342
-  Original size:        1.8 MB
-  Compressed size:      589.4 KB
-  Saved:                1.2 MB (67.3%)
+  Original tokens:      461.0k tokens
+  Compressed tokens:    147.3k tokens
+  Saved:                307.2k tokens (67.3%)
 
 Top Processors
 ----------------------------------------
-  git                    142 cmds, 487.2 KB saved
-  test                    89 cmds, 312.1 KB saved
-  build                   45 cmds, 198.7 KB saved
+  git                    142 cmds, 121.8k tokens saved
+  test                    89 cmds, 78.0k tokens saved
+  build                   45 cmds, 49.7k tokens saved
 ```
 
 ### Maintenance

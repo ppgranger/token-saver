@@ -15,13 +15,20 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.tracker import SavingsTracker
 
 
-def _format_bytes(n: int) -> str:
-    """Human-readable byte size."""
-    if n < 1024:
-        return f"{n} B"
-    if n < 1024 * 1024:
-        return f"{n / 1024:.1f} KB"
-    return f"{n / (1024 * 1024):.1f} MB"
+def _chars_to_tokens(n: int) -> int:
+    """Estimate token count from character count."""
+    from src import config  # noqa: PLC0415
+
+    return max(1, round(n / config.get("chars_per_token"))) if n > 0 else 0
+
+
+def _format_tokens(n: int) -> str:
+    """Human-readable token count."""
+    if n < 1_000:
+        return f"{n} tokens"
+    if n < 1_000_000:
+        return f"{n / 1_000:.1f}k tokens"
+    return f"{n / 1_000_000:.1f}M tokens"
 
 
 def main():
@@ -54,9 +61,10 @@ def main():
         print("  No compressions in this session.")
     else:
         print(f"  Commands compressed:  {session['commands']}")
-        print(f"  Original size:        {_format_bytes(session['original'])}")
-        print(f"  Compressed size:      {_format_bytes(session['compressed'])}")
-        print(f"  Saved:                {_format_bytes(session['saved'])} ({session['ratio']}%)")
+        print(f"  Original tokens:      {_format_tokens(_chars_to_tokens(session['original']))}")
+        print(f"  Compressed tokens:    {_format_tokens(_chars_to_tokens(session['compressed']))}")
+        saved = _format_tokens(_chars_to_tokens(session["saved"]))
+        print(f"  Saved:                {saved} ({session['ratio']}%)")
 
     print("\nLifetime")
     print("-" * 40)
@@ -65,15 +73,16 @@ def main():
     else:
         print(f"  Sessions:             {lifetime['sessions']}")
         print(f"  Commands compressed:  {lifetime['commands']}")
-        print(f"  Original size:        {_format_bytes(lifetime['original'])}")
-        print(f"  Compressed size:      {_format_bytes(lifetime['compressed'])}")
-        print(f"  Saved:                {_format_bytes(lifetime['saved'])} ({lifetime['ratio']}%)")
+        print(f"  Original tokens:      {_format_tokens(_chars_to_tokens(lifetime['original']))}")
+        print(f"  Compressed tokens:    {_format_tokens(_chars_to_tokens(lifetime['compressed']))}")
+        saved = _format_tokens(_chars_to_tokens(lifetime["saved"]))
+        print(f"  Saved:                {saved} ({lifetime['ratio']}%)")
 
     if top:
         print("\nTop Processors")
         print("-" * 40)
         for entry in top:
-            saved = _format_bytes(entry["saved"])
+            saved = _format_tokens(_chars_to_tokens(entry["saved"]))
             print(f"  {entry['processor']:<20s} {entry['count']:>4d} cmds, {saved} saved")
 
 

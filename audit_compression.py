@@ -10,13 +10,20 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 
+from src import config
 from src.engine import CompressionEngine
 
 engine = CompressionEngine()
 
+CHARS_PER_TOKEN = config.get("chars_per_token")
+
 # ============================================================
 # Helper
 # ============================================================
+
+
+def _to_tokens(n: int) -> int:
+    return max(1, round(n / CHARS_PER_TOKEN)) if n > 0 else 0
 
 
 def audit(label: str, command: str, output: str, observations: list[str] | None = None):
@@ -25,15 +32,17 @@ def audit(label: str, command: str, output: str, observations: list[str] | None 
     orig_len = len(output)
     comp_len = len(compressed)
     ratio = (orig_len - comp_len) / orig_len * 100 if orig_len else 0
-    saved = orig_len - comp_len
+    orig_tokens = _to_tokens(orig_len)
+    comp_tokens = _to_tokens(comp_len)
+    saved_tokens = orig_tokens - comp_tokens
 
     print(f"\n{'=' * 80}")
     print(f"SCENARIO: {label}")
     print(f"Command:  {command}")
     print(f"Processor: {processor} | Compressed: {was_compressed}")
-    print(f"Original:   {orig_len:>7,} chars  ({len(output.splitlines()):>5} lines)")
-    print(f"Compressed: {comp_len:>7,} chars  ({len(compressed.splitlines()):>5} lines)")
-    print(f"Saved:      {saved:>7,} chars  ({ratio:5.1f}%)")
+    print(f"Original:   {orig_tokens:>7,} tokens  ({len(output.splitlines()):>5} lines)")
+    print(f"Compressed: {comp_tokens:>7,} tokens  ({len(compressed.splitlines()):>5} lines)")
+    print(f"Saved:      {saved_tokens:>7,} tokens  ({ratio:5.1f}%)")
     print("----- First 15 lines of compressed output -----")
     for _i, line in enumerate(compressed.splitlines()[:15]):
         print(f"  {line}")

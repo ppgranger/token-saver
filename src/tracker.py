@@ -244,13 +244,21 @@ class SavingsTracker:
             for r in rows
         ]
 
-    def _format_bytes(self, n: int) -> str:
-        """Human-readable byte size."""
-        if n < 1024:
-            return f"{n} B"
-        if n < 1024 * 1024:
-            return f"{n / 1024:.1f} KB"
-        return f"{n / (1024 * 1024):.1f} MB"
+    @staticmethod
+    def _chars_to_tokens(n: int) -> int:
+        """Estimate token count from character count."""
+        from src import config  # noqa: PLC0415
+
+        return max(1, round(n / config.get("chars_per_token"))) if n > 0 else 0
+
+    @staticmethod
+    def _format_tokens(n: int) -> str:
+        """Human-readable token count."""
+        if n < 1_000:
+            return f"{n} tokens"
+        if n < 1_000_000:
+            return f"{n / 1_000:.1f}k tokens"
+        return f"{n / 1_000_000:.1f}M tokens"
 
     def format_stats_message(self) -> str:
         """Format a human-readable stats summary."""
@@ -260,15 +268,17 @@ class SavingsTracker:
         parts = ["[token-saver]"]
 
         if lifetime["commands"] > 0:
+            saved_tokens = self._chars_to_tokens(lifetime["saved"])
             parts.append(
                 f"Lifetime: {lifetime['commands']} cmds, "
-                f"{self._format_bytes(lifetime['saved'])} saved ({lifetime['ratio']}%)"
+                f"{self._format_tokens(saved_tokens)} saved ({lifetime['ratio']}%)"
             )
 
         if session["commands"] > 0:
+            saved_tokens = self._chars_to_tokens(session["saved"])
             parts.append(
                 f"Session: {session['commands']} cmds, "
-                f"{self._format_bytes(session['saved'])} saved ({session['ratio']}%)"
+                f"{self._format_tokens(saved_tokens)} saved ({session['ratio']}%)"
             )
 
         if lifetime["commands"] == 0:

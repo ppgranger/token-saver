@@ -93,10 +93,16 @@ class TestSavingsTracker:
         assert "[token-saver]" in msg
         assert "Lifetime" in msg
 
-    def test_format_bytes(self):
-        assert self.tracker._format_bytes(500) == "500 B"
-        assert self.tracker._format_bytes(2048) == "2.0 KB"
-        assert self.tracker._format_bytes(1048576) == "1.0 MB"
+    def test_format_tokens(self):
+        assert self.tracker._format_tokens(500) == "500 tokens"
+        assert self.tracker._format_tokens(2000) == "2.0k tokens"
+        assert self.tracker._format_tokens(1500000) == "1.5M tokens"
+
+    def test_chars_to_tokens(self):
+        assert self.tracker._chars_to_tokens(0) == 0
+        assert self.tracker._chars_to_tokens(4) == 1
+        assert self.tracker._chars_to_tokens(400) == 100
+        assert self.tracker._chars_to_tokens(3) == 1  # rounds up to min 1
 
     def test_command_truncation(self):
         """Long commands should be truncated to 500 chars."""

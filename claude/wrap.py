@@ -111,10 +111,14 @@ def main():
         compressed_len = len(compressed)
         saved = original_len - compressed_len
         ratio = (saved / original_len * 100) if original_len > 0 else 0
+        chars_per_token = config.get("chars_per_token")
+        orig_tokens = max(1, round(original_len / chars_per_token)) if original_len > 0 else 0
+        comp_tokens = max(1, round(compressed_len / chars_per_token)) if compressed_len > 0 else 0
+        saved_tokens = orig_tokens - comp_tokens
         print(
             f"[token-saver dry-run] processor={processor_name} "
-            f"original={original_len} compressed={compressed_len} "
-            f"saved={saved} ({ratio:.1f}%)",
+            f"original={orig_tokens} tokens compressed={comp_tokens} tokens "
+            f"saved={saved_tokens} tokens ({ratio:.1f}%)",
             file=sys.stderr,
         )
         print(output, end="")
