@@ -6,11 +6,14 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.processors.build_output import BuildOutputProcessor
+from src.processors.cloud_cli import CloudCliProcessor
+from src.processors.db_query import DbQueryProcessor
 from src.processors.docker import DockerProcessor
 from src.processors.env import EnvProcessor
 from src.processors.file_content import FileContentProcessor
 from src.processors.file_listing import FileListingProcessor
 from src.processors.generic import GenericProcessor
+from src.processors.gh import GhProcessor
 from src.processors.git import GitProcessor
 from src.processors.kubectl import KubectlProcessor
 from src.processors.lint_output import LintOutputProcessor
@@ -2082,3 +2085,322 @@ class TestTerraformProcessor:
         )
         result = self.p.process("terraform plan -var init=true", output)
         assert "Plan: 1 to add" in result
+
+
+class TestGhProcessor:
+    def setup_method(self):
+        self.p = GhProcessor()
+
+    def test_can_handle(self):
+        assert self.p.can_handle("gh pr list")
+        assert self.p.can_handle("gh issue list")
+        assert self.p.can_handle("gh run view 12345")
+        assert self.p.can_handle("gh pr diff 42")
+        assert self.p.can_handle("gh pr checks")
+        assert not self.p.can_handle("git status")
+        assert not self.p.can_handle("gh auth login")
+
+    def test_empty_output(self):
+        assert self.p.process("gh pr list", "") == ""
+
+    def test_pr_list_compresses_long_output(self):
+        lines = []
+        for i in range(40):
+            lines.append(f"{i}\tFix bug #{i}\tfeature/fix-{i}\tOPEN\t2025-01-{i % 28 + 1:02d}")
+        output = "\n".join(lines)
+        result = self.p.process("gh pr list", output)
+        assert "more pr" in result
+        assert len(result.splitlines()) < len(lines)
+
+    def test_pr_list_short_unchanged(self):
+        output = "1\tFix login\tmain\tOPEN\t2025-01-01\n2\tAdd tests\tmain\tOPEN\t2025-01-02"
+        result = self.p.process("gh pr list", output)
+        assert result == output
+
+    def test_pr_list_preserves_all_fields(self):
+        lines = []
+        for i in range(20):
+            lines.append(f"{i}\tPR title {i}\tbranch-{i}\tOPEN\t2025-01-01")
+        output = "\n".join(lines)
+        result = self.p.process("gh pr list", output)
+        # All 20 should be shown (< 30 threshold)
+        assert "PR title 0" in result
+        assert "PR title 19" in result
+
+    def test_checks_collapses_passing(self):
+        lines = []
+        for i in range(15):
+            lines.append(f"✓  build-{i}\tpassing\t1m")
+        lines.append("✗  lint\tfailing\t30s")
+        lines.append("○  deploy\tpending\t-")
+        output = "\n".join(lines)
+        result = self.p.process("gh pr checks", output)
+        assert "15 checks passed" in result
+        assert "lint" in result
+        assert "deploy" in result
+        assert "Failed" in result
+        assert "Pending" in result
+
+    def test_checks_short_unchanged(self):
+        output = "✓  build\tpassing\t1m\n✓  test\tpassing\t2m"
+        result = self.p.process("gh pr checks", output)
+        assert result == output
+
+    def test_diff_compresses(self):
+        lines = ["diff --git a/file.py b/file.py", "@@ -1,200 +1,200 @@"]
+        for i in range(200):
+            lines.append(f"+line {i}")
+        output = "\n".join(lines)
+        result = self.p.process("gh pr diff 42", output)
+        assert "truncated" in result
+        assert len(result) < len(output)
+
+    def test_diff_preserves_changes(self):
+        lines = [
+            "diff --git a/app.py b/app.py",
+            "@@ -1,5 +1,6 @@",
+            " context",
+            "+added_line",
+            "-removed_line",
+            " context",
+        ]
+        output = "\n".join(lines)
+        result = self.p.process("gh pr diff 42", output)
+        assert "+added_line" in result
+        assert "-removed_line" in result
+
+
+class TestDbQueryProcessor:
+    def setup_method(self):
+        self.p = DbQueryProcessor()
+
+    def test_can_handle(self):
+        assert self.p.can_handle("psql -d mydb -c 'SELECT * FROM users'")
+        assert self.p.can_handle("mysql -u root mydb")
+        assert self.p.can_handle("sqlite3 test.db")
+        assert self.p.can_handle("pgcli postgres://localhost/mydb")
+        assert not self.p.can_handle("git status")
+
+    def test_empty_output(self):
+        assert self.p.process("psql", "") == ""
+
+    def test_psql_table_compressed(self):
+        lines = [
+            " id | name       | email",
+            "----+------------+------------------",
+        ]
+        for i in range(50):
+            lines.append(f" {i:2d} | user_{i:<6} | user{i}@example.com")
+        lines.append("(50 rows)")
+        output = "\n".join(lines)
+        result = self.p.process("psql -c 'SELECT * FROM users'", output)
+        assert "rows omitted" in result
+        assert "(50 rows)" in result
+        assert "id | name" in result
+        assert len(result.splitlines()) < len(lines)
+
+    def test_psql_short_unchanged(self):
+        output = " id | name\n----+------\n  1 | Alice\n  2 | Bob\n(2 rows)"
+        result = self.p.process("psql", output)
+        assert result == output
+
+    def test_mysql_table_compressed(self):
+        lines = [
+            "+----+--------+",
+            "| id | name   |",
+            "+----+--------+",
+        ]
+        for i in range(50):
+            lines.append(f"| {i:2d} | user_{i} |")
+        lines.append("+----+--------+")
+        lines.append("50 rows in set (0.01 sec)")
+        output = "\n".join(lines)
+        result = self.p.process("mysql -e 'SELECT * FROM users'", output)
+        assert "rows omitted" in result
+        assert "50 rows in set" in result
+
+    def test_mysql_short_unchanged(self):
+        output = "+----+------+\n| id | name |\n+----+------+\n|  1 | Bob  |\n+----+------+"
+        result = self.p.process("mysql", output)
+        assert result == output
+
+    def test_preserves_errors(self):
+        output = "ERROR 1045 (28000): Access denied for user 'root'@'localhost'"
+        result = self.p.process("mysql", output)
+        assert "ERROR" in result
+        assert "Access denied" in result
+
+    def test_csv_output_compressed(self):
+        lines = ["id,name,email"]
+        for i in range(40):
+            lines.append(f"{i},user_{i},user{i}@example.com")
+        output = "\n".join(lines)
+        result = self.p.process("psql -A -c 'SELECT * FROM users'", output)
+        assert "rows omitted" in result
+        assert "id,name,email" in result
+
+    def test_csv_short_unchanged(self):
+        output = "id,name\n1,Alice\n2,Bob"
+        result = self.p.process("sqlite3 -csv", output)
+        assert result == output
+
+
+class TestCloudCliProcessor:
+    def setup_method(self):
+        self.p = CloudCliProcessor()
+
+    def test_can_handle(self):
+        assert self.p.can_handle("aws ec2 describe-instances")
+        assert self.p.can_handle("gcloud compute instances list")
+        assert self.p.can_handle("az vm list")
+        assert not self.p.can_handle("git status")
+        assert not self.p.can_handle("terraform plan")
+
+    def test_empty_output(self):
+        assert self.p.process("aws ec2 describe-instances", "") == ""
+
+    def test_json_compressed(self):
+        import json
+
+        data = {
+            "Reservations": [
+                {
+                    "Instances": [
+                        {
+                            "InstanceId": f"i-{i:012d}",
+                            "State": {"Name": "running"},
+                            "Tags": [{"Key": "Name", "Value": f"server-{i}"}],
+                            "NetworkInterfaces": [
+                                {
+                                    "SubnetId": f"subnet-{j:08d}",
+                                    "PrivateIpAddress": f"10.0.{i}.{j}",
+                                    "Groups": [
+                                        {"GroupId": f"sg-{j:08d}", "GroupName": f"group-{j}"},
+                                    ],
+                                }
+                                for j in range(5)
+                            ],
+                        }
+                        for i in range(10)
+                    ]
+                }
+            ]
+        }
+        output = json.dumps(data, indent=2)
+        result = self.p.process("aws ec2 describe-instances", output)
+        assert "i-" in result
+        assert "running" in result
+        assert len(result) < len(output)
+
+    def test_json_short_unchanged(self):
+        output = '{"InstanceId": "i-123", "State": "running"}'
+        result = self.p.process("aws ec2 describe-instances", output)
+        # Short JSON should be parsed and re-serialized but not truncated
+        assert "i-123" in result
+        assert "running" in result
+
+    def test_preserves_errors(self):
+        import json
+
+        data = {
+            "error": {
+                "code": "UnauthorizedAccess",
+                "message": "User is not authorized to perform this operation",
+            }
+        }
+        output = json.dumps(data, indent=2)
+        result = self.p.process("aws ec2 describe-instances", output)
+        assert "UnauthorizedAccess" in result
+        assert "not authorized" in result
+
+    def test_preserves_state_and_id_fields(self):
+        import json
+
+        data = {
+            "InstanceId": "i-abc123def456",
+            "State": {"Name": "stopped", "Code": 80},
+            "arn": "arn:aws:ec2:us-east-1:123456789:instance/i-abc123def456",
+            "VeryDeepField": {"Level1": {"Level2": {"Level3": {"Level4": {"data": "deep value"}}}}},
+        }
+        output = json.dumps(data, indent=2)
+        result = self.p.process("aws ec2 describe-instances", output)
+        assert "i-abc123def456" in result
+        assert "stopped" in result
+        assert "arn:aws:ec2" in result
+
+    def test_table_output_compressed(self):
+        lines = [
+            "+---+---+---+",
+            "| InstanceId | State | Name |",
+            "+---+---+---+",
+        ]
+        for i in range(30):
+            lines.append(f"| i-{i:010d} | running | server-{i} |")
+        lines.append("+---+---+---+")
+        output = "\n".join(lines)
+        result = self.p.process("aws ec2 describe-instances --output table", output)
+        assert "more rows" in result
+        assert len(result.splitlines()) < len(lines)
+
+    def test_text_output_compressed(self):
+        lines = [f"i-{i:012d}\trunning\tserver-{i}\tt3.micro" for i in range(50)]
+        output = "\n".join(lines)
+        result = self.p.process("aws ec2 describe-instances --output text", output)
+        assert "omitted" in result
+        assert len(result.splitlines()) < len(lines)
+
+    def test_text_short_unchanged(self):
+        output = "i-123\trunning\tserver-1"
+        result = self.p.process("aws ec2 describe-instances --output text", output)
+        assert result == output
+
+
+class TestGitRemoteProcessor:
+    """Tests for git remote subcommand handler."""
+
+    def setup_method(self):
+        self.p = GitProcessor()
+
+    def test_can_handle_remote(self):
+        assert self.p.can_handle("git remote -v")
+        assert self.p.can_handle("git remote")
+
+    def test_remote_short_unchanged(self):
+        output = (
+            "origin\thttps://github.com/user/repo.git (fetch)\n"
+            "origin\thttps://github.com/user/repo.git (push)"
+        )
+        result = self.p.process("git remote -v", output)
+        assert result == output
+
+    def test_remote_deduplicates_fetch_push(self):
+        lines = []
+        for i in range(8):
+            lines.append(f"remote-{i}\thttps://github.com/user/repo-{i}.git (fetch)")
+            lines.append(f"remote-{i}\thttps://github.com/user/repo-{i}.git (push)")
+        output = "\n".join(lines)
+        result = self.p.process("git remote -v", output)
+        assert "fetch/push deduplicated" in result
+        assert "remote-0" in result
+        assert "remote-7" in result
+        assert len(result.splitlines()) < len(lines)
+
+
+class TestGitTypechange:
+    """Test typechange status code handling."""
+
+    def setup_method(self):
+        self.p = GitProcessor()
+
+    def test_status_typechange(self):
+        output = "\n".join(
+            [
+                "On branch main",
+                "Changes not staged for commit:",
+                "  typechange:   src/link.py",
+                "  modified:     src/app.py",
+            ]
+        )
+        result = self.p.process("git status", output)
+        assert "link.py" in result
+        assert "T" in result

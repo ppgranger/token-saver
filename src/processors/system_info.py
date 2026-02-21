@@ -8,7 +8,7 @@ from .base import Processor
 class SystemInfoProcessor(Processor):
     priority = 36
     hook_patterns = [
-        r"^(wc\s|du\s|df\s)",
+        r"^(wc|du|df)(\s|$)",
     ]
 
     @property
