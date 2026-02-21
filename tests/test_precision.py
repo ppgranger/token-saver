@@ -608,6 +608,107 @@ class TestPackageListPrecision:
         assert "packages installed" in compressed
 
 
+class TestGhPrecision:
+    def setup_method(self):
+        self.engine = CompressionEngine()
+
+    def test_gh_checks_preserves_failures(self):
+        """All failing checks must survive compression."""
+        lines = []
+        for i in range(20):
+            lines.append(f"✓  build-{i}\tpassing\t1m")
+        lines.append("✗  lint\tfailing\t30s")
+        lines.append("✗  security-scan\tfailing\t2m")
+        lines.append("○  deploy\tpending\t-")
+        output = "\n".join(lines)
+        compressed, _, was_compressed = self.engine.compress("gh pr checks", output)
+        assert was_compressed
+        assert "lint" in compressed
+        assert "security-scan" in compressed
+        assert "deploy" in compressed
+
+    def test_gh_pr_list_preserves_pr_numbers(self):
+        """PR numbers and titles must survive compression."""
+        lines = []
+        for i in range(40):
+            lines.append(f"{i + 100}\tFix critical bug #{i}\tfix/bug-{i}\tOPEN")
+        output = "\n".join(lines)
+        compressed, _, was_compressed = self.engine.compress("gh pr list", output)
+        assert was_compressed
+        # First 30 PRs should be present
+        assert "100" in compressed
+        assert "Fix critical bug #0" in compressed
+
+
+class TestDbQueryPrecision:
+    def setup_method(self):
+        self.engine = CompressionEngine()
+
+    def test_psql_preserves_header_and_row_count(self):
+        """Table header and row count must survive compression."""
+        lines = [
+            " id | name       | email",
+            "----+------------+------------------",
+        ]
+        for i in range(100):
+            lines.append(f" {i:2d} | user_{i:<6} | user{i}@example.com")
+        lines.append("(100 rows)")
+        output = "\n".join(lines)
+        compressed, _, was_compressed = self.engine.compress(
+            "psql -c 'SELECT * FROM users'", output
+        )
+        assert was_compressed
+        assert "id | name" in compressed
+        assert "(100 rows)" in compressed
+
+    def test_psql_preserves_first_and_last_rows(self):
+        """First and last data rows must survive compression."""
+        lines = [
+            " id | name",
+            "----+------",
+        ]
+        for i in range(50):
+            lines.append(f" {i:2d} | user_{i}")
+        lines.append("(50 rows)")
+        output = "\n".join(lines)
+        compressed, _, was_compressed = self.engine.compress("psql", output)
+        assert was_compressed
+        assert "user_0" in compressed
+        assert "user_49" in compressed
+
+
+class TestCloudCliPrecision:
+    def setup_method(self):
+        self.engine = CompressionEngine()
+
+    def test_aws_preserves_instance_ids_and_state(self):
+        """Instance IDs and state must survive JSON compression."""
+        import json
+
+        data = {
+            "Reservations": [
+                {
+                    "Instances": [
+                        {
+                            "InstanceId": "i-0abc123def456789a",
+                            "State": {"Name": "running"},
+                            "Tags": [{"Key": "Name", "Value": "prod-web-1"}],
+                            "SecurityGroups": [
+                                {"GroupId": f"sg-{j:08d}", "GroupName": f"web-sg-{j}"}
+                                for j in range(10)
+                            ],
+                        }
+                    ]
+                }
+            ]
+        }
+        output = json.dumps(data, indent=2)
+        compressed, _, _ = self.engine.compress("aws ec2 describe-instances", output)
+        assert "i-0abc123def456789a" in compressed
+        assert "running" in compressed
+        assert "prod-web-1" in compressed
+
+
 class TestGenericPrecision:
     def setup_method(self):
         self.engine = CompressionEngine()
