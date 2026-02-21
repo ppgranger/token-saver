@@ -169,9 +169,7 @@ class GhProcessor(Processor):
                 leading_buffer = []
                 trailing_remaining = 0
                 if hunk_truncated:
-                    result.append(
-                        f"  ... (truncated after {max_hunk} lines)"
-                    )
+                    result.append(f"  ... (truncated after {max_hunk} lines)")
                 result.append(line)
                 hunk_line_count = 0
                 hunk_truncated = False
@@ -181,9 +179,7 @@ class GhProcessor(Processor):
                 leading_buffer = []
                 trailing_remaining = 0
                 if hunk_truncated:
-                    result.append(
-                        f"  ... (truncated after {max_hunk} lines)"
-                    )
+                    result.append(f"  ... (truncated after {max_hunk} lines)")
                 result.append(line)
                 hunk_line_count = 0
                 hunk_truncated = False
@@ -231,9 +227,7 @@ class GhProcessor(Processor):
             if re.search(r"\bpass\b", stripped, re.I) or "\u2713" in stripped:
                 passed += 1
             elif (
-                re.search(r"\bfail\b", stripped, re.I)
-                or "\u2717" in stripped
-                or "\xd7" in stripped
+                re.search(r"\bfail\b", stripped, re.I) or "\u2717" in stripped or "\xd7" in stripped
             ):
                 failed.append(stripped)
             elif _PENDING_RE.search(stripped) or "\u25cb" in stripped:
