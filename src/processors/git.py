@@ -61,6 +61,8 @@ class GitProcessor(Processor):
             return self._process_reflog(output)
         if subcmd == "blame":
             return self._process_blame(output)
+        if subcmd == "remote":
+            return self._process_remote(output)
         if subcmd in ("cherry-pick", "rebase", "merge"):
             return self._process_transfer(output)
         return output
@@ -109,6 +111,8 @@ class GitProcessor(Processor):
                 code, filepath = "R", stripped.split(":", 1)[1].strip()
             elif stripped.startswith("copied:"):
                 code, filepath = "C", stripped.split(":", 1)[1].strip()
+            elif stripped.startswith("typechange:"):
+                code, filepath = "T", stripped.split(":", 1)[1].strip()
             elif stripped.startswith("both modified:"):
                 code, filepath = "UU", stripped.split(":", 1)[1].strip()
             elif stripped.startswith("both added:"):
@@ -425,6 +429,25 @@ class GitProcessor(Processor):
         if len(lines) <= max_entries:
             return output
         return "\n".join(lines[:max_entries]) + f"\n... ({len(lines) - max_entries} more entries)"
+
+    def _process_remote(self, output: str) -> str:
+        """Compress git remote -v: deduplicate fetch/push lines."""
+        lines = output.strip().splitlines()
+        if len(lines) <= 10:
+            return output
+        seen = set()
+        result = []
+        for line in lines:
+            stripped = line.strip()
+            # git remote -v shows "name\turl (fetch)" and "name\turl (push)"
+            # Deduplicate by keeping only the first occurrence per name+url
+            key = re.sub(r"\s+\((fetch|push)\)\s*$", "", stripped)
+            if key not in seen:
+                seen.add(key)
+                result.append(stripped)
+        if len(result) < len(lines):
+            result.append(f"({len(lines)} total lines, fetch/push deduplicated)")
+        return "\n".join(result)
 
     def _process_blame(self, output: str) -> str:
         """Compress git blame: group by author, show line counts."""

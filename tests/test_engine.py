@@ -200,9 +200,9 @@ class TestProcessorRegistry:
     """Tests for auto-discovery and the processor registry."""
 
     def test_discover_processors_finds_all(self):
-        """Auto-discovery should find all 15 processors."""
+        """Auto-discovery should find all 18 processors."""
         processors = discover_processors()
-        assert len(processors) == 15
+        assert len(processors) == 18
 
     def test_discover_processors_sorted_by_priority(self):
         """Processors must be returned in ascending priority order."""
@@ -244,6 +244,9 @@ class TestProcessorRegistry:
         assert name_to_priority["env"] == 34
         assert name_to_priority["search"] == 35
         assert name_to_priority["system_info"] == 36
+        assert name_to_priority["gh"] == 37
+        assert name_to_priority["db_query"] == 38
+        assert name_to_priority["cloud_cli"] == 39
         assert name_to_priority["file_listing"] == 50
         assert name_to_priority["file_content"] == 51
         assert name_to_priority["generic"] == 999
@@ -357,6 +360,19 @@ class TestProcessorRegistry:
             "pip freeze",
             "npm ls",
             "conda list",
+            # GitHub CLI
+            "gh pr list",
+            "gh issue list",
+            "gh run view 12345",
+            "gh pr checks",
+            # Database
+            "psql -c 'SELECT 1'",
+            "mysql -e 'SHOW TABLES'",
+            "sqlite3 test.db",
+            # Cloud CLI
+            "aws ec2 describe-instances",
+            "gcloud compute instances list",
+            "az vm list",
         ]
 
         for cmd in test_commands:

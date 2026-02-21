@@ -69,7 +69,7 @@ _SENSITIVE_PATTERNS = re.compile(
 class EnvProcessor(Processor):
     priority = 34
     hook_patterns = [
-        r"^(env|printenv)\s*$",
+        r"^(env|printenv|set)\s*$",
     ]
 
     @property
