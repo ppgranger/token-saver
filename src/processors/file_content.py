@@ -149,7 +149,7 @@ class FileContentProcessor(Processor):
         return "file_content"
 
     def can_handle(self, command: str) -> bool:
-        return bool(re.match(r".*\b(cat|head|tail|less|more|bat)\b", command))
+        return bool(re.search(r"\b(cat|head|tail|less|more|bat)\b", command))
 
     def process(self, command: str, output: str) -> str:
         if not output or not output.strip():

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3.12 -m pytest:*)",
+      "Bash(python3.11 -m pytest:*)",
+      "Bash(python3.13 -m pytest:*)",
+      "Bash(pip3 install:*)",
+      "Bash(python3 -m pytest:*)",
+      "Bash(python3:*)"
+    ]
+  }
+}

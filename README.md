@@ -23,11 +23,12 @@ the model, preserving 100% of useful information.
 ```
 CLI command  -->  Specialized processor  -->  Compressed output
                         |
-                  15 processors
+                  18 processors
                   (git, test, package_list,
                    build, lint, network,
                    docker, kubectl, terraform,
                    env, search, system_info,
+                   gh, db_query, cloud_cli,
                    file_listing, file_content,
                    generic)
 ```
@@ -78,7 +79,7 @@ Gemini CLI allows direct output replacement through the deny/reason mechanism.
 - Compression is only applied if the gain exceeds 10%
 - All errors, stack traces, and actionable information are **fully preserved**
 - Only "noise" is removed: progress bars, passing tests, installation logs, ANSI codes, platform lines
-- 336 unit tests including precision-specific tests that verify every critical piece of data survives compression
+- 372 unit tests including precision-specific tests that verify every critical piece of data survives compression
 
 ## Installation
 
@@ -158,9 +159,12 @@ processor is in [`docs/processors/`](docs/processors/).
 | 10 | **Environment** | 34 | env, printenv (with secret redaction) | [env.md](docs/processors/env.md) |
 | 11 | **Search** | 35 | grep -r, rg, ag, fd, fdfind | [search.md](docs/processors/search.md) |
 | 12 | **System Info** | 36 | du, wc, df | [system_info.md](docs/processors/system_info.md) |
-| 13 | **File Listing** | 50 | ls, find, tree, exa, eza | [file_listing.md](docs/processors/file_listing.md) |
-| 14 | **File Content** | 51 | cat, head, tail, bat, less, more (content-aware: code, config, log, CSV) | [file_content.md](docs/processors/file_content.md) |
-| 15 | **Generic** | 999 | Any command (fallback: ANSI strip, dedup, truncation) | [generic.md](docs/processors/generic.md) |
+| 13 | **GitHub CLI** | 37 | gh pr/issue/run list/view/diff/checks/status | [gh.md](docs/processors/gh.md) |
+| 14 | **Database Query** | 38 | psql, mysql, sqlite3, pgcli, mycli, litecli | [db_query.md](docs/processors/db_query.md) |
+| 15 | **Cloud CLI** | 39 | aws, gcloud, az (JSON/table/text output compression) | [cloud_cli.md](docs/processors/cloud_cli.md) |
+| 16 | **File Listing** | 50 | ls, find, tree, exa, eza | [file_listing.md](docs/processors/file_listing.md) |
+| 17 | **File Content** | 51 | cat, head, tail, bat, less, more (content-aware: code, config, log, CSV) | [file_content.md](docs/processors/file_content.md) |
+| 18 | **Generic** | 999 | Any command (fallback: ANSI strip, dedup, truncation) | [generic.md](docs/processors/generic.md) |
 
 ## Configuration
 
@@ -395,7 +399,7 @@ token-saver/
 python3 -m pytest tests/ -v
 ```
 
-336 tests covering:
+372 tests covering:
 
 - **test_engine.py** (28 tests): compression thresholds, processor priority, ANSI cleanup, generic fallback, hook pattern coverage for 73 commands
 - **test_processors.py** (165 tests): each processor with nominal and edge cases, all new subcommands (blame, inspect, stats, compose, apply/delete, init/output/state, fd, exa, httpie, dotnet/swift/mix test, shellcheck/hadolint/biome, traceback truncation)
