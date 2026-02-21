@@ -2261,6 +2261,7 @@ class TestCloudCliProcessor:
 
     def test_json_compressed(self):
         import json
+
         data = {
             "Reservations": [
                 {
@@ -2300,10 +2301,11 @@ class TestCloudCliProcessor:
 
     def test_preserves_errors(self):
         import json
+
         data = {
             "error": {
                 "code": "UnauthorizedAccess",
-                "message": "User is not authorized to perform this operation"
+                "message": "User is not authorized to perform this operation",
             }
         }
         output = json.dumps(data, indent=2)
@@ -2313,19 +2315,12 @@ class TestCloudCliProcessor:
 
     def test_preserves_state_and_id_fields(self):
         import json
+
         data = {
             "InstanceId": "i-abc123def456",
             "State": {"Name": "stopped", "Code": 80},
             "arn": "arn:aws:ec2:us-east-1:123456789:instance/i-abc123def456",
-            "VeryDeepField": {
-                "Level1": {
-                    "Level2": {
-                        "Level3": {
-                            "Level4": {"data": "deep value"}
-                        }
-                    }
-                }
-            }
+            "VeryDeepField": {"Level1": {"Level2": {"Level3": {"Level4": {"data": "deep value"}}}}},
         }
         output = json.dumps(data, indent=2)
         result = self.p.process("aws ec2 describe-instances", output)
@@ -2398,12 +2393,14 @@ class TestGitTypechange:
         self.p = GitProcessor()
 
     def test_status_typechange(self):
-        output = "\n".join([
-            "On branch main",
-            "Changes not staged for commit:",
-            "  typechange:   src/link.py",
-            "  modified:     src/app.py",
-        ])
+        output = "\n".join(
+            [
+                "On branch main",
+                "Changes not staged for commit:",
+                "  typechange:   src/link.py",
+                "  modified:     src/app.py",
+            ]
+        )
         result = self.p.process("git status", output)
         assert "link.py" in result
         assert "T" in result

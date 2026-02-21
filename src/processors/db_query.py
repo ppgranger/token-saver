@@ -97,10 +97,7 @@ class DbQueryProcessor(Processor):
 
         data_lines = lines[header_end:data_end]
         # Filter out separator lines from data
-        data_lines = [
-            row for row in data_lines
-            if not re.match(r"^[-─┼+]+$", row.strip())
-        ]
+        data_lines = [row for row in data_lines if not re.match(r"^[-─┼+]+$", row.strip())]
 
         max_rows = config.get("db_max_rows") if config.get("db_max_rows") else 20
         head_rows = max_rows // 2 + max_rows % 2

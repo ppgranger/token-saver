@@ -684,6 +684,7 @@ class TestCloudCliPrecision:
     def test_aws_preserves_instance_ids_and_state(self):
         """Instance IDs and state must survive JSON compression."""
         import json
+
         data = {
             "Reservations": [
                 {
@@ -702,9 +703,7 @@ class TestCloudCliPrecision:
             ]
         }
         output = json.dumps(data, indent=2)
-        compressed, _, _ = self.engine.compress(
-            "aws ec2 describe-instances", output
-        )
+        compressed, _, _ = self.engine.compress("aws ec2 describe-instances", output)
         assert "i-0abc123def456789a" in compressed
         assert "running" in compressed
         assert "prod-web-1" in compressed
