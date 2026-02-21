@@ -5,9 +5,7 @@ import re
 
 from .base import Processor
 
-_CLOUD_CMD_RE = re.compile(
-    r"\b(aws|gcloud|az)\s+"
-)
+_CLOUD_CMD_RE = re.compile(r"\b(aws|gcloud|az)\s+")
 
 _IMPORTANT_KEY_RE = re.compile(
     r"(?i)(error|status|state|name|id|arn|message"
@@ -66,10 +64,7 @@ class CloudCliProcessor(Processor):
         orig_lines = output.count("\n")
         new_lines = result.count("\n")
         if orig_lines > new_lines + 10:
-            result += (
-                f"\n\n({orig_lines + 1} lines compressed"
-                f" to {new_lines + 1})"
-            )
+            result += f"\n\n({orig_lines + 1} lines compressed to {new_lines + 1})"
 
         return result
 
@@ -89,13 +84,9 @@ class CloudCliProcessor(Processor):
             for k, v in value.items():
                 # Preserve important keys at full depth
                 if _IMPORTANT_KEY_RE.match(k):
-                    result[k] = self._compress_json_value(
-                        v, depth, max_depth + 1
-                    )
+                    result[k] = self._compress_json_value(v, depth, max_depth + 1)
                 else:
-                    result[k] = self._compress_json_value(
-                        v, depth + 1, max_depth
-                    )
+                    result[k] = self._compress_json_value(v, depth + 1, max_depth)
             return result
 
         if isinstance(value, list):
@@ -103,14 +94,8 @@ class CloudCliProcessor(Processor):
                 return value
             # Don't increment depth for list traversal
             if len(value) <= 5:
-                return [
-                    self._compress_json_value(item, depth, max_depth)
-                    for item in value
-                ]
-            compressed = [
-                self._compress_json_value(item, depth, max_depth)
-                for item in value[:3]
-            ]
+                return [self._compress_json_value(item, depth, max_depth) for item in value]
+            compressed = [self._compress_json_value(item, depth, max_depth) for item in value[:3]]
             compressed.append(f"... ({len(value) - 3} more items)")
             return compressed
 
@@ -144,8 +129,7 @@ class CloudCliProcessor(Processor):
 
         sep_re = re.compile(r"^[+\-|─┼]+$")
         data_lines = [
-            row for row in lines[header_end:]
-            if not sep_re.match(row.strip()) and row.strip()
+            row for row in lines[header_end:] if not sep_re.match(row.strip()) and row.strip()
         ]
 
         if len(data_lines) <= 20:
