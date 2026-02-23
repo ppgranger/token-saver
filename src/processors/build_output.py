@@ -14,6 +14,7 @@ class BuildOutputProcessor(Processor):
         r"^(tsc|webpack|vite(\s+build)?|esbuild|rollup|next\s+build|nuxt\s+build)\b",
         r"^(turbo\s+run|turbo\s+build|nx\s+(run|build)|bazel\s+build|sbt\s|mix\s+compile)\b",
         r"^docker\s+(build|compose\s+build)\b",
+        r"^bun\s+(install|build|run)\b",
     ]
 
     @property
@@ -29,18 +30,24 @@ class BuildOutputProcessor(Processor):
             return False
         return bool(
             re.search(
-                r"\b(npm\s+(run|install|ci|build|audit)|yarn\s+(install|build|add|audit)|pnpm\s+(install|build|add|audit)|"
+                r"\b(npm\s+(run|install|ci|build|audit)|yarn\s+(run|install|build|add|audit)|pnpm\s+(run|install|build|add|audit)|"
                 r"cargo\s+(build|check)|make\b|cmake\b|gradle\b|mvn\b|ant\b|"
                 r"pip3?\s+install|poetry\s+(install|update)|uv\s+(pip|sync)|"
                 r"tsc\b|webpack\b|vite(\s+build)?|esbuild\b|rollup\b|next\s+build|nuxt\s+build|"
                 r"docker\s+(build|compose\s+build)|"
-                r"turbo\s+(run|build)|nx\s+(run|build)|bazel\s+build|sbt\b|mix\s+compile)\b",
+                r"turbo\s+(run|build)|nx\s+(run|build)|bazel\s+build|sbt\b|mix\s+compile|"
+                r"bun\s+(install|build|run))\b",
                 command,
             )
         )
 
     def process(self, command: str, output: str) -> str:
         if not output or not output.strip():
+            return output
+
+        # Piped output may be partial — skip aggressive summarization to
+        # avoid claiming "Build succeeded" when errors were piped away.
+        if "|" in command:
             return output
 
         if re.search(r"\b(npm|yarn|pnpm)\s+audit\b", command):
@@ -117,6 +124,7 @@ class BuildOutputProcessor(Processor):
     def _summarize_success(self, lines: list[str]) -> str:
         result = []
         warning_count = 0
+        warning_samples: list[str] = []
         output_lines = []
 
         for line in lines:
@@ -127,6 +135,8 @@ class BuildOutputProcessor(Processor):
 
             if re.search(r"\bwarn(ing)?\b", stripped, re.IGNORECASE):
                 warning_count += 1
+                if len(warning_samples) < 5:
+                    warning_samples.append(stripped)
                 continue
 
             # Keep meaningful output lines
@@ -159,6 +169,9 @@ class BuildOutputProcessor(Processor):
             summary += f" ({warning_count} warnings)"
 
         result.append(summary)
+        if warning_samples:
+            for sample in warning_samples:
+                result.append(f"  {sample}")
         # Keep last few meaningful lines (often contain size/timing info)
         if output_lines:
             result.extend(output_lines[-3:])
@@ -280,7 +293,7 @@ class BuildOutputProcessor(Processor):
             r"^\s*\d+(\.\d+)?\s*%",
             r"^\s*(⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|⣾|⣽|⣻|⢿|⡿|⣟|⣯|⣷)",
             r"^\s*\[\d+/\d+\]",  # [1/5] progress indicators
-            r"^\s*(Compiling|Compiling|Updating|Preparing)\s+\S+",  # cargo
+            r"^\s*(Compiling|Updating|Preparing)\s+\S+",  # cargo
             r"^\s*Already up to date",
             r"^\s*Using\s+(cached|version)\b",
             r"^\s*Collecting\s+\S+",  # pip

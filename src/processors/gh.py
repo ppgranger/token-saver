@@ -1,13 +1,16 @@
 """GitHub CLI output processor: gh pr, gh issue, gh run, gh repo."""
 
+import json
 import re
 
 from .. import config
 from .base import Processor
+from .utils import compress_diff
 
 _GH_CMD_RE = re.compile(
-    r"\bgh\s+(pr|issue|run|repo|release|workflow)\s+"
-    r"(list|view|status|diff|checks|ls|create|close|merge)\b"
+    r"\bgh\s+(?:(pr|issue|run|repo|release|workflow)\s+"
+    r"(list|view|status|diff|checks|ls|create|close|merge)"
+    r"|api\s+\S+)\b"
 )
 
 _VIEW_META_RE = re.compile(
@@ -28,6 +31,7 @@ class GhProcessor(Processor):
     priority = 37
     hook_patterns = [
         r"^gh\s+(pr|issue|run|repo|release|workflow)\s+(list|view|status|diff|checks|ls)\b",
+        r"^gh\s+api\s+\S+",
     ]
 
     @property
@@ -38,8 +42,13 @@ class GhProcessor(Processor):
         return bool(_GH_CMD_RE.search(command))
 
     def _get_subcmd(self, command: str) -> tuple[str, str] | None:
+        # Detect gh api first
+        if re.search(r"\bgh\s+api\s+", command):
+            return ("api", "api")
         m = _GH_CMD_RE.search(command)
-        return (m.group(1), m.group(2)) if m else None
+        if m and m.group(1):
+            return (m.group(1), m.group(2))
+        return None
 
     def process(self, command: str, output: str) -> str:
         if not output or not output.strip():
@@ -51,6 +60,8 @@ class GhProcessor(Processor):
 
         resource, action = subcmd
 
+        if resource == "api":
+            return self._process_api(output)
         if action == "list":
             return self._process_list(output, resource)
         if action == "view":
@@ -151,63 +162,63 @@ class GhProcessor(Processor):
         return "\n".join(result) if result else output
 
     def _process_diff(self, output: str) -> str:
-        """Compress gh pr diff: reuse git diff compression logic."""
+        """Compress gh pr diff: delegates to shared diff utility."""
         lines = output.splitlines()
         if len(lines) <= 50:
             return output
 
         max_hunk = config.get("max_diff_hunk_lines")
         max_context = config.get("max_diff_context_lines")
-        result = []
-        hunk_line_count = 0
-        hunk_truncated = False
-        leading_buffer = []
-        trailing_remaining = 0
-
-        for line in lines:
-            if line.startswith("diff --git"):
-                leading_buffer = []
-                trailing_remaining = 0
-                if hunk_truncated:
-                    result.append(f"  ... (truncated after {max_hunk} lines)")
-                result.append(line)
-                hunk_line_count = 0
-                hunk_truncated = False
-            elif line.startswith(("index ", "---", "+++")):
-                continue
-            elif line.startswith("@@"):
-                leading_buffer = []
-                trailing_remaining = 0
-                if hunk_truncated:
-                    result.append(f"  ... (truncated after {max_hunk} lines)")
-                result.append(line)
-                hunk_line_count = 0
-                hunk_truncated = False
-            elif line.startswith(("+", "-")):
-                hunk_line_count += 1
-                if hunk_line_count <= max_hunk:
-                    if leading_buffer:
-                        result.extend(leading_buffer[-max_context:])
-                        leading_buffer = []
-                    result.append(line)
-                    trailing_remaining = max_context
-                elif not hunk_truncated:
-                    hunk_truncated = True
-            elif line.startswith(" "):
-                hunk_line_count += 1
-                if hunk_line_count <= max_hunk:
-                    if trailing_remaining > 0:
-                        result.append(line)
-                        trailing_remaining -= 1
-                    else:
-                        leading_buffer.append(line)
-                elif not hunk_truncated:
-                    hunk_truncated = True
-
-        if hunk_truncated:
-            result.append(f"  ... (truncated after {max_hunk} lines)")
-
+        result = compress_diff(lines, max_hunk, max_context)
         return "\n".join(result)
+
+    def _process_api(self, output: str) -> str:
+        """Compress gh api output: JSON compression."""
+        stripped = output.strip()
+        if not stripped.startswith(("{", "[")):
+            return output
+
+        try:
+            data = json.loads(stripped)
+        except (json.JSONDecodeError, ValueError):
+            return output
+
+        if len(stripped) < 500:
+            return output
+
+        compressed = self._summarize_json(data, depth=0, max_depth=3)
+        orig_lines = stripped.count("\n") + 1
+        new_lines = compressed.count("\n") + 1
+        result = compressed
+        if orig_lines > new_lines + 10:
+            result += f"\n\n({orig_lines} lines compressed to {new_lines})"
+        return result
+
+    def _summarize_json(self, val, depth: int, max_depth: int) -> str:
+        """Recursively summarize a JSON value."""
+        indent = "  " * depth
+        if isinstance(val, dict):
+            if depth >= max_depth:
+                return f"{{{len(val)} keys}}"
+            items = []
+            for k, v in val.items():
+                summarized = self._summarize_json(v, depth + 1, max_depth)
+                items.append(f'{indent}  "{k}": {summarized}')
+            return "{\n" + ",\n".join(items) + f"\n{indent}}}"
+        elif isinstance(val, list):
+            if len(val) == 0:
+                return "[]"
+            if len(val) <= 3:
+                inner = [self._summarize_json(v, depth + 1, max_depth) for v in val]
+                return "[" + ", ".join(inner) + "]"
+            first = self._summarize_json(val[0], depth + 1, max_depth)
+            return f"[{first}, ... ({len(val)} items total)]"
+        elif isinstance(val, str):
+            if len(val) > 80:
+                return f'"{val[:60]}..." ({len(val)} chars)'
+            return json.dumps(val)
+        else:
+            return json.dumps(val)
 
     def _process_checks(self, output: str) -> str:
         """Compress gh pr checks: collapse passing checks."""

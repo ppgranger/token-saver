@@ -203,44 +203,21 @@ class NetworkProcessor(Processor):
         lines = output.splitlines()
         result = []
 
+        _useful_re = re.compile(
+            r"^(Length:|Saving to:|Location:|HTTP request sent|--\d{4})"
+            r"|^\d{3}\s"
+            r"|\b(saved|ERROR|error|failed|refused|not found)\b",
+            re.I,
+        )
+
         for line in lines:
             stripped = line.strip()
+            if not stripped:
+                continue
+            if _useful_re.search(stripped):
+                result.append(stripped)
 
-            # DNS resolution
-            if re.match(r"^Resolving\s+", stripped):
-                continue
-            # Connection info
-            if re.match(r"^Connecting to\s+", stripped):
-                continue
-            # Progress bars
-            if re.search(r"\d+%\s*\[=*>?\s*\]", stripped):
-                continue
-            if re.match(r"^\s*\d+K\s+", stripped) and re.search(r"\.\.\.", stripped):
-                continue
-            # Length info (keep)
-            if re.match(r"^Length:", stripped):
-                result.append(stripped)
-                continue
-            # Saving to (keep)
-            if re.match(r"^Saving to:", stripped):
-                result.append(stripped)
-                continue
-            # Final status (keep)
-            if re.search(r"saved|ERROR|error|failed|refused|not found", stripped, re.I):
-                result.append(stripped)
-                continue
-            # HTTP response
-            if re.match(r"^HTTP request sent", stripped) or re.search(r"^\d{3}\s", stripped):
-                result.append(stripped)
-                continue
-            # Redirect
-            if re.match(r"^Location:", stripped):
-                result.append(stripped)
-                continue
-
-            result.append(line)
-
-        return "\n".join(result)
+        return "\n".join(result) if result else output
 
     def _process_httpie(self, output: str) -> str:
         """Compress httpie output: keep status, important headers, compress body."""

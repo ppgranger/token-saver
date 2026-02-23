@@ -5,6 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from src.chain_utils import extract_primary_command
 from src.processors.build_output import BuildOutputProcessor
 from src.processors.cloud_cli import CloudCliProcessor
 from src.processors.db_query import DbQueryProcessor
@@ -1009,20 +1010,24 @@ class TestFileContentProcessor:
     def test_empty_output(self):
         assert self.p.process("cat file.py", "") == ""
 
-    def test_short_file_unchanged(self):
-        output = "\n".join(f"line {i}" for i in range(100))
+    def test_source_code_never_compressed(self):
+        """Source code files (.py, .js, .ts, etc.) pass through unchanged."""
+        output = "\n".join(f"line {i}: content here" for i in range(500))
+        result = self.p.process("cat big_file.py", output)
+        assert result == output  # NEVER compress source code
+
+    def test_source_code_short_unchanged(self):
+        output = "\n".join(f"line {i}" for i in range(80))
         result = self.p.process("cat file.py", output)
         assert result == output
 
-    def test_long_file_truncated(self):
-        output = "\n".join(f"line {i}: content here" for i in range(500))
-        result = self.p.process("cat big_file.py", output)
-        assert "omitted" in result
-        assert len(result) < len(output)
-        # Head is preserved (code strategy keeps first N lines)
-        assert "line 0:" in result
+    def test_sensitive_config_never_compressed(self):
+        """Sensitive config files (.env, .ini, .cfg, .conf) pass through unchanged."""
+        output = "\n".join(f"KEY_{i}=value_{i}" for i in range(500))
+        result = self.p.process("cat .env", output)
+        assert result == output
 
-    def test_long_file_fallback_truncated(self):
+    def test_long_unknown_file_truncated(self):
         """Unknown file type falls back to head/tail truncation."""
         output = "\n".join(f"line {i}: content here" for i in range(500))
         result = self.p.process("cat big_file.xyz", output)
@@ -1032,9 +1037,135 @@ class TestFileContentProcessor:
         assert "line 499:" in result
 
     def test_exact_threshold_not_truncated(self):
-        output = "\n".join(f"line {i}" for i in range(300))
-        result = self.p.process("cat file.py", output)
+        from src import config
+
+        threshold = config.get("max_file_lines")
+        output = "\n".join(f"line {i}" for i in range(threshold))
+        result = self.p.process("cat file.xyz", output)
         assert result == output
+
+    def test_json_compression_preserves_keys(self):
+        """JSON files should be compressed but preserve all top-level keys."""
+        import json
+
+        data = {
+            "name": "my-project",
+            "version": "1.0.0",
+            "description": "A test project",
+            "dependencies": {
+                f"pkg-{i}": {
+                    "version": f"^{i}.0.0",
+                    "resolved": f"https://registry.npmjs.org/pkg-{i}/-/pkg-{i}-{i}.0.0.tgz",
+                    "integrity": f"sha512-{'a' * 44}",
+                    "requires": {f"sub-dep-{j}": f"^{j}.0" for j in range(3)},
+                }
+                for i in range(30)
+            },
+        }
+        output = json.dumps(data, indent=2)
+        result = self.p.process("cat package.json", output)
+        assert len(result) < len(output)
+        assert '"name"' in result
+        assert '"version"' in result
+        assert '"dependencies"' in result
+        assert '"description"' in result
+
+    def test_npm_lock_file_compression(self):
+        """package-lock.json should extract dependency names + versions."""
+        import json
+
+        data = {
+            "name": "my-project",
+            "lockfileVersion": 3,
+            "packages": {
+                "": {"name": "my-project", "version": "1.0.0"},
+                "node_modules/lodash": {"version": "4.17.21"},
+                "node_modules/express": {"version": "4.18.2"},
+                "node_modules/react": {"version": "18.2.0"},
+            },
+        }
+        output = json.dumps(data, indent=2)
+        # Pad to exceed threshold
+        output += "\n" * 200
+        result = self.p.process("cat package-lock.json", output)
+        assert "lodash" in result
+        assert "express" in result
+        assert "react" in result
+        assert "4.17.21" in result
+        assert "3 dependencies" in result
+
+    def test_poetry_lock_compression(self):
+        """poetry.lock should extract package names + versions."""
+        lines = []
+        for i in range(20):
+            lines.extend(
+                [
+                    "[[package]]",
+                    f'name = "package-{i}"',
+                    f'version = "{i}.0.0"',
+                    f'description = "Description for package {i}"',
+                    "",
+                ]
+            )
+        # Pad to exceed threshold
+        lines.extend([""] * 100)
+        output = "\n".join(lines)
+        result = self.p.process("cat poetry.lock", output)
+        assert "package-0" in result
+        assert "0.0.0" in result
+        assert "20 packages" in result
+
+    def test_yaml_compression_preserves_keys(self):
+        """YAML files should preserve top-level and second-level keys."""
+        lines = ["apiVersion: v1", "kind: Deployment", "metadata:", "  name: my-app"]
+        for i in range(150):
+            lines.append(f"    label_{i}: value_{i}")
+        output = "\n".join(lines)
+        result = self.p.process("cat config.yaml", output)
+        assert len(result) < len(output)
+        assert "apiVersion: v1" in result
+        assert "kind: Deployment" in result
+        assert "name: my-app" in result
+
+    def test_toml_compression_preserves_sections(self):
+        """TOML files should preserve section headers and top-level keys."""
+        lines = [
+            "[tool.poetry]",
+            'name = "my-project"',
+            'version = "1.0.0"',
+            "",
+            "[tool.poetry.dependencies]",
+        ]
+        for i in range(150):
+            lines.append(f'  package-{i} = "^{i}.0.0"')
+        output = "\n".join(lines)
+        result = self.p.process("cat pyproject.toml", output)
+        assert len(result) < len(output)
+        assert "[tool.poetry]" in result
+        assert "[tool.poetry.dependencies]" in result
+        assert 'name = "my-project"' in result
+
+    def test_log_file_preserves_errors(self):
+        """Log files should preserve error lines and context."""
+        lines = []
+        for i in range(200):
+            if i == 100:
+                lines.append(f"2025-01-01 12:00:{i:02d} ERROR Database connection lost")
+            else:
+                lines.append(f"2025-01-01 12:00:{i:02d} INFO Processing request {i}")
+        output = "\n".join(lines)
+        result = self.p.process("cat app.log", output)
+        assert len(result) < len(output)
+        assert "Database connection lost" in result
+
+    def test_unknown_gets_generic_truncation(self):
+        """Unknown file types get conservative head/tail truncation, not passthrough."""
+        output = "\n".join(f"data line {i}" for i in range(500))
+        result = self.p.process("cat unknown_data.xyz", output)
+        assert "truncated" in result
+        assert len(result) < len(output)
+        assert "data line 0" in result
+        assert "data line 499" in result
 
 
 class TestGenericProcessor:
@@ -2404,3 +2535,369 @@ class TestGitTypechange:
         result = self.p.process("git status", output)
         assert "link.py" in result
         assert "T" in result
+
+
+class TestGitStatusShortBranch:
+    """Test git status -sb branch header detection."""
+
+    def setup_method(self):
+        self.p = GitProcessor()
+
+    def test_status_sb_branch_header(self):
+        output = "\n".join(
+            [
+                "## main...origin/main",
+                " M src/app.py",
+                "?? new_file.txt",
+            ]
+        )
+        result = self.p.process("git status -sb", output)
+        assert "On branch main" in result
+        assert "app.py" in result
+        assert "new_file.txt" in result
+
+    def test_status_sb_branch_no_tracking(self):
+        output = "\n".join(
+            [
+                "## feature/foo",
+                " M src/app.py",
+            ]
+        )
+        result = self.p.process("git status -sb", output)
+        assert "On branch feature/foo" in result
+
+
+class TestBuildBunCanHandle:
+    """Test bun command handling in build processor."""
+
+    def setup_method(self):
+        self.p = BuildOutputProcessor()
+
+    def test_can_handle_bun_install(self):
+        assert self.p.can_handle("bun install")
+
+    def test_can_handle_bun_build(self):
+        assert self.p.can_handle("bun build")
+
+    def test_can_handle_bun_run(self):
+        assert self.p.can_handle("bun run build")
+
+
+class TestBuildWarningSamples:
+    """Test that build success shows warning samples."""
+
+    def setup_method(self):
+        self.p = BuildOutputProcessor()
+
+    def test_warning_samples_shown(self):
+        lines = [f"  WARNING: deprecated dep-{i}" for i in range(10)]
+        lines.append("Build done in 5s")
+        output = "\n".join(lines)
+        result = self.p.process("npm run build", output)
+        assert "10 warnings" in result
+        assert "deprecated dep-0" in result
+        assert "deprecated dep-4" in result
+
+    def test_warning_samples_capped_at_five(self):
+        lines = [f"  WARNING: issue-{i}" for i in range(20)]
+        lines.append("Build done in 5s")
+        output = "\n".join(lines)
+        result = self.p.process("npm run build", output)
+        assert "20 warnings" in result
+        assert "issue-0" in result
+        assert "issue-4" in result
+        # The 6th warning should not be a sample
+        assert "  WARNING: issue-5" not in result
+
+
+class TestBuildOutputPipeGuard:
+    """Test that piped build commands bypass aggressive summarization."""
+
+    def setup_method(self):
+        self.p = BuildOutputProcessor()
+
+    def test_piped_output_not_summarized(self):
+        """Piped build output must not be aggressively summarized."""
+        output = "\n".join(
+            [f"  Installing dep-{i}..." for i in range(20)] + ["Build completed successfully"]
+        )
+        result = self.p.process("npm run build | tail -10", output)
+        # With pipe, output should pass through unchanged
+        assert result == output
+
+    def test_unpiped_output_still_summarized(self):
+        """Non-piped build output should still be summarized normally."""
+        output = "\n".join(
+            [f"  Installing dep-{i}..." for i in range(20)] + ["Build completed successfully"]
+        )
+        result = self.p.process("npm run build", output)
+        assert "Build succeeded" in result
+
+
+class TestLintNewPatterns:
+    """Test new lint patterns: oxlint, deno lint, golangci-lint, rubocop."""
+
+    def setup_method(self):
+        self.p = LintOutputProcessor()
+
+    def test_can_handle_oxlint(self):
+        assert self.p.can_handle("oxlint src/")
+
+    def test_can_handle_deno_lint(self):
+        assert self.p.can_handle("deno lint")
+
+    def test_golangci_lint_parsing(self):
+        output = "\n".join(
+            [
+                "main.go:10:5: undeclared name: foo (typecheck)",
+                "main.go:20:1: exported function Bar should have comment (golint)",
+                "util.go:5:10: undeclared name: baz (typecheck)",
+            ]
+        )
+        result = self.p.process("golangci-lint run", output)
+        assert "typecheck" in result
+        assert "golint" in result
+
+    def test_rubocop_parsing(self):
+        output = "\n".join(
+            [
+                "app.rb:10:5: C: Style/StringLiterals: Prefer single quotes",
+                "app.rb:20:1: W: Lint/UselessAssignment: Useless assignment",
+                "lib.rb:5:3: C: Style/StringLiterals: Prefer single quotes",
+            ]
+        )
+        result = self.p.process("rubocop", output)
+        assert "Style/StringLiterals" in result
+        assert "Lint/UselessAssignment" in result
+
+
+class TestTerraformNewPatterns:
+    """Test terraform validate/fmt handling."""
+
+    def setup_method(self):
+        self.p = TerraformProcessor()
+
+    def test_can_handle_validate(self):
+        assert self.p.can_handle("terraform validate")
+
+    def test_can_handle_fmt(self):
+        assert self.p.can_handle("terraform fmt")
+
+    def test_can_handle_tofu_validate(self):
+        assert self.p.can_handle("tofu validate")
+
+
+class TestGhApiHandling:
+    """Test gh api command handling."""
+
+    def setup_method(self):
+        self.p = GhProcessor()
+
+    def test_can_handle_gh_api(self):
+        assert self.p.can_handle("gh api repos/owner/repo/pulls")
+
+    def test_gh_api_json_compression(self):
+        import json
+
+        data = {
+            "id": 1,
+            "title": "Test PR",
+            "body": "x" * 600,
+            "user": {"login": "dev", "id": 42},
+        }
+        output = json.dumps(data, indent=2)
+        result = self.p.process("gh api repos/owner/repo/pulls/1", output)
+        assert "Test PR" in result
+        assert "dev" in result
+
+    def test_gh_api_small_json_unchanged(self):
+        output = '{"id": 1, "name": "test"}'
+        result = self.p.process("gh api repos/owner/repo", output)
+        assert result == output
+
+
+class TestSearchExtensionless:
+    """Test grep grouping of extensionless files."""
+
+    def setup_method(self):
+        self.p = SearchProcessor()
+
+    def test_extensionless_file_grouped(self):
+        lines = []
+        for i in range(25):
+            lines.append(f"bin/mycommand:{i + 1}:pattern match line {i}")
+        output = "\n".join(lines)
+        result = self.p.process("grep -r pattern .", output)
+        assert "bin/mycommand" in result
+        assert "25 matches" in result
+
+
+class TestCloudCliImportantKeys:
+    """Test that cloud CLI preserves keys like InstanceId via .search()."""
+
+    def setup_method(self):
+        self.p = CloudCliProcessor()
+
+    def test_instance_id_preserved_at_depth(self):
+        import json
+
+        data = {
+            "Reservations": [
+                {
+                    "Instances": [
+                        {
+                            "InstanceId": "i-0abc123def456789a",
+                            "State": {"Name": "running"},
+                            "ResourceName": "my-server",
+                            "DeepNested": {
+                                "Level1": {
+                                    "Level2": {
+                                        "Level3": {
+                                            "Level4": {
+                                                "InstanceId": "i-deep",
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                        }
+                    ]
+                }
+            ]
+        }
+        output = json.dumps(data, indent=2)
+        result = self.p.process("aws ec2 describe-instances", output)
+        assert "i-0abc123def456789a" in result
+        assert "running" in result
+
+
+class TestDbQueryPsqlDetection:
+    """Test improved psql table detection requiring count('|') >= 2."""
+
+    def setup_method(self):
+        self.p = DbQueryProcessor()
+
+    def test_single_pipe_not_table(self):
+        lines = [
+            "some output | with pipe",
+            "another line",
+            "third line",
+        ]
+        assert not self.p._is_psql_table(lines)
+
+    def test_double_pipe_is_table(self):
+        lines = [
+            " id | name | email",
+            "----+------+------",
+            " 1  | a    | b",
+        ]
+        assert self.p._is_psql_table(lines)
+
+
+class TestGenericNumericThreshold:
+    """Test that generic processor uses 30% digit threshold."""
+
+    def setup_method(self):
+        self.p = GenericProcessor()
+
+    def test_tabular_data_26pct_not_collapsed(self):
+        # Line with ~26% digits should NOT be collapsed (below 30%)
+        # "user_123  active  2025-01-15" has 10 digits out of ~30 chars ≈ 33%
+        # Need a line that's between 25% and 30%
+        line = "id=12 name=JohnDoe status=active region=us-east"
+        # 2 digits out of ~48 chars ≈ 4%, well below threshold
+        assert not self.p._is_numeric_heavy(line)
+
+
+class TestChainedCommandProcessorRouting:
+    """Verify extract_primary_command returns the correct segment and
+    that the right processor handles it."""
+
+    def test_extract_last_compressible(self):
+        assert extract_primary_command("git add . && git push") == "git push"
+
+    def test_extract_skips_silent(self):
+        assert extract_primary_command("cd /project && npm install") == "npm install"
+        assert extract_primary_command("mkdir -p /tmp && ls -la") == "ls -la"
+
+    def test_extract_single_command(self):
+        assert extract_primary_command("git status") == "git status"
+
+    def test_extract_semicolon(self):
+        assert extract_primary_command("cd /tmp; git log --oneline") == "git log --oneline"
+
+    def test_extract_all_silent_returns_last(self):
+        assert extract_primary_command("cd /tmp && mkdir -p foo") == "mkdir -p foo"
+
+    def test_extract_mixed_chain(self):
+        assert extract_primary_command("cd /project && git add .; git push") == "git push"
+
+    def test_git_processor_handles_extracted(self):
+        p = GitProcessor()
+        primary = extract_primary_command("git add . && git push origin main")
+        assert primary == "git push origin main"
+        assert p.can_handle(primary)
+
+    def test_build_processor_handles_extracted(self):
+        p = BuildOutputProcessor()
+        primary = extract_primary_command("cd /project && npm install")
+        assert primary == "npm install"
+        assert p.can_handle(primary)
+
+    def test_file_listing_processor_handles_extracted(self):
+        p = FileListingProcessor()
+        primary = extract_primary_command("mkdir -p /tmp/test && ls -la /tmp/test")
+        assert primary == "ls -la /tmp/test"
+        assert p.can_handle(primary)
+
+    def test_extract_quoted_semicolon_not_split(self):
+        """Semicolons inside quotes should not split."""
+        assert extract_primary_command('grep -r "foo;bar" .') == 'grep -r "foo;bar" .'
+
+    def test_extract_quoted_ampersand_not_split(self):
+        """&& inside quotes should not split."""
+        cmd = 'git log --format="%H && %s"'
+        assert extract_primary_command(cmd) == cmd
+
+    def test_extract_three_segment_chain(self):
+        primary = extract_primary_command("cd /project && git add . && git push")
+        assert primary == "git push"
+
+    def test_extract_git_checkout_then_status(self):
+        """git checkout is silent, git status is compressible."""
+        primary = extract_primary_command("git checkout main && git status")
+        assert primary == "git status"
+
+    def test_extract_multi_silent_then_compressible(self):
+        primary = extract_primary_command("cd /project && git checkout main && git pull")
+        assert primary == "git pull"
+
+    def test_test_processor_handles_extracted(self):
+        p = TestOutputProcessor()
+        primary = extract_primary_command("cd /project && pytest tests/ -v")
+        assert primary == "pytest tests/ -v"
+        assert p.can_handle(primary)
+
+    def test_lint_processor_handles_extracted(self):
+        p = LintOutputProcessor()
+        primary = extract_primary_command("cd /project && ruff check .")
+        assert primary == "ruff check ."
+        assert p.can_handle(primary)
+
+    def test_docker_processor_handles_extracted(self):
+        p = DockerProcessor()
+        primary = extract_primary_command("cd /app && docker compose build")
+        assert primary == "docker compose build"
+        assert p.can_handle(primary)
+
+    def test_terraform_processor_handles_extracted(self):
+        p = TerraformProcessor()
+        primary = extract_primary_command("cd infra && terraform plan")
+        assert primary == "terraform plan"
+        assert p.can_handle(primary)
+
+    def test_kubectl_processor_handles_extracted(self):
+        p = KubectlProcessor()
+        primary = extract_primary_command("cd /deploy && kubectl get pods")
+        assert primary == "kubectl get pods"
+        assert p.can_handle(primary)

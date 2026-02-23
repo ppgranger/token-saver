@@ -18,8 +18,8 @@ class TestConfig:
             if key.startswith("TOKEN_SAVER_"):
                 monkeypatch.delenv(key)
         config.reload()
-        assert config.get("min_input_length") == 200
-        assert config.get("min_compression_ratio") == 0.10
+        assert config.get("min_input_length") == 1
+        assert config.get("min_compression_ratio") == 0.0
         assert config.get("wrap_timeout") == 300
         assert config.get("debug") is False
 
@@ -57,7 +57,7 @@ class TestConfig:
         os.environ["TOKEN_SAVER_MIN_INPUT_LENGTH"] = "not_a_number"  # noqa: S105
         config.reload()
         try:
-            assert config.get("min_input_length") == 200  # default
+            assert config.get("min_input_length") == 1  # default
         finally:
             del os.environ["TOKEN_SAVER_MIN_INPUT_LENGTH"]
             config.reload()

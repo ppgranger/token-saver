@@ -25,8 +25,9 @@ class TestCompressionEngine:
         assert compressed == ""
 
     def test_whitespace_only_output(self):
-        _compressed, _processor, was_compressed = self.engine.compress("git status", "   \n\n  ")
-        assert not was_compressed
+        compressed, _processor, _was_compressed = self.engine.compress("git status", "   \n\n  ")
+        # With aggressive settings, whitespace is stripped (compressed to empty)
+        assert compressed.strip() == ""
 
     def test_git_status_compressed(self):
         output = "\n".join(
@@ -117,14 +118,23 @@ class TestCompressionEngine:
         assert processor == "file_listing"
         assert "60 files found" in compressed
 
-    def test_cat_long_file_truncated(self):
+    def test_cat_source_code_never_compressed(self):
+        """Source code files pass through unchanged — model needs exact content."""
         lines = [f"line {i}: some code here" for i in range(500)]
         output = "\n".join(lines)
 
-        compressed, processor, was_compressed = self.engine.compress("cat big_file.py", output)
+        compressed, _processor, was_compressed = self.engine.compress("cat big_file.py", output)
+        assert not was_compressed
+        assert compressed == output
+
+    def test_cat_long_unknown_file_truncated(self):
+        lines = [f"line {i}: some data here" for i in range(500)]
+        output = "\n".join(lines)
+
+        compressed, processor, was_compressed = self.engine.compress("cat big_file.xyz", output)
         assert was_compressed
         assert processor == "file_content"
-        assert "omitted" in compressed or "truncated" in compressed
+        assert "truncated" in compressed
         assert len(compressed) < len(output)
 
     def test_min_compression_ratio(self):

@@ -5,14 +5,14 @@ import re
 from .base import Processor
 
 _TF_CMD_RE = re.compile(
-    r"\b(terraform|tofu)\s+(plan|apply|destroy|init|output|state\s+(?:list|show))\b"
+    r"\b(terraform|tofu)\s+(plan|apply|destroy|init|output|validate|fmt|state\s+(?:list|show))\b"
 )
 
 
 class TerraformProcessor(Processor):
     priority = 33
     hook_patterns = [
-        r"^(terraform|tofu)\s+(plan|apply|destroy|init|output|state\s+(list|show))\b",
+        r"^(terraform|tofu)\s+(plan|apply|destroy|init|output|validate|fmt|state\s+(list|show))\b",
     ]
 
     @property

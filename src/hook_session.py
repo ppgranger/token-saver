@@ -13,8 +13,18 @@ from src.tracker import SavingsTracker
 def main():
     message = None
 
+    # Read Claude Code's session_id from stdin JSON payload
+    cc_session = None
     try:
-        tracker = SavingsTracker()
+        raw = sys.stdin.read()
+        if raw.strip():
+            data = json.loads(raw)
+            cc_session = data.get("session_id")
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    try:
+        tracker = SavingsTracker(session_id=cc_session)
         message = tracker.format_stats_message()
         tracker.close()
     except Exception:  # noqa: S110
