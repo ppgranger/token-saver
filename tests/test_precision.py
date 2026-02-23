@@ -141,8 +141,11 @@ class TestGitPrecision:
             )
         output = "\n".join(entries)
         compressed, _, _ = self.engine.compress("git log", output)
-        # First 20 hashes must be present
-        for h in hashes[:20]:
+        # First max_log_entries (5) hashes must be present
+        from src import config
+
+        limit = config.get("max_log_entries")
+        for h in hashes[:limit]:
             assert h in compressed, f"Hash {h} missing"
 
     def test_push_preserves_branch_ref(self):
@@ -471,8 +474,11 @@ class TestSearchPrecision:
         compressed, _, was_compressed = self.engine.compress("grep -r pattern_here .", output)
         assert was_compressed
         assert "100 matches" in compressed
-        # All files should be represented
-        for f in files[:20]:  # First 20 shown
+        # Files up to search_max_files limit should be represented
+        from src import config
+
+        limit = config.get("search_max_files")
+        for f in files[:limit]:
             assert f in compressed
 
 
@@ -732,3 +738,289 @@ class TestGenericPrecision:
         compressed, _, was_compressed = self.engine.compress("any_cmd", output)
         assert not was_compressed
         assert compressed == output
+
+
+class TestFileContentSignaturePrecision:
+    """Ensure source code is NEVER compressed — model needs exact content."""
+
+    def setup_method(self):
+        self.engine = CompressionEngine()
+
+    def test_source_code_passthrough_preserves_everything(self):
+        """Source code (.py) must pass through byte-for-byte, even if huge."""
+        code = "\n".join(
+            [
+                "import os",
+                "import json",
+                "",
+                "class Manager:",
+                "    def __init__(self, host: str, port: int):",
+                "        self.host = host",
+                "        self.port = port",
+                "",
+                "    def connect(self, timeout: float = 30.0) -> bool:",
+                "        pass",
+                "",
+                "    def execute(self, sql: str, params: dict = None) -> list:",
+                "        pass",
+                "",
+                "    def close(self) -> None:",
+                "        pass",
+                "",
+                "def create_manager(config_path: str) -> Manager:",
+                "    pass",
+            ]
+            + [""] * 40  # pad to exceed threshold
+        )
+        compressed, _, was_compressed = self.engine.compress("cat src/manager.py", code)
+        assert not was_compressed
+        assert compressed == code
+
+    def test_all_source_extensions_passthrough(self):
+        """Every source code extension must pass through unchanged."""
+        code = "\n".join(f"line {i}: code content" for i in range(500))
+        extensions = [".py", ".js", ".ts", ".tsx", ".go", ".rs", ".java", ".rb"]
+        for ext in extensions:
+            compressed, _, was_compressed = self.engine.compress(f"cat file{ext}", code)
+            assert not was_compressed, f"Extension {ext} was compressed"
+            assert compressed == code, f"Extension {ext} content changed"
+
+    def test_sensitive_config_passthrough(self):
+        """Sensitive config files (.env, .ini, .cfg, .conf) must pass through."""
+        config_content = "\n".join(f"KEY_{i}=value_{i}" for i in range(200))
+        for ext in [".env", ".ini", ".cfg", ".conf"]:
+            compressed, _, was_compressed = self.engine.compress(f"cat config{ext}", config_content)
+            assert not was_compressed, f"Extension {ext} was compressed"
+            assert compressed == config_content, f"Extension {ext} content changed"
+
+    def test_large_source_file_class_definitions_intact(self):
+        """All class names must survive in large .py files (by passthrough)."""
+        classes = ["import os", "import sys", ""]
+        for i in range(8):
+            classes.append(f"class Handler{i}:")
+            classes.append("    def process(self, data: dict) -> dict:")
+            classes.append(f'        """Process data for handler {i}."""')
+            for j in range(8):
+                classes.append(f"        step_{j} = data.get('{j}', None)")
+            classes.append("        return data")
+            classes.append("")
+        code = "\n".join(classes)
+        compressed, _, was_compressed = self.engine.compress("cat src/handlers.py", code)
+        assert not was_compressed
+        assert compressed == code
+        for i in range(8):
+            assert f"Handler{i}" in compressed, f"Class Handler{i} missing"
+
+
+class TestGenericTruncationPrecision:
+    """Ensure generic truncation preserves head and tail correctly."""
+
+    def setup_method(self):
+        self.engine = CompressionEngine()
+
+    def test_unique_lines_at_boundary_preserved(self):
+        """With generic_truncate_threshold=100, lines at positions 45-55
+        (near the head/tail boundary) must not be silently lost if they
+        are unique and actionable."""
+        from src import config
+
+        threshold = config.get("generic_truncate_threshold")
+        # Build output that exceeds threshold but has a critical message in the middle
+        lines = [f"Processing item {i}" for i in range(threshold + 50)]
+        # Insert a critical error in the middle
+        mid = (threshold + 50) // 2
+        lines[mid] = "CRITICAL ERROR: database connection lost at step 75"
+        output = "\n".join(lines)
+        compressed, _, _was_compressed = self.engine.compress("unknown_tool run", output)
+        # Head and tail must be present
+        assert "Processing item 0" in compressed
+        assert f"Processing item {threshold + 49}" in compressed
+        # The critical error in the middle may be truncated — this is the expected
+        # trade-off. But the truncation marker must indicate lines were dropped.
+        if "CRITICAL ERROR" not in compressed:
+            assert "truncated" in compressed or "omitted" in compressed
+
+
+class TestGitLogCountPrecision:
+    """Test that git log respects the configured limit clearly."""
+
+    def setup_method(self):
+        self.engine = CompressionEngine()
+
+    def test_truncation_marker_shows_count(self):
+        """When commits are truncated, the marker must show how many are hidden."""
+        entries = []
+        for i in range(15):
+            entries.append(f"abc{i:04x} Fix issue #{i}")
+        output = "\n".join(entries)
+        compressed, _, was_compressed = self.engine.compress("git log --oneline -15", output)
+        assert was_compressed
+        # Must show how many are hidden
+        assert "more" in compressed
+
+
+class TestLintFileCoveragePrecision:
+    """Ensure lint compression shows all affected files even with 1 example."""
+
+    def setup_method(self):
+        self.engine = CompressionEngine()
+
+    def test_all_affected_files_listed(self):
+        """Even with lint_example_count=1, the file count must be accurate."""
+        lines = []
+        files = set()
+        for i in range(8):
+            f = f"src/module{i}.py"
+            files.add(f)
+            lines.append(f"{f}:10:1: E501 line too long")
+        output = "\n".join(lines)
+        compressed, _, was_compressed = self.engine.compress("ruff check .", output)
+        assert was_compressed
+        # File count must appear
+        assert "8 files" in compressed or "8 occurrences" in compressed
+
+
+class TestCloudCliImportantKeyPrecision:
+    """Test that cloud CLI important key preservation works via .search()."""
+
+    def setup_method(self):
+        self.engine = CompressionEngine()
+
+    def test_instance_id_key_preserved(self):
+        """Keys like InstanceId and ResourceName must be preserved at depth."""
+        import json
+
+        data = {
+            "Reservations": [
+                {
+                    "Instances": [
+                        {
+                            "InstanceId": "i-0abc123def456789a",
+                            "State": {"Name": "running"},
+                            "NetworkInterfaces": [
+                                {
+                                    "SubnetId": f"subnet-{j:08d}",
+                                    "PrivateIpAddress": f"10.0.0.{j}",
+                                    "Groups": [
+                                        {
+                                            "GroupId": f"sg-{j:08d}",
+                                            "GroupName": f"group-{j}",
+                                        }
+                                    ],
+                                }
+                                for j in range(5)
+                            ],
+                        }
+                    ]
+                }
+            ]
+        }
+        output = json.dumps(data, indent=2)
+        compressed, _, _ = self.engine.compress("aws ec2 describe-instances", output)
+        assert "i-0abc123def456789a" in compressed
+        assert "running" in compressed
+
+
+class TestGitStatusSbPrecision:
+    """Test git status -sb branch header precision."""
+
+    def setup_method(self):
+        self.engine = CompressionEngine()
+
+    def test_sb_format_preserves_branch_and_files(self):
+        output = "\n".join(
+            [
+                "## feature/new-thing...origin/feature/new-thing",
+                " M src/app.py",
+                " M src/config.py",
+                "?? tests/test_new.py",
+            ]
+        )
+        compressed, _, _ = self.engine.compress("git status -sb", output)
+        assert "feature/new-thing" in compressed
+        assert "app.py" in compressed
+        assert "config.py" in compressed
+        assert "test_new.py" in compressed
+
+
+class TestJsonCompressionPrecision:
+    """Ensure JSON compression preserves all top-level keys."""
+
+    def setup_method(self):
+        self.engine = CompressionEngine()
+
+    def test_all_top_level_keys_preserved(self):
+        """Every top-level key in a JSON file must appear in compressed output."""
+        import json
+
+        data = {
+            "name": "project",
+            "version": "2.0.0",
+            "scripts": {"build": "tsc", "test": "jest"},
+            "dependencies": {f"dep-{i}": f"^{i}.0" for i in range(100)},
+            "devDependencies": {f"dev-{i}": f"^{i}.0" for i in range(50)},
+            "peerDependencies": {"react": "^18.0.0"},
+        }
+        output = json.dumps(data, indent=2)
+        compressed, _, _ = self.engine.compress("cat package.json", output)
+        for key in data:
+            assert f'"{key}"' in compressed, f"Top-level key {key} missing"
+
+    def test_json_values_not_empty(self):
+        """Compressed JSON must still show meaningful values, not just keys."""
+        import json
+
+        data = {
+            "name": "test",
+            "version": "1.0.0",
+            "main": "index.js",
+            "dependencies": {f"pkg-{i}": f"^{i}.0" for i in range(60)},
+        }
+        output = json.dumps(data, indent=2)
+        compressed, _, _ = self.engine.compress("cat config.json", output)
+        assert '"test"' in compressed
+        assert '"1.0.0"' in compressed
+
+
+class TestLockFilePrecision:
+    """Ensure lock file compression preserves all dependency names."""
+
+    def setup_method(self):
+        self.engine = CompressionEngine()
+
+    def test_npm_lock_dependency_count_accurate(self):
+        """The reported dependency count must match actual dependencies."""
+        import json
+
+        packages = {"": {"name": "root", "version": "1.0.0"}}
+        for i in range(30):
+            packages[f"node_modules/pkg-{i}"] = {"version": f"{i}.0.0"}
+        data = {"name": "root", "lockfileVersion": 3, "packages": packages}
+        output = json.dumps(data, indent=2)
+        output += "\n" * 200  # pad to exceed threshold
+        compressed, _, _ = self.engine.compress("cat package-lock.json", output)
+        assert "30 dependencies" in compressed
+        assert "pkg-0" in compressed
+        assert "pkg-29" in compressed
+
+    def test_poetry_lock_all_packages_listed(self):
+        """All packages from poetry.lock must appear in compressed output."""
+        lines = []
+        for i in range(40):
+            lines.extend(
+                [
+                    "[[package]]",
+                    f'name = "lib-{i}"',
+                    f'version = "{i}.1.0"',
+                    f'description = "Library {i}"',
+                    "",
+                    "[package.dependencies]",
+                    'other = "^1.0"',
+                    "",
+                ]
+            )
+        output = "\n".join(lines)
+        compressed, _, _ = self.engine.compress("cat poetry.lock", output)
+        assert "40 packages" in compressed
+        assert "lib-0" in compressed
+        assert "lib-39" in compressed

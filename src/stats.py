@@ -40,7 +40,13 @@ def main():
         SavingsTracker.DB_DIR = db_dir
         SavingsTracker.DB_PATH = os.path.join(db_dir, "savings.db")
 
-    tracker = SavingsTracker()
+    # Allow passing a session ID to show stats for a specific session
+    session_id = None
+    for i, arg in enumerate(sys.argv[1:], 1):
+        if arg == "--session" and i < len(sys.argv) - 1:
+            session_id = sys.argv[i + 1]
+
+    tracker = SavingsTracker(session_id=session_id)
     session = tracker.get_session_stats()
     lifetime = tracker.get_lifetime_stats()
     top = tracker.get_top_processors(limit=5)

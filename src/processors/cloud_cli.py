@@ -83,7 +83,7 @@ class CloudCliProcessor(Processor):
             result = {}
             for k, v in value.items():
                 # Preserve important keys at full depth
-                if _IMPORTANT_KEY_RE.match(k):
+                if _IMPORTANT_KEY_RE.search(k):
                     result[k] = self._compress_json_value(v, depth, max_depth + 1)
                 else:
                     result[k] = self._compress_json_value(v, depth + 1, max_depth)

@@ -46,8 +46,10 @@ class SearchProcessor(Processor):
                 continue
 
             # file:line:content or file:content
-            # Be more specific: require the file part to look like a path
+            # Accept extensionless files if a line number follows
             m = re.match(r"^((?:[a-zA-Z]:)?[^\s:]+\.[a-zA-Z0-9]+):(\d+:)?(.*)$", stripped)
+            if not m:
+                m = re.match(r"^((?:[a-zA-Z]:)?[^\s:]+):(\d+:)(.*)$", stripped)
             if m:
                 filepath = m.group(1)
                 by_file[filepath].append(stripped)

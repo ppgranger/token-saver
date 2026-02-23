@@ -1,4 +1,15 @@
-"""File content processor: content-aware compression for long file outputs."""
+"""File content processor: content-aware compression for file outputs.
+
+Strategy — strict two-category dispatch:
+
+NEVER COMPRESS (pass-through):
+  Source code and sensitive config files. The model reads these to write
+  patches and understand exact values.  One missing line → wrong patch.
+
+COMPRESS (structure-preserving):
+  Data/structured files the model reads for information, not patching:
+  JSON, YAML, TOML, XML, logs, CSV, lock files, docs, unknown types.
+"""
 
 import json
 import re
@@ -6,8 +17,10 @@ import re
 from .. import config
 from .base import Processor
 
-# Extension sets for content type detection
-_CODE_EXTENSIONS = {
+# ── File type sets ───────────────────────────────────────────────────
+
+# Source code: NEVER compressed — model needs exact content for patching
+_SOURCE_CODE_EXTENSIONS = {
     ".py",
     ".js",
     ".ts",
@@ -17,16 +30,17 @@ _CODE_EXTENSIONS = {
     ".rs",
     ".java",
     ".kt",
+    ".scala",
     ".c",
     ".cpp",
     ".h",
     ".hpp",
+    ".cs",
     ".rb",
     ".php",
     ".swift",
-    ".scala",
-    ".tf",
-    ".hcl",
+    ".ex",
+    ".exs",
     ".sh",
     ".bash",
     ".zsh",
@@ -34,12 +48,9 @@ _CODE_EXTENSIONS = {
     ".lua",
     ".r",
     ".m",
-    ".cs",
     ".vb",
     ".pl",
     ".pm",
-    ".ex",
-    ".exs",
     ".hs",
     ".ml",
     ".vue",
@@ -50,82 +61,58 @@ _CODE_EXTENSIONS = {
     ".v",
     ".groovy",
     ".sql",
-    ".md",
-    ".rst",
+    ".tf",
+    ".hcl",
 }
 
-_CONFIG_EXTENSIONS = {
-    ".json",
-    ".yaml",
-    ".yml",
-    ".toml",
+# Config files with exact values: NEVER compressed
+_SENSITIVE_CONFIG_EXTENSIONS = {
+    ".env",
     ".ini",
     ".cfg",
-    ".xml",
-    ".env",
-    ".properties",
-    ".plist",
     ".conf",
 }
 
+# Lock files: AGGRESSIVELY compressed (dependency names + versions only)
+_LOCK_FILENAMES = {
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "poetry.lock",
+    "Pipfile.lock",
+    "Cargo.lock",
+    "composer.lock",
+    "Gemfile.lock",
+    "go.sum",
+    "bun.lockb",
+}
+
+# Structured data: compress preserving keys + structure
+_STRUCTURED_EXTENSIONS = {
+    ".json": "json",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".toml": "toml",
+    ".xml": "xml",
+}
+
+# Log files
+_LOG_EXTENSIONS = {".log"}
+
+# CSV/TSV files
 _CSV_EXTENSIONS = {".csv", ".tsv"}
 
-# Regex patterns for code definitions, grouped by language family
-_DEFINITION_PATTERNS = [
-    # Python
-    re.compile(r"^\s*(async\s+)?def\s+\w+"),
-    re.compile(r"^\s*class\s+\w+"),
-    # JS/TS
-    re.compile(r"^\s*(export\s+)?(async\s+)?function\s+\w+"),
-    re.compile(r"^\s*(export\s+)?(default\s+)?class\s+\w+"),
-    re.compile(r"^\s*(export\s+)?(const|let|var)\s+\w+\s*=\s*(async\s+)?\(.*\)\s*=>"),
-    re.compile(r"^\s*(export\s+)?interface\s+\w+"),
-    re.compile(r"^\s*(export\s+)?type\s+\w+\s*="),
-    re.compile(r"^\s*(export\s+)?enum\s+\w+"),
-    # Go
-    re.compile(r"^\s*func\s+(\(.*?\)\s*)?\w+"),
-    re.compile(r"^\s*type\s+\w+\s+(struct|interface)"),
-    # Rust
-    re.compile(r"^\s*(pub\s+)?(async\s+)?fn\s+\w+"),
-    re.compile(r"^\s*(pub\s+)?struct\s+\w+"),
-    re.compile(r"^\s*(pub\s+)?enum\s+\w+"),
-    re.compile(r"^\s*(pub\s+)?trait\s+\w+"),
-    re.compile(r"^\s*impl\s+"),
-    # Java/Kotlin/C#
-    re.compile(r"^\s*(public|private|protected|internal)\s+.*\s+(class|interface|enum)\s+\w+"),
-    re.compile(
-        r"^\s*(public|private|protected|internal)"
-        r"\s+(static\s+)?(async\s+)?\w+[\w<>\[\],\s]*\s+\w+\s*\("
-    ),
-    # C/C++ -- require a return type keyword or modifier before the function name
-    re.compile(
-        r"^\s*(static\s+|extern\s+|inline\s+|virtual\s+|const\s+)*"
-        r"(void|int|char|float|double|long|short|unsigned|signed|bool|auto|size_t|"
-        r"std::\w+|struct\s+\w+|enum\s+\w+|class\s+\w+|\w+_t)"
-        r"[\s\*&]+\w+\s*\("
-    ),
-    # Ruby
-    re.compile(r"^\s*def\s+\w+"),
-    re.compile(r"^\s*class\s+\w+"),
-    re.compile(r"^\s*module\s+\w+"),
-    # PHP
-    re.compile(r"^\s*(public|private|protected)?\s*(static\s+)?function\s+\w+"),
-    # Shell
-    re.compile(r"^\s*\w+\s*\(\)\s*\{"),
-    re.compile(r"^\s*function\s+\w+"),
-]
-
-# Important markers to always preserve in code
-_IMPORTANT_MARKERS = re.compile(r"\b(TODO|FIXME|HACK|BUG|XXX|NOQA|SAFETY)\b", re.IGNORECASE)
+# Documentation
+_DOC_EXTENSIONS = {".md", ".rst"}
 
 # Log level patterns
 _LOG_LEVEL_RE = re.compile(
     r"("
-    r"\d{4}[-/]\d{2}[-/]\d{2}"  # date
-    r"|^\d{2}:\d{2}:\d{2}"  # time
+    r"\d{4}[-/]\d{2}[-/]\d{2}"
+    r"|^\d{2}:\d{2}:\d{2}"
     r"|\[(INFO|DEBUG|WARN|WARNING|ERROR|FATAL|CRITICAL|TRACE)\]"
     r"|\b(INFO|DEBUG|WARN|WARNING|ERROR|FATAL|CRITICAL|TRACE)\s"
-    r"|^\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}"  # syslog date
+    r"|^\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}"
     r")",
     re.IGNORECASE,
 )
@@ -155,63 +142,111 @@ class FileContentProcessor(Processor):
         if not output or not output.strip():
             return output
 
+        ext = self._extract_extension(command)
+        filename = self._extract_filename(command)
+
+        # ── NEVER COMPRESS: source code ──────────────────────────────
+        if ext in _SOURCE_CODE_EXTENSIONS:
+            return output
+
+        # ── NEVER COMPRESS: sensitive config ─────────────────────────
+        if ext in _SENSITIVE_CONFIG_EXTENSIONS:
+            return output
+
+        # Below here: only compress if the output is long enough
         lines = output.splitlines()
         max_lines = config.get("max_file_lines")
 
         if len(lines) <= max_lines:
             return output
 
-        ext = self._extract_extension(command)
-        content_type = self._detect_type(ext, lines)
+        # ── Lock files: aggressive compression ───────────────────────
+        if filename in _LOCK_FILENAMES:
+            return self._compress_lock_file(lines, ext, filename)
 
-        if content_type == "code":
-            return self._compress_code(lines, ext)
-        elif content_type == "config":
-            return self._compress_config(lines, ext)
-        elif content_type == "log":
+        # ── Structured data: preserve keys + structure ───────────────
+        structured_type = _STRUCTURED_EXTENSIONS.get(ext)
+        if structured_type:
+            return self._compress_structured(lines, structured_type)
+
+        # ── Log files ────────────────────────────────────────────────
+        if ext in _LOG_EXTENSIONS:
             return self._compress_log(lines)
-        elif content_type == "csv":
+
+        # ── CSV/TSV ──────────────────────────────────────────────────
+        if ext in _CSV_EXTENSIONS:
             return self._compress_csv(lines)
-        else:
+
+        # ── Documentation ────────────────────────────────────────────
+        if ext in _DOC_EXTENSIONS:
             return self._truncate_default(lines)
 
-    # ── Type detection ──────────────────────────────────────────────
+        # ── Heuristic detection for extensionless/unknown files ──────
+        detected = self._detect_heuristic(lines)
+        if detected == "log":
+            return self._compress_log(lines)
+        if detected == "json":
+            return self._compress_structured(lines, "json")
+        if detected == "csv":
+            return self._compress_csv(lines)
+
+        # ── Unknown: conservative generic compression ────────────────
+        return self._truncate_default(lines)
+
+    # ── Filename / extension extraction ──────────────────────────────
 
     def _extract_extension(self, command: str) -> str:
-        """Extract file extension from the command, e.g. 'cat foo.py' → '.py'."""
-        match = re.search(r"[\w/\\.-]+\.(\w+)(?:\s|$|;|\||&)", command)
-        if match:
-            return "." + match.group(1).lower()
+        """Extract file extension from the command, e.g. 'cat foo.py' -> '.py'.
+
+        Also handles dotfiles like '.env' -> '.env'.
+        """
+        # Find the file argument (skip the command itself and flags)
+        parts = command.split()
+        for part in parts[1:]:
+            if part.startswith("-"):
+                continue
+            # Get the basename
+            basename = part.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+            # Dotfile like .env
+            if basename.startswith(".") and "." not in basename[1:]:
+                return "." + basename[1:].lower()
+            # Normal extension
+            dot_pos = basename.rfind(".")
+            if dot_pos > 0:
+                return "." + basename[dot_pos + 1 :].lower()
         return ""
 
-    def _detect_type(self, ext: str, lines: list[str]) -> str:
-        """Detect content type from extension, then heuristics."""
-        if ext in _CODE_EXTENSIONS:
-            return "code"
-        if ext in _CONFIG_EXTENSIONS:
-            return "config"
-        if ext in _CSV_EXTENSIONS:
-            return "csv"
+    def _extract_filename(self, command: str) -> str:
+        """Extract bare filename from the command, e.g. 'cat /path/to/package-lock.json'."""
+        parts = command.split()
+        for part in parts[1:]:
+            if part.startswith("-"):
+                continue
+            return part.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        return ""
 
-        # Heuristic: log detection (>30% lines match log patterns)
+    # ── Heuristic detection (for extensionless files) ────────────────
+
+    def _detect_heuristic(self, lines: list[str]) -> str:
+        """Detect content type from content heuristics."""
+        # Log detection (>30% lines match log patterns)
         sample = lines[:200]
         log_matches = sum(1 for line in sample if _LOG_LEVEL_RE.search(line))
         if log_matches > len(sample) * 0.3:
             return "log"
 
-        # Heuristic: JSON (starts with { or [)
-        stripped_start = output_start(lines)
-        if stripped_start in ("{", "["):
-            return "config"
+        # JSON (starts with { or [)
+        first_char = _output_start(lines)
+        if first_char in ("{", "["):
+            return "json"
 
-        # Heuristic: CSV (consistent comma/tab separators in first lines)
+        # CSV (consistent separators)
         if self._looks_like_csv(lines[:10]):
             return "csv"
 
         return "unknown"
 
     def _looks_like_csv(self, sample: list[str]) -> bool:
-        """Check if lines look like CSV/TSV data."""
         if len(sample) < 3:
             return False
         for sep in (",", "\t"):
@@ -220,84 +255,186 @@ class FileContentProcessor(Processor):
                 return True
         return False
 
-    # ── Code compression ────────────────────────────────────────────
+    # ── Lock file compression ────────────────────────────────────────
 
-    def _compress_code(self, lines: list[str], ext: str) -> str:
-        total = len(lines)
-        head_lines = config.get("file_code_head_lines")
-        body_lines = config.get("file_code_body_lines")
-
-        result = []
-        # Keep header (imports, shebang, module docstrings)
-        result.extend(lines[:head_lines])
-
-        # Scan rest for definitions and important markers
-        i = head_lines
-        definitions_found = 0
-        last_added = head_lines - 1
-        omitted_count = 0
-
-        while i < total:
-            line = lines[i]
-
-            # Check if this line is a definition
-            is_def = any(p.match(line) for p in _DEFINITION_PATTERNS)
-            is_important = bool(_IMPORTANT_MARKERS.search(line))
-
-            if is_def:
-                definitions_found += 1
-                # Add separator if we skipped lines
-                gap = i - last_added - 1
-                if gap > 0:
-                    omitted_count += gap
-                    result.append(f"  ... ({gap} lines omitted)")
-
-                # Add the definition signature + a few body lines
-                result.append(line)
-                end = min(i + 1 + body_lines, total)
-                for j in range(i + 1, end):
-                    result.append(lines[j])
-                last_added = end - 1
-                i = end
-                continue
-
-            if is_important:
-                gap = i - last_added - 1
-                if gap > 0:
-                    omitted_count += gap
-                    result.append(f"  ... ({gap} lines omitted)")
-                result.append(line)
-                last_added = i
-
-            i += 1
-
-        # Account for any trailing omitted lines
-        trailing_gap = total - last_added - 1
-        if trailing_gap > 0:
-            omitted_count += trailing_gap
-            result.append(f"  ... ({trailing_gap} lines omitted)")
-
-        result.append(
-            f"\n({total} total lines, {definitions_found} definitions found, "
-            f"{omitted_count} lines omitted)"
-        )
-        return "\n".join(result)
-
-    # ── Config compression ──────────────────────────────────────────
-
-    def _compress_config(self, lines: list[str], ext: str) -> str:
+    def _compress_lock_file(self, lines: list[str], ext: str, filename: str) -> str:
+        """Extract only dependency names and versions from lock files."""
         total = len(lines)
         raw = "\n".join(lines)
 
-        if ext == ".json":
-            return self._compress_json(raw, total)
-        elif ext in (".yaml", ".yml"):
-            return self._compress_yaml(lines, total)
-        elif ext == ".xml":
-            return self._compress_xml(lines, total)
+        if filename == "package-lock.json":
+            return self._compress_npm_lock(raw, total)
+        if filename in ("yarn.lock", "Gemfile.lock"):
+            return self._compress_yarn_lock(lines, total)
+        if filename == "poetry.lock":
+            return self._compress_poetry_lock(lines, total)
+        if filename == "Cargo.lock":
+            return self._compress_cargo_lock(lines, total)
+        if filename in ("composer.lock", "Pipfile.lock"):
+            return self._compress_json_lock(raw, total)
+        if filename == "go.sum":
+            return self._compress_go_sum(lines, total)
+
+        # Fallback for unrecognized lock files
+        return self._truncate_default(lines)
+
+    def _compress_npm_lock(self, raw: str, total: int) -> str:
+        """package-lock.json: extract top-level dependency names + versions."""
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return self._truncate_default(raw.splitlines())
+
+        deps = {}
+        # lockfileVersion 3 uses "packages" with "" as root
+        packages = data.get("packages", {})
+        if packages:
+            for path, info in packages.items():
+                if not path or path == "":
+                    continue
+                # "node_modules/lodash" -> "lodash"
+                name = path.rsplit("node_modules/", 1)[-1]
+                version = info.get("version", "?")
+                # Only top-level (no nested node_modules)
+                if name.count("node_modules/") == 0:
+                    deps[name] = version
         else:
-            # TOML, INI, CFG, ENV, properties — keep section headers and keys
-            return self._compress_ini_like(lines, total)
+            # lockfileVersion 1 uses "dependencies"
+            for name, info in data.get("dependencies", {}).items():
+                deps[name] = info.get("version", "?") if isinstance(info, dict) else "?"
+
+        result = [f"package-lock.json ({len(deps)} dependencies, {total} lines):"]
+        for name, version in sorted(deps.items()):
+            result.append(f"  {name}@{version}")
+        return "\n".join(result)
+
+    def _compress_yarn_lock(self, lines: list[str], total: int) -> str:
+        """yarn.lock / Gemfile.lock: extract package@version entries."""
+        deps = []
+        for line in lines:
+            stripped = line.strip()
+            # yarn: lines like '"lodash@^4.17.21":'  or  'lodash@^4.17.21:'
+            if stripped and not stripped.startswith("#") and stripped.endswith(":"):
+                name = stripped.rstrip(":").strip('"')
+                deps.append(name)
+            # version line
+            if stripped.startswith("version "):
+                version = stripped.split('"')[1] if '"' in stripped else stripped.split()[-1]
+                if deps and "@" not in deps[-1].split(",")[0].rsplit("@", 1)[-1]:
+                    deps[-1] = f"{deps[-1]} -> {version}"
+
+        result = [f"lock file ({len(deps)} entries, {total} lines):"]
+        for d in deps[:50]:
+            result.append(f"  {d}")
+        if len(deps) > 50:
+            result.append(f"  ... ({len(deps) - 50} more)")
+        return "\n".join(result)
+
+    def _compress_poetry_lock(self, lines: list[str], total: int) -> str:
+        """poetry.lock: extract [[package]] name and version."""
+        deps = []
+        current_name = None
+        for line in lines:
+            stripped = line.strip()
+            if stripped == "[[package]]":
+                current_name = None
+            elif stripped.startswith("name = "):
+                val = stripped.split('"')[1] if '"' in stripped else stripped.split("=")[1].strip()
+                current_name = val
+            elif stripped.startswith("version = ") and current_name:
+                val = stripped.split('"')[1] if '"' in stripped else stripped.split("=")[1].strip()
+                deps.append(f"{current_name}@{val}")
+                current_name = None
+
+        result = [f"poetry.lock ({len(deps)} packages, {total} lines):"]
+        for d in deps[:50]:
+            result.append(f"  {d}")
+        if len(deps) > 50:
+            result.append(f"  ... ({len(deps) - 50} more)")
+        return "\n".join(result)
+
+    def _compress_cargo_lock(self, lines: list[str], total: int) -> str:
+        """Cargo.lock: extract [[package]] name and version."""
+        deps = []
+        current_name = None
+        for line in lines:
+            stripped = line.strip()
+            if stripped == "[[package]]":
+                current_name = None
+            elif stripped.startswith("name = "):
+                val = stripped.split('"')[1] if '"' in stripped else stripped.split("=")[1].strip()
+                current_name = val
+            elif stripped.startswith("version = ") and current_name:
+                val = stripped.split('"')[1] if '"' in stripped else stripped.split("=")[1].strip()
+                deps.append(f"{current_name}@{val}")
+                current_name = None
+
+        result = [f"Cargo.lock ({len(deps)} packages, {total} lines):"]
+        for d in deps[:50]:
+            result.append(f"  {d}")
+        if len(deps) > 50:
+            result.append(f"  ... ({len(deps) - 50} more)")
+        return "\n".join(result)
+
+    def _compress_json_lock(self, raw: str, total: int) -> str:
+        """composer.lock / Pipfile.lock: extract package names + versions from JSON."""
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return self._truncate_default(raw.splitlines())
+
+        deps = []
+        # composer.lock: packages array
+        for pkg in data.get("packages", []):
+            if isinstance(pkg, dict):
+                name = pkg.get("name", "?")
+                version = pkg.get("version", "?")
+                deps.append(f"{name}@{version}")
+        # Pipfile.lock: default + develop dicts
+        for section in ("default", "develop"):
+            for name, info in data.get(section, {}).items():
+                version = info.get("version", "?") if isinstance(info, dict) else "?"
+                deps.append(f"{name}{version}")
+
+        result = [f"lock file ({len(deps)} packages, {total} lines):"]
+        for d in deps[:50]:
+            result.append(f"  {d}")
+        if len(deps) > 50:
+            result.append(f"  ... ({len(deps) - 50} more)")
+        return "\n".join(result)
+
+    def _compress_go_sum(self, lines: list[str], total: int) -> str:
+        """go.sum: extract module@version pairs (dedup h1: hashes)."""
+        modules = set()
+        for line in lines:
+            parts = line.strip().split()
+            if len(parts) >= 2:
+                modules.add(f"{parts[0]}@{parts[1].split('/')[0]}")
+
+        sorted_mods = sorted(modules)
+        result = [f"go.sum ({len(sorted_mods)} modules, {total} lines):"]
+        for m in sorted_mods[:50]:
+            result.append(f"  {m}")
+        if len(sorted_mods) > 50:
+            result.append(f"  ... ({len(sorted_mods) - 50} more)")
+        return "\n".join(result)
+
+    # ── Structured data compression ──────────────────────────────────
+
+    def _compress_structured(self, lines: list[str], fmt: str) -> str:
+        total = len(lines)
+        raw = "\n".join(lines)
+
+        if fmt == "json":
+            return self._compress_json(raw, total)
+        if fmt == "yaml":
+            return self._compress_yaml(lines, total)
+        if fmt == "toml":
+            return self._compress_toml(lines, total)
+        if fmt == "xml":
+            return self._compress_xml(lines, total)
+
+        return self._truncate_default(lines)
 
     def _compress_json(self, raw: str, total: int) -> str:
         try:
@@ -341,7 +478,6 @@ class FileContentProcessor(Processor):
             indent = len(line) - len(stripped)
             # Keep top-level keys (indent 0) and second-level (indent <= 2)
             if indent <= 2 and stripped and not stripped.startswith("#"):
-                # Truncate long values
                 if ": " in stripped and len(stripped) > 120:
                     key_part = stripped.split(": ", 1)[0]
                     result.append(f"{line[:indent]}{key_part}: ... (truncated)")
@@ -355,13 +491,38 @@ class FileContentProcessor(Processor):
         result.append(f"\n({total} total lines)")
         return "\n".join(result)
 
+    def _compress_toml(self, lines: list[str], total: int) -> str:
+        """Keep section headers [section] and key = value lines."""
+        result = []
+        nested_count = 0
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            # Section headers: [section] or [[array]]
+            if stripped.startswith("["):
+                result.append(line)
+            # Key-value at top level (no leading whitespace)
+            elif "=" in stripped and not line.startswith((" ", "\t")):
+                if len(stripped) > 120:
+                    key_part = stripped.split("=", 1)[0].strip()
+                    result.append(f"{key_part} = ... (truncated)")
+                else:
+                    result.append(line)
+            else:
+                nested_count += 1
+
+        if nested_count > 0:
+            result.append(f"  ... ({nested_count} additional lines omitted)")
+        result.append(f"\n({total} total lines)")
+        return "\n".join(result)
+
     def _compress_xml(self, lines: list[str], total: int) -> str:
         result = []
         nested_count = 0
         for line in lines:
             stripped = line.lstrip()
             indent = len(line) - len(stripped)
-            # Keep XML declaration, top-level and second-level tags
             if indent <= 4 or stripped.startswith(("<?", "<!")):
                 result.append(line)
             else:
@@ -372,37 +533,15 @@ class FileContentProcessor(Processor):
         result.append(f"\n({total} total lines)")
         return "\n".join(result)
 
-    def _compress_ini_like(self, lines: list[str], total: int) -> str:
-        result = []
-        nested_count = 0
-        for line in lines:
-            stripped = line.strip()
-            # Keep section headers, key=value lines at top level, and comments
-            if stripped.startswith(("[", "#", ";")) or "=" in stripped or ":" in stripped:
-                if len(stripped) > 120:
-                    key_part = re.split(r"[=:]", stripped, maxsplit=1)[0]
-                    result.append(f"{key_part}= ... (truncated)")
-                else:
-                    result.append(line)
-            elif stripped:
-                nested_count += 1
-
-        if nested_count > 0:
-            result.append(f"  ... ({nested_count} additional lines omitted)")
-        result.append(f"\n({total} total lines)")
-        return "\n".join(result)
-
     # ── Log compression ─────────────────────────────────────────────
 
     def _compress_log(self, lines: list[str]) -> str:
         total = len(lines)
         context_lines = config.get("file_log_context_lines")
 
-        # Keep first 5 and last 5 for temporal context
         head = lines[:5]
         tail = lines[-5:]
 
-        # Scan middle for ERROR/WARN/FATAL lines
         middle = lines[5:-5] if len(lines) > 10 else []
         error_indices = set()
         info_count = 0
@@ -410,7 +549,6 @@ class FileContentProcessor(Processor):
 
         for idx, line in enumerate(middle):
             if _LOG_ERROR_RE.search(line):
-                # Add this line + context
                 for c in range(idx - context_lines, idx + context_lines + 1):
                     if 0 <= c < len(middle):
                         error_indices.add(c)
@@ -419,7 +557,6 @@ class FileContentProcessor(Processor):
             elif re.search(r"\bINFO\b", line, re.IGNORECASE):
                 info_count += 1
 
-        # Build result
         result = head[:]
         if middle:
             if error_indices:
@@ -460,17 +597,15 @@ class FileContentProcessor(Processor):
         head_rows = config.get("file_csv_head_rows")
         tail_rows = config.get("file_csv_tail_rows")
 
-        # Detect number of columns from header
         header = lines[0] if lines else ""
         sep = "\t" if "\t" in header else ","
         col_count = header.count(sep) + 1
 
-        # header + head data rows + tail data rows
-        result = [lines[0]]  # header
+        result = [lines[0]]
         data_lines = lines[1:]
 
         if len(data_lines) <= head_rows + tail_rows:
-            return output_join(lines)
+            return "\n".join(lines)
 
         result.extend(data_lines[:head_rows])
         omitted = len(data_lines) - head_rows - tail_rows
@@ -479,7 +614,7 @@ class FileContentProcessor(Processor):
         result.append(f"\n({total - 1} data rows, {col_count} columns)")
         return "\n".join(result)
 
-    # ── Fallback: original head/tail truncation ─────────────────────
+    # ── Fallback: head/tail truncation ───────────────────────────────
 
     def _truncate_default(self, lines: list[str]) -> str:
         keep_head = config.get("file_keep_head")
@@ -498,15 +633,10 @@ class FileContentProcessor(Processor):
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
-def output_start(lines: list[str]) -> str:
+def _output_start(lines: list[str]) -> str:
     """Return the first non-whitespace character of the output."""
     for line in lines:
         stripped = line.strip()
         if stripped:
             return stripped[0]
     return ""
-
-
-def output_join(lines: list[str]) -> str:
-    """Join lines back into output string."""
-    return "\n".join(lines)
