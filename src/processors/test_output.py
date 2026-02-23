@@ -261,11 +261,7 @@ class TestOutputProcessor(Processor):
             result.extend(self._truncate_traceback(failure_buffer))
 
         if passed_suites > 0:
-            msg = f"[{passed_suites} suites passed"
-            if passed_tests:
-                msg += f", {passed_tests} tests"
-            msg += "]"
-            result.insert(0, msg)
+            result.insert(0, f"[{passed_suites} suites passed]")
 
         return "\n".join(result) if result else "\n".join(lines)
 
@@ -325,7 +321,7 @@ class TestOutputProcessor(Processor):
 
             if in_failure:
                 result.append(line)
-                if stripped.startswith(("FAIL", "ok")):
+                if re.match(r"^(FAIL|ok)\s+\S+", stripped):
                     in_failure = False
                 continue
 

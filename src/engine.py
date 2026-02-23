@@ -33,6 +33,12 @@ class CompressionEngine:
             if processor.can_handle(command):
                 compressed = processor.process(command, output)
 
+                # If the processor returned output exactly unchanged, it
+                # explicitly chose not to compress (e.g. source code files).
+                # Respect the processor's decision — no generic fallback.
+                if compressed is output or compressed == output:
+                    return output, processor.name, False
+
                 # If a specialized processor handled it, also run generic
                 # cleanup (ANSI strip, blank line collapse) but not truncation
                 if processor is not self._generic:
@@ -42,7 +48,7 @@ class CompressionEngine:
                 compressed_len = len(compressed)
                 gain = (original_len - compressed_len) / original_len if original_len > 0 else 0
 
-                if gain >= min_ratio:
+                if compressed_len < original_len and gain >= min_ratio:
                     return compressed, processor.name, True
 
                 # Specialized processor didn't compress enough — try the
@@ -54,7 +60,7 @@ class CompressionEngine:
                     generic_gain = (
                         (original_len - generic_len) / original_len if original_len > 0 else 0
                     )
-                    if generic_gain >= min_ratio:
+                    if generic_len < original_len and generic_gain >= min_ratio:
                         return generic_compressed, "generic", True
 
                 return output, processor.name, False

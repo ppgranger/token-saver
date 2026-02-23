@@ -168,7 +168,7 @@ class GenericProcessor(Processor):
             return False
         # Count digits + common numeric-adjacent chars (colons for time, dashes for ETA)
         numeric_chars = sum(1 for c in stripped if c.isdigit())
-        if numeric_chars / len(stripped) >= 0.25:
+        if numeric_chars / len(stripped) >= 0.30:
             return True
         # Percentage patterns
         if re.search(r"\d+(\.\d+)?%", stripped):

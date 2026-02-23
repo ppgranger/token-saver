@@ -4,6 +4,7 @@ import re
 
 from .. import config
 from .base import Processor
+from .utils import compress_diff
 
 # Optional git global options that may appear between 'git' and the subcommand.
 # Covers: -C <path>, --no-pager, -c <key>=<val>, --git-dir <path>, --work-tree <path>
@@ -77,6 +78,12 @@ class GitProcessor(Processor):
         for line in lines:
             stripped = line.strip()
             if not stripped:
+                continue
+
+            # Short-format branch header: ## main...origin/main
+            if stripped.startswith("## "):
+                branch = stripped[3:].split("...")[0]
+                header_lines.append(f"On branch {branch}")
                 continue
 
             # Header lines
@@ -184,65 +191,7 @@ class GitProcessor(Processor):
 
         max_hunk = config.get("max_diff_hunk_lines")
         max_context = config.get("max_diff_context_lines")
-        result = []
-        hunk_line_count = 0
-        hunk_truncated = False
-        stat_line = ""
-        # Leading context: buffer context lines, flush last N when a change appears
-        leading_buffer: list[str] = []
-        # Trailing context: after a change, emit up to N context lines
-        trailing_remaining = 0
-
-        for line in lines:
-            if line.startswith("diff --git"):
-                leading_buffer = []
-                trailing_remaining = 0
-                if hunk_truncated:
-                    result.append(f"  ... (truncated after {max_hunk} lines)")
-                result.append(line)
-                hunk_line_count = 0
-                hunk_truncated = False
-            elif line.startswith(("index ", "---", "+++")):
-                continue
-            elif line.startswith("@@"):
-                leading_buffer = []
-                trailing_remaining = 0
-                if hunk_truncated:
-                    result.append(f"  ... (truncated after {max_hunk} lines)")
-                result.append(line)
-                hunk_line_count = 0
-                hunk_truncated = False
-            elif line.startswith(("+", "-")):
-                hunk_line_count += 1
-                if hunk_line_count <= max_hunk:
-                    # Flush leading context (last N lines from buffer)
-                    if leading_buffer:
-                        result.extend(leading_buffer[-max_context:])
-                        leading_buffer = []
-                    result.append(line)
-                    trailing_remaining = max_context
-                elif not hunk_truncated:
-                    hunk_truncated = True
-            elif line.startswith(" "):
-                hunk_line_count += 1
-                if hunk_line_count <= max_hunk:
-                    if trailing_remaining > 0:
-                        # Still emitting trailing context after a change
-                        result.append(line)
-                        trailing_remaining -= 1
-                    else:
-                        # Buffer as potential leading context for next change
-                        leading_buffer.append(line)
-                elif not hunk_truncated:
-                    hunk_truncated = True
-            elif re.match(r"^\s*\d+ files? changed", line):
-                stat_line = line
-
-        if hunk_truncated:
-            result.append(f"  ... (truncated after {max_hunk} lines)")
-        if stat_line:
-            result.append(stat_line)
-
+        result = compress_diff(lines, max_hunk, max_context)
         return "\n".join(result)
 
     def _process_name_list(self, lines: list[str]) -> str:

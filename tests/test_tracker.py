@@ -141,6 +141,58 @@ class TestSavingsTracker:
         stats = self.tracker.get_session_stats()
         assert stats["commands"] == 80
 
+    def test_session_id_from_env(self):
+        """TOKEN_SAVER_SESSION env var should set the session ID."""
+        os.environ["TOKEN_SAVER_SESSION"] = "env-session-42"  # noqa: S105
+        try:
+            tracker = SavingsTracker()
+            assert tracker.session_id == "env-session-42"
+            tracker.close()
+        finally:
+            del os.environ["TOKEN_SAVER_SESSION"]
+
+    def test_shared_session_aggregates(self):
+        """Multiple trackers with the same session_id should aggregate."""
+        t1 = SavingsTracker(session_id="shared-session")
+        t1.record_saving("git status", "git", 1000, 200, "claude_code")
+        t1.close()
+
+        t2 = SavingsTracker(session_id="shared-session")
+        t2.record_saving("git diff", "git", 2000, 400, "claude_code")
+
+        stats = t2.get_session_stats()
+        assert stats["commands"] == 2
+        assert stats["original"] == 3000
+        assert stats["compressed"] == 600
+        assert stats["saved"] == 2400
+
+        # Lifetime should show 1 session, not 2
+        lifetime = t2.get_lifetime_stats()
+        assert lifetime["sessions"] == 1
+        assert lifetime["commands"] == 2
+        t2.close()
+
+    def test_session_stats_isolated(self):
+        """Different session IDs should have independent stats."""
+        t1 = SavingsTracker(session_id="session-A")
+        t1.record_saving("cmd1", "git", 1000, 200, "claude_code")
+        t1.close()
+
+        t2 = SavingsTracker(session_id="session-B")
+        t2.record_saving("cmd2", "test", 500, 100, "claude_code")
+
+        a_stats = t2.get_session_stats("session-A")
+        b_stats = t2.get_session_stats("session-B")
+        assert a_stats["commands"] == 1
+        assert a_stats["original"] == 1000
+        assert b_stats["commands"] == 1
+        assert b_stats["original"] == 500
+
+        lifetime = t2.get_lifetime_stats()
+        assert lifetime["sessions"] == 2
+        assert lifetime["commands"] == 2
+        t2.close()
+
     def test_db_recreation_on_corruption(self):
         """If DB is corrupted, it should be recreated."""
         self.tracker.close()
