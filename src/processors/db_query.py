@@ -50,7 +50,7 @@ class DbQueryProcessor(Processor):
             if re.match(r"^[-─┼+|]+$", line.strip()):
                 return True
             # Also detect the header underline pattern: " col1 | col2 "
-            if "|" in line and re.search(r"\w", line):
+            if line.count("|") >= 2 and re.search(r"\w", line):
                 return True
         return False
 

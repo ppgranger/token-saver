@@ -62,12 +62,45 @@ class TestHookPretool:
         assert is_compressible("tree src/")
         assert is_compressible("cat file.py")
 
-    def test_piped_commands_excluded(self):
-        assert not is_compressible("git status | head")
-        assert not is_compressible("ls | grep foo")
+    def test_complex_pipelines_excluded(self):
+        assert not is_compressible("cat file.txt | sort | uniq")
+        assert not is_compressible("git log | grep fix | sort")
+        assert not is_compressible("git log | grep fix | wc -l")
+        assert not is_compressible("cat app.log | tail -100 | grep ERROR")
+        assert not is_compressible("ls | awk '{print $1}'")
+        assert not is_compressible("git log | sed 's/foo/bar/'")
+        assert not is_compressible("find . | xargs rm")
 
-    def test_chained_commands_excluded(self):
-        assert not is_compressible("git add . && git commit")
+    def test_safe_trailing_truncation_pipes(self):
+        """head, tail, wc after a compressible command."""
+        assert is_compressible("git status | head")
+        assert is_compressible("git log --oneline | tail -20")
+        assert is_compressible("pip3 list | head -30")
+        assert is_compressible("ls -la /tmp | wc -l")
+        assert is_compressible("pytest tests/ | tail -10")
+        assert is_compressible("git log --oneline | head -n 50")
+        assert is_compressible("find . -name '*.py' | wc -l")
+
+    def test_safe_trailing_grep_pipes(self):
+        """Single grep filter after a compressible command."""
+        assert is_compressible("git log --oneline | grep fix")
+        assert is_compressible("pip3 list | grep -i torch")
+        assert is_compressible("docker ps | grep running")
+        assert is_compressible("git log --oneline | grep -v Merge")
+        assert is_compressible("ls -la | grep .py")
+        assert is_compressible("pip list | grep -E 'torch|numpy'")
+        assert is_compressible("git log | grep -c fix")
+
+    def test_safe_trailing_sort_uniq_cut_pipes(self):
+        """sort, uniq, cut after a compressible command."""
+        assert is_compressible("docker ps | sort")
+        assert is_compressible("docker ps | sort -k 2")
+        assert is_compressible("find . -name '*.py' | sort -r")
+        assert is_compressible("pip list | uniq")
+        assert is_compressible("pip list | uniq -c")
+        assert is_compressible("ls -la | cut -f1 -d,")
+
+    def test_or_chains_excluded(self):
         assert not is_compressible("make || echo failed")
 
     def test_interactive_commands_excluded(self):
@@ -78,6 +111,13 @@ class TestHookPretool:
     def test_self_wrapping_excluded(self):
         assert not is_compressible("python3 wrap.py git status")
         assert not is_compressible("python3 /path/to/token_saver/wrap.py ls")
+        assert not is_compressible("token-saver stats")
+
+    def test_token_saver_in_path_not_excluded(self):
+        """token-saver in a path argument must not trigger the self-wrap guard."""
+        assert is_compressible("ls /Users/user/Desktop/token-saver")
+        assert is_compressible("git -C /path/token-saver status")
+        assert is_compressible("cat /tmp/token-saver/README.md")
 
     def test_sudo_excluded(self):
         assert not is_compressible("sudo apt install foo")
@@ -287,3 +327,177 @@ class TestHookPretoolIntegration:
             cmd = data["hookSpecificOutput"]["updatedInput"]["command"]
             # Should be safely quoted
             assert "wrap.py" in cmd
+
+    def test_piped_command_preserved_in_rewrite(self):
+        """The full original command including pipe must be passed to wrap.py."""
+        stdout, code = self._run_hook(
+            {"tool_name": "Bash", "tool_input": {"command": "git log --oneline | grep fix"}}
+        )
+        assert code == 0
+        assert stdout  # Should produce output (not empty passthrough)
+        data = json.loads(stdout)
+        rewritten = data["hookSpecificOutput"]["updatedInput"]["command"]
+        assert "wrap.py" in rewritten
+        # Full command including pipe must be inside the quoted argument
+        assert "grep fix" in rewritten
+
+    def test_multi_stage_pipe_not_rewritten(self):
+        """Complex pipelines should NOT be rewritten."""
+        stdout, code = self._run_hook(
+            {"tool_name": "Bash", "tool_input": {"command": "git log | grep fix | wc -l"}}
+        )
+        assert code == 0
+        assert stdout == ""  # Passthrough, no rewrite
+
+    def test_session_id_embedded_in_rewrite(self):
+        """Claude Code's session_id should be embedded as env var in rewritten command."""
+        stdout, code = self._run_hook(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "git status"},
+                "session_id": "cc-session-xyz",
+            }
+        )
+        assert code == 0
+        data = json.loads(stdout)
+        cmd = data["hookSpecificOutput"]["updatedInput"]["command"]
+        assert "TOKEN_SAVER_SESSION=cc-session-xyz" in cmd
+        assert "wrap.py" in cmd
+
+    def test_no_session_id_still_works(self):
+        """If no session_id in payload, command should still be rewritten (without prefix)."""
+        stdout, code = self._run_hook(
+            {"tool_name": "Bash", "tool_input": {"command": "git status"}}
+        )
+        assert code == 0
+        data = json.loads(stdout)
+        cmd = data["hookSpecificOutput"]["updatedInput"]["command"]
+        assert "wrap.py" in cmd
+        assert "TOKEN_SAVER_SESSION" not in cmd
+
+
+class TestChainedCommands:
+    """Tests for && and ; chained command support."""
+
+    def test_all_compressible_and_chain(self):
+        assert is_compressible("git add . && git commit -m fix && git push")
+        assert is_compressible("git status && git diff")
+
+    def test_silent_plus_compressible(self):
+        assert is_compressible("cd /project && npm install")
+        assert is_compressible("mkdir -p /tmp/test && ls -la /tmp/test")
+        assert is_compressible("cd /project && git status")
+
+    def test_all_silent_rejected(self):
+        assert not is_compressible("cd /tmp && mkdir -p foo")
+        assert not is_compressible("export FOO=bar && cd /tmp")
+
+    def test_unknown_command_in_chain_rejected(self):
+        assert not is_compressible("echo hello && git status")
+        assert not is_compressible("git status && python3 script.py")
+
+    def test_pipe_in_non_last_segment_rejected(self):
+        assert not is_compressible("git status | grep foo && git diff")
+        assert not is_compressible("cat file | sort && git status")
+
+    def test_redirect_in_segment_rejected(self):
+        assert not is_compressible("git status && git log > log.txt")
+
+    def test_sudo_in_segment_rejected(self):
+        assert not is_compressible("cd /project && sudo apt install foo")
+
+    def test_or_chain_always_rejected(self):
+        assert not is_compressible("git push || echo failed")
+        assert not is_compressible("git add . && git push || echo failed")
+
+    def test_semicolon_chains(self):
+        assert is_compressible("cd /project; npm install")
+        assert is_compressible("cd /tmp; ls -la")
+
+    def test_mixed_and_semicolon(self):
+        assert is_compressible("cd /project && git add .; git push")
+        assert is_compressible("mkdir -p /tmp/test; cd /tmp/test && ls -la")
+
+    def test_safe_trailing_pipe_on_last_segment(self):
+        assert is_compressible("cd /project && git log --oneline | head -20")
+
+    def test_self_wrap_guard_in_chain(self):
+        assert not is_compressible("cd /project && python3 wrap.py git status")
+        assert not is_compressible("cd /project && token-saver stats")
+
+    # --- Real-world Claude Code patterns ---
+
+    def test_real_world_git_add_commit_push(self):
+        """The most common Claude Code chained command."""
+        assert is_compressible("git add . && git commit -m 'feat: add auth' && git push")
+        assert is_compressible('git add . && git commit -m "fix bug" && git push origin main')
+
+    def test_real_world_cd_then_build(self):
+        assert is_compressible("cd /project && npm run build")
+        assert is_compressible("cd /project && cargo build")
+        assert is_compressible("cd /project && make")
+
+    def test_real_world_cd_then_test(self):
+        assert is_compressible("cd /project && npm test")
+        assert is_compressible("cd /project && pytest tests/ -v")
+        assert is_compressible("cd /project && cargo test")
+
+    def test_real_world_mkdir_then_ls(self):
+        assert is_compressible("mkdir -p /tmp/output && ls -la /tmp/output")
+
+    def test_real_world_cd_then_lint(self):
+        assert is_compressible("cd /project && ruff check .")
+        assert is_compressible("cd /project && eslint src/")
+
+    def test_real_world_git_stash_then_pull(self):
+        assert is_compressible("git stash && git pull")
+
+    def test_real_world_checkout_then_status(self):
+        """git checkout is silent, git status is compressible."""
+        assert is_compressible("git checkout main && git status")
+        assert is_compressible("git checkout -b feature && git status")
+
+    def test_real_world_multi_silent_then_compressible(self):
+        assert is_compressible("cd /project && git checkout main && git pull")
+        assert is_compressible("mkdir -p dist && cp src/*.py dist/ && ls -la dist/")
+
+    def test_real_world_terraform_init_plan(self):
+        assert is_compressible("cd infra && terraform init && terraform plan")
+
+    def test_real_world_docker_compose(self):
+        assert is_compressible("cd /app && docker compose build && docker compose up -d")
+
+    # --- Quoted delimiters (should NOT split) ---
+
+    def test_quoted_semicolon_not_split(self):
+        """A ; inside quotes is not a chain delimiter."""
+        assert is_compressible("grep -r 'foo;bar' .")
+        assert is_compressible('grep -r "error; fatal" src/')
+
+    def test_quoted_ampersand_not_split(self):
+        """&& inside quotes is not a chain delimiter."""
+        assert is_compressible('git log --format="%H && %s"')
+
+    # --- Edge cases ---
+
+    def test_env_var_in_chain_rejected(self):
+        """env VAR=val prefix in any segment should reject the chain."""
+        assert not is_compressible("cd /project && env FOO=bar npm test")
+
+    def test_interactive_in_chain_rejected(self):
+        assert not is_compressible("cd /project && vim file.py")
+        assert not is_compressible("mkdir -p /tmp && ssh server")
+
+    def test_safe_trailing_pipe_on_last_segment_various(self):
+        assert is_compressible("cd /project && pip list | grep torch")
+        assert is_compressible("cd /project && git log --oneline | tail -20")
+        assert is_compressible("cd /project && docker ps | wc -l")
+
+    def test_single_segment_after_split(self):
+        """A command with quoted ; shouldn't change single-command behavior."""
+        assert is_compressible("git status")
+        assert not is_compressible("echo hello")
+
+    def test_three_segment_chain(self):
+        assert is_compressible("cd /a && cd /b && git status")
+        assert is_compressible("touch f && chmod 644 f && ls -la f")

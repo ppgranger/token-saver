@@ -20,6 +20,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src import config
+from src.chain_utils import extract_primary_command
 from src.engine import CompressionEngine
 from src.tracker import SavingsTracker
 
@@ -102,9 +103,14 @@ def main():
     if not output.strip():
         sys.exit(returncode)
 
+    # For chained commands (&&, ;), extract the last non-silent segment
+    # so the engine routes to the correct processor.  The full chain was
+    # already executed above; only processor selection needs the primary cmd.
+    primary_cmd = extract_primary_command(command_str)
+
     # Compress
     engine = CompressionEngine()
-    compressed, processor_name, was_compressed = engine.compress(command_str, output)
+    compressed, processor_name, was_compressed = engine.compress(primary_cmd, output)
 
     if dry_run:
         original_len = len(output)
@@ -133,6 +139,13 @@ def main():
         )
         try:
             tracker = SavingsTracker()
+            _log.debug(
+                "Recording: session=%s processor=%s original=%d compressed=%d",
+                tracker.session_id,
+                processor_name,
+                len(output),
+                len(compressed),
+            )
             tracker.record_saving(
                 command=command_str,
                 processor=processor_name,

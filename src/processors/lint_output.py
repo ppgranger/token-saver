@@ -13,6 +13,7 @@ class LintOutputProcessor(Processor):
         r"^(eslint|ruff(\s+check)?|flake8|pylint|clippy|rubocop|golangci-lint|stylelint|biome\s+(check|lint))\b",
         r"^python3?\s+-m\s+(flake8|pylint|ruff|mypy)\b",
         r"^(mypy|prettier\s+--check|shellcheck|hadolint|tflint|ktlint|swiftlint|cargo\s+clippy)\b",
+        r"^(oxlint|deno\s+lint)\b",
     ]
 
     @property
@@ -25,7 +26,8 @@ class LintOutputProcessor(Processor):
                 r"\b(eslint|ruff(\s+check)?|flake8|pylint|clippy|rubocop|"
                 r"golangci-lint|stylelint|prettier\s+--check|biome\s+(check|lint)|"
                 r"python3?\s+-m\s+(flake8|pylint|ruff|mypy)|mypy|"
-                r"shellcheck|hadolint|tflint|ktlint|swiftlint|cargo\s+clippy)\b",
+                r"shellcheck|hadolint|tflint|ktlint|swiftlint|cargo\s+clippy|"
+                r"oxlint|deno\s+lint)\b",
                 command,
             )
         )
@@ -164,6 +166,16 @@ class LintOutputProcessor(Processor):
 
         # biome: file.ts:10:5 lint/rule message
         m = re.match(r"^(.+?):(\d+):\d+\s+(lint/\S+)\s+", line)
+        if m:
+            return m.group(3), m.group(1)
+
+        # golangci-lint: file.go:10:5: message (linter-name)
+        m = re.match(r"^(.+?\.go):(\d+):\d+:\s+.+\(([a-zA-Z][\w-]*)\)\s*$", line)
+        if m:
+            return m.group(3), m.group(1)
+
+        # rubocop: file.rb:10:5: C: Rule/Name: message
+        m = re.match(r"^(.+?\.rb):(\d+):\d+:\s+[CWEFR]:\s+(\S+?):\s+", line)
         if m:
             return m.group(3), m.group(1)
 
