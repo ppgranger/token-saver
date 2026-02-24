@@ -79,7 +79,7 @@ Gemini CLI allows direct output replacement through the deny/reason mechanism.
 - Compression is only applied if the gain exceeds 10%
 - All errors, stack traces, and actionable information are **fully preserved**
 - Only "noise" is removed: progress bars, passing tests, installation logs, ANSI codes, platform lines
-- 372 unit tests including precision-specific tests that verify every critical piece of data survives compression
+- 478 unit tests including precision-specific tests that verify every critical piece of data survives compression
 
 ## Installation
 
@@ -312,7 +312,9 @@ Top Processors
 - **No sensitive data**: only sizes are stored, not output content
 - **Secret redaction**: the `env` processor automatically redacts values of variables matching `*KEY*`, `*SECRET*`, `*TOKEN*`, `*PASSWORD*`, `*CREDENTIAL*` patterns, preventing accidental leakage into AI context windows
 - **Signal forwarding**: the wrapper propagates SIGINT/SIGTERM to the child process
-- **Exclusions**: commands with pipes, redirections, sudo, editors, ssh are never intercepted
+- **Exclusions**: commands with complex pipes, redirections, sudo, editors, ssh are never intercepted
+- **Safe trailing pipes**: simple trailing pipes (`| head`, `| tail`, `| wc`, `| grep`, `| sort`) are allowed
+- **Chained commands**: `&&` and `;` chains are supported — each segment is validated individually
 - **Self-protection**: commands containing `token-saver` or `wrap.py` are not intercepted (prevents recursion)
 
 ## Project Structure
@@ -332,17 +334,19 @@ token-saver/
 │   └── token-saver.cmd              # Windows CLI wrapper
 ├── src/                             # Shared source code
 │   ├── __init__.py                  # Version (__version__)
+│   ├── chain_utils.py               # Chained command splitting (&&, ;)
 │   ├── cli.py                       # CLI entry point (version/stats/update)
-│   ├── version_check.py             # GitHub update check
 │   ├── config.py                    # Configuration system
-│   ├── platforms.py                 # Platform detection + I/O abstraction
 │   ├── engine.py                    # Compression engine (orchestrator)
 │   ├── hook_session.py              # SessionStart hook (stats + update notif)
-│   ├── tracker.py                   # SQLite tracking
+│   ├── platforms.py                 # Platform detection + I/O abstraction
 │   ├── stats.py                     # Stats display
-│   └── processors/                  # 15 auto-discovered processors
+│   ├── tracker.py                   # SQLite tracking
+│   ├── version_check.py             # GitHub update check
+│   └── processors/                  # 18 auto-discovered processors
 │       ├── __init__.py
 │       ├── base.py                  # Abstract Processor class
+│       ├── utils.py                 # Shared utilities (diff compression)
 │       ├── package_list.py          # pip list/freeze, npm ls, conda list
 │       ├── git.py                   # git status/diff/log/show/blame/push/pull
 │       ├── test_output.py           # pytest/jest/cargo/go/dotnet/swift/mix test
@@ -355,26 +359,32 @@ token-saver/
 │       ├── env.py                   # env/printenv (with secret redaction)
 │       ├── search.py                # grep/rg/ag/fd/fdfind
 │       ├── system_info.py           # du/wc/df
+│       ├── gh.py                    # gh pr/issue/run list/view/diff/checks
+│       ├── db_query.py              # psql/mysql/sqlite3/pgcli/mycli/litecli
+│       ├── cloud_cli.py             # aws/gcloud/az
 │       ├── file_listing.py          # ls/find/tree/exa/eza
 │       ├── file_content.py          # cat/bat (content-aware compression)
 │       └── generic.py               # Universal fallback
 ├── docs/
 │   └── processors/                  # Per-processor documentation
-│       ├── git.md
-│       ├── test_output.md
 │       ├── build_output.md
+│       ├── cloud_cli.md
+│       ├── db_query.md
+│       ├── docker.md
+│       ├── env.md
+│       ├── file_content.md
+│       ├── file_listing.md
+│       ├── generic.md
+│       ├── gh.md
+│       ├── git.md
+│       ├── kubectl.md
 │       ├── lint_output.md
 │       ├── network.md
-│       ├── docker.md
-│       ├── kubectl.md
-│       ├── terraform.md
 │       ├── package_list.md
 │       ├── search.md
-│       ├── env.md
 │       ├── system_info.md
-│       ├── file_listing.md
-│       ├── file_content.md
-│       └── generic.md
+│       ├── terraform.md
+│       └── test_output.md
 ├── installers/                      # Modular installer package
 │   ├── common.py                    # Shared constants + utilities
 │   ├── claude.py                    # Claude Code installer
@@ -382,14 +392,18 @@ token-saver/
 ├── install.py                       # Installer entry point
 ├── tests/
 │   ├── test_engine.py               # Engine + registry tests (28)
-│   ├── test_processors.py           # Per-processor tests (165)
-│   ├── test_hooks.py                # Hook pattern + integration tests (38)
-│   ├── test_precision.py            # Precision preservation tests (25)
-│   ├── test_tracker.py              # SQLite + concurrency tests (16)
+│   ├── test_processors.py           # Per-processor tests (263)
+│   ├── test_hooks.py                # Hook pattern + integration tests (77)
+│   ├── test_precision.py            # Precision preservation tests (44)
+│   ├── test_tracker.py              # SQLite + concurrency tests (20)
 │   ├── test_config.py               # Configuration tests (6)
-│   ├── test_version_check.py        # Version check + fail-open tests (7)
+│   ├── test_version_check.py        # Version check + fail-open tests (12)
 │   ├── test_cli.py                  # CLI subcommand tests (7)
-│   └── test_installers.py           # Installer utility tests (15)
+│   └── test_installers.py           # Installer utility tests (21)
+├── audit_compression.py             # Deep audit tool for compression analysis
+├── pyproject.toml                   # Python project config + Ruff rules
+├── CONTRIBUTING.md                  # Developer guide
+├── LICENSE                          # Apache 2.0
 └── README.md
 ```
 
@@ -399,17 +413,17 @@ token-saver/
 python3 -m pytest tests/ -v
 ```
 
-372 tests covering:
+478 tests covering:
 
 - **test_engine.py** (28 tests): compression thresholds, processor priority, ANSI cleanup, generic fallback, hook pattern coverage for 73 commands
-- **test_processors.py** (165 tests): each processor with nominal and edge cases, all new subcommands (blame, inspect, stats, compose, apply/delete, init/output/state, fd, exa, httpie, dotnet/swift/mix test, shellcheck/hadolint/biome, traceback truncation)
-- **test_hooks.py** (38 tests): matching patterns for all supported commands, exclusions (pipes, sudo, editors, redirections), subprocess integration, global options (git, docker, kubectl)
-- **test_precision.py** (25 tests): verification that every critical piece of data survives compression (filenames, hashes, error messages, stack traces, line numbers, rule IDs, diff changes, warning types, secret redaction, unhealthy pods, terraform changes, unmet dependencies)
-- **test_tracker.py** (16 tests): CRUD, concurrency (4 threads), corruption recovery, stats CLI
+- **test_processors.py** (263 tests): each processor with nominal and edge cases, chained command routing, all subcommands (blame, inspect, stats, compose, apply/delete, init/output/state, fd, exa, httpie, dotnet/swift/mix test, shellcheck/hadolint/biome, traceback truncation)
+- **test_hooks.py** (77 tests): matching patterns for all supported commands, exclusions (pipes, sudo, editors, redirections), subprocess integration, global options (git, docker, kubectl), chained commands, safe trailing pipes
+- **test_precision.py** (44 tests): verification that every critical piece of data survives compression (filenames, hashes, error messages, stack traces, line numbers, rule IDs, diff changes, warning types, secret redaction, unhealthy pods, terraform changes, unmet dependencies)
+- **test_tracker.py** (20 tests): CRUD, concurrency (4 threads), corruption recovery, session tracking, stats CLI
 - **test_config.py** (6 tests): defaults, env overrides, invalid values
-- **test_version_check.py** (7 tests): version parsing, comparison, fail-open on errors
+- **test_version_check.py** (12 tests): version parsing, comparison, fail-open on errors
 - **test_cli.py** (7 tests): version/stats/help subcommands, bin script execution
-- **test_installers.py** (15 tests): version stamping, legacy migration, CLI install/uninstall
+- **test_installers.py** (21 tests): version stamping, legacy migration, CLI install/uninstall
 
 ## Debugging
 
@@ -431,7 +445,9 @@ token-saver version
 
 ## Known Limitations
 
-- Does not compress commands with pipes (`git log | head`), redirections (`> file`), or chaining (`&&`, `||`)
+- Does not compress commands with complex pipelines, redirections (`> file`), or `||` chains
+- Simple trailing pipes are supported (`| head`, `| tail`, `| wc`, `| grep`, `| sort`, `| uniq`, `| cut`)
+- Chained commands (`&&`, `;`) are supported — each segment is validated individually
 - `sudo`, `ssh`, `vim` commands are never intercepted
 - Long diff compression truncates per-hunk, not per-file: a diff with many small hunks is not reduced
 - The generic processor only deduplicates **consecutive identical lines**, not similar lines

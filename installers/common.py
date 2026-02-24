@@ -13,6 +13,7 @@ HOOK_MARKER = "token-saver"
 
 SHARED_FILES = [
     "src/__init__.py",
+    "src/chain_utils.py",
     "src/config.py",
     "src/platforms.py",
     "src/engine.py",
@@ -23,7 +24,9 @@ SHARED_FILES = [
     "src/cli.py",
     "src/processors/__init__.py",
     "src/processors/base.py",
+    "src/processors/utils.py",
     "src/processors/git.py",
+    "src/processors/gh.py",
     "src/processors/test_output.py",
     "src/processors/build_output.py",
     "src/processors/lint_output.py",
@@ -31,6 +34,8 @@ SHARED_FILES = [
     "src/processors/docker.py",
     "src/processors/kubectl.py",
     "src/processors/terraform.py",
+    "src/processors/cloud_cli.py",
+    "src/processors/db_query.py",
     "src/processors/env.py",
     "src/processors/search.py",
     "src/processors/system_info.py",
