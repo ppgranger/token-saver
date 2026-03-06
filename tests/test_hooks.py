@@ -501,3 +501,55 @@ class TestChainedCommands:
     def test_three_segment_chain(self):
         assert is_compressible("cd /a && cd /b && git status")
         assert is_compressible("touch f && chmod 644 f && ls -la f")
+
+
+class TestPermissionMode:
+    """Tests for permission_mode → permissionDecision mapping."""
+
+    def _run_hook(self, input_data: dict) -> tuple[str, int]:
+        """Run hook_pretool.py with JSON input, return (stdout, exit_code)."""
+        import subprocess
+
+        hook_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "claude", "hook_pretool.py"
+        )
+        result = subprocess.run(  # noqa: S603, PLW1510
+            [sys.executable, hook_path],
+            input=json.dumps(input_data),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.stdout, result.returncode
+
+    def _get_permission_decision(self, permission_mode=None):
+        """Run hook with a compressible command and return the permissionDecision."""
+        input_data = {"tool_name": "Bash", "tool_input": {"command": "git status"}}
+        if permission_mode is not None:
+            input_data["permission_mode"] = permission_mode
+        stdout, code = self._run_hook(input_data)
+        assert code == 0
+        assert stdout, "Expected rewritten output, got empty"
+        data = json.loads(stdout)
+        return data["hookSpecificOutput"]["permissionDecision"]
+
+    def test_default_permission_mode_returns_ask(self):
+        assert self._get_permission_decision("default") == "ask"
+
+    def test_accept_edits_returns_ask(self):
+        assert self._get_permission_decision("acceptEdits") == "ask"
+
+    def test_plan_mode_returns_deny(self):
+        assert self._get_permission_decision("plan") == "deny"
+
+    def test_bypass_permissions_returns_allow(self):
+        assert self._get_permission_decision("bypassPermissions") == "allow"
+
+    def test_dont_ask_returns_allow(self):
+        assert self._get_permission_decision("dontAsk") == "allow"
+
+    def test_missing_permission_mode_defaults_to_allow(self):
+        assert self._get_permission_decision() == "allow"
+
+    def test_unknown_permission_mode_defaults_to_allow(self):
+        assert self._get_permission_decision("something_new") == "allow"
