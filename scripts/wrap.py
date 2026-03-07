@@ -16,7 +16,7 @@ import signal
 import subprocess
 import sys
 
-# Ensure the extension root is importable (claude/ -> extension/)
+# Ensure the extension root is importable (scripts/ -> plugin root)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src import config

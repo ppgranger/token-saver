@@ -88,13 +88,33 @@ Gemini CLI allows direct output replacement through the deny/reason mechanism.
 - Python 3.10+
 - Claude Code and/or Gemini CLI
 
-### Quick Install
+### Method 1: Claude Code Plugin (recommended)
+
+From the self-hosted marketplace:
+```
+/plugin marketplace add ppgranger/token-saver
+/plugin install token-saver
+```
+
+Or test directly from a local clone:
+```bash
+git clone https://github.com/ppgranger/token-saver.git
+claude --plugin-dir ./token-saver
+```
+
+### Method 2: Manual installation
 
 ```bash
-python3 install.py --target claude    # For Claude Code
-python3 install.py --target gemini    # For Gemini CLI
-python3 install.py --target both      # For both
+git clone https://github.com/ppgranger/token-saver.git
+cd token-saver
+python3 install.py --target claude    # Claude Code only
+python3 install.py --target gemini    # Gemini CLI only
+python3 install.py --target both      # Both platforms
 ```
+
+The manual installer registers token-saver as a native Claude Code plugin
+(equivalent to `/plugin install`). It appears in `/plugin` list and hooks,
+skills, and commands are managed natively by Claude Code.
 
 The repo/zip can be deleted after installation. Token-Saver copies everything
 it needs to `~/.token-saver/` and the platform plugin directories.
@@ -115,16 +135,55 @@ python3 install.py --uninstall              # Remove from all platforms
 python3 install.py --uninstall --keep-data  # Keep stats DB
 ```
 
+### Updating
+
+**Plugin install**: Claude Code handles updates automatically when you refresh the marketplace.
+
+**Manual install**: Run `token-saver update` from anywhere, or:
+```bash
+cd token-saver && git pull && python3 install.py --target claude
+```
+
+**GitHub releases**: Both methods check for new releases via the GitHub API. The `token-saver update` CLI command and the SessionStart hook notification work regardless of install method.
+
+### Upgrading from v1.x to v2.0
+
+If you previously installed token-saver v1.x:
+```bash
+cd token-saver
+git pull
+python3 install.py --target claude
+```
+The installer automatically:
+- Removes legacy hooks from `~/.claude/settings.json` (no longer needed)
+- Removes the old `~/.claude/plugins/token-saver/` directory
+- Installs to the plugin cache as a native Claude Code plugin
+- Registers in `enabledPlugins` and `installed_plugins.json`
+
+You can also run `token-saver update` from anywhere to auto-upgrade.
+
+### Avoid dual installation
+
+Do NOT install token-saver via BOTH `/plugin install` AND `python3 install.py`
+simultaneously — this could register the plugin twice. Use one method or the other.
+
+To switch from manual to marketplace:
+```bash
+python3 install.py --uninstall --target claude
+/plugin marketplace add ppgranger/token-saver
+/plugin install token-saver
+```
+
 ### What the Installer Does
 
 1. Copies (or symlinks) files to:
    - Core: `~/.token-saver/` (CLI, updater, shared source)
-   - Claude Code: `~/.claude/plugins/token-saver/`
+   - Claude Code: `~/.claude/plugins/cache/token-saver-marketplace/token-saver/`
    - Gemini CLI: `~/.gemini/extensions/token-saver/`
-2. Registers hooks in `~/.claude/settings.json` (Claude Code only)
+2. Registers as a native Claude Code plugin in `installed_plugins.json` and `enabledPlugins`
 3. Installs `token-saver` CLI to `~/.local/bin/`
 4. Stamps the current version into plugin manifests
-5. Cleans up any legacy `token-saving` installation
+5. Cleans up any legacy `token-saving` or v1.x installation
 
 ### CLI
 
@@ -321,10 +380,21 @@ Top Processors
 
 ```
 token-saver/
-├── claude/                          # Claude Code specific files
-│   ├── plugin.json                  # Claude Code plugin metadata
+├── .claude-plugin/                  # Plugin metadata
+│   ├── plugin.json                  # Plugin manifest
+│   └── marketplace.json             # Marketplace catalog for distribution
+├── hooks/                           # Native hook declarations
+│   └── hooks.json                   # Claude Code reads this automatically
+├── skills/                          # Agent skills
+│   └── token-saver-config/
+│       └── SKILL.md
+├── commands/                        # Slash commands
+│   └── token-saver-stats.md
+├── scripts/                         # Python hook scripts
+│   ├── __init__.py                  # Package init (prevents namespace conflicts)
 │   ├── hook_pretool.py              # PreToolUse hook (Claude Code)
-│   └── wrap.py                      # CLI wrapper (Claude Code)
+│   ├── wrap.py                      # CLI wrapper (Claude Code)
+│   └── hook_session.py              # SessionStart hook wrapper
 ├── gemini/                          # Gemini CLI specific files
 │   ├── gemini-extension.json        # Gemini extension metadata
 │   ├── hooks.json                   # Gemini hook definitions
@@ -387,9 +457,10 @@ token-saver/
 │       └── test_output.md
 ├── installers/                      # Modular installer package
 │   ├── common.py                    # Shared constants + utilities
-│   ├── claude.py                    # Claude Code installer
+│   ├── claude.py                    # Claude Code installer (native plugin registration)
 │   └── gemini.py                    # Gemini CLI installer
 ├── install.py                       # Installer entry point
+├── CLAUDE.md                        # Plugin instructions
 ├── tests/
 │   ├── test_engine.py               # Engine + registry tests (28)
 │   ├── test_processors.py           # Per-processor tests (263)
@@ -431,7 +502,7 @@ To diagnose issues:
 
 ```bash
 # Test compression on a command without replacing the output
-python3 claude/wrap.py --dry-run 'git status'
+python3 scripts/wrap.py --dry-run 'git status'
 
 # Enable debug logging
 export TOKEN_SAVER_DEBUG=true

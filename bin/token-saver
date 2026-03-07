@@ -32,15 +32,31 @@ def _find_src_dir():
 
     # Third: platform plugin directories (fallback)
     if os.name == "nt":
+        cache_base = os.path.join(appdata, "claude", "plugins", "cache",
+                                  "token-saver-marketplace", "token-saver")
         candidates = [
             os.path.join(appdata, "claude", "plugins", "token-saver"),
             os.path.join(appdata, "gemini", "extensions", "token-saver"),
         ]
     else:
+        cache_base = os.path.join(home, ".claude", "plugins", "cache",
+                                  "token-saver-marketplace", "token-saver")
         candidates = [
             os.path.join(home, ".claude", "plugins", "token-saver"),
             os.path.join(home, ".gemini", "extensions", "token-saver"),
         ]
+
+    # v2 cache: files are under .../token-saver/<version>/
+    if os.path.isdir(cache_base):
+        versions = sorted(
+            (d for d in os.listdir(cache_base)
+             if os.path.isdir(os.path.join(cache_base, d))),
+            reverse=True,
+        )
+        for v in versions:
+            vdir = os.path.join(cache_base, v)
+            if os.path.isfile(os.path.join(vdir, "src", "cli.py")):
+                return vdir
 
     for candidate in candidates:
         if os.path.isfile(os.path.join(candidate, "src", "cli.py")):
