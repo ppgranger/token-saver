@@ -1,0 +1,28 @@
+{
+  "description": "Token-saver: compress verbose CLI output to save tokens",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/hook_pretool.py\"",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/hook_session.py\"",
+            "timeout": 3000
+          }
+        ]
+      }
+    ]
+  }
+}
