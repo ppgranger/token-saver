@@ -92,13 +92,19 @@ def _detect_installed_targets():
     h = os.path.expanduser("~")
     if os.name == "nt":
         appdata = os.environ.get("APPDATA", os.path.join(h, "AppData", "Roaming"))
-        claude_dir = os.path.join(appdata, "claude", "plugins", "token-saver")
+        claude_old = os.path.join(appdata, "claude", "plugins", "token-saver")
+        claude_cache = os.path.join(
+            appdata, "claude", "plugins", "cache", "token-saver-marketplace", "token-saver"
+        )
         gemini_dir = os.path.join(appdata, "gemini", "extensions", "token-saver")
     else:
-        claude_dir = os.path.join(h, ".claude", "plugins", "token-saver")
+        claude_old = os.path.join(h, ".claude", "plugins", "token-saver")
+        claude_cache = os.path.join(
+            h, ".claude", "plugins", "cache", "token-saver-marketplace", "token-saver"
+        )
         gemini_dir = os.path.join(h, ".gemini", "extensions", "token-saver")
 
-    claude_installed = os.path.isdir(claude_dir)
+    claude_installed = os.path.isdir(claude_old) or os.path.isdir(claude_cache)
     gemini_installed = os.path.isdir(gemini_dir)
 
     if claude_installed and gemini_installed:
@@ -184,11 +190,16 @@ def _update_via_tarball(repo_dir, version):
         overlay_items = (
             "src",
             "installers",
-            "claude",
+            "scripts",
+            ".claude-plugin",
+            "hooks",
+            "skills",
+            "commands",
             "gemini",
             "bin",
             "install.py",
             "pyproject.toml",
+            "CLAUDE.md",
         )
         for item in overlay_items:
             s = os.path.join(src_dir, item)
@@ -201,6 +212,13 @@ def _update_via_tarball(repo_dir, version):
                 shutil.copytree(s, d)
             else:
                 shutil.copy2(s, d)
+
+        # Clean up legacy claude/ directory from v1.x
+        legacy_claude = os.path.join(repo_dir, "claude")
+        if os.path.isdir(legacy_claude):
+            shutil.rmtree(legacy_claude)
+            print("Removed legacy claude/ directory.")
+
         print("Files updated from tarball.")
 
 

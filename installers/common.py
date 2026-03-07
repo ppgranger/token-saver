@@ -101,14 +101,15 @@ def install_files(target_dir, file_list, use_symlink=False):
             print(f"  COPY {rel_path}")
 
     # Fix hooks.json for Windows: replace python3 with python
-    hooks_path = os.path.join(target_dir, "gemini", "hooks.json")
-    if IS_WINDOWS and os.path.exists(hooks_path) and not os.path.islink(hooks_path):
-        with open(hooks_path) as f:
-            content = f.read()
-        content = content.replace("python3 ", "python ")
-        with open(hooks_path, "w") as f:
-            f.write(content)
-        print("  PATCHED hooks.json for Windows python")
+    for hooks_rel in ("gemini/hooks.json", "hooks/hooks.json"):
+        hooks_path = os.path.join(target_dir, hooks_rel)
+        if IS_WINDOWS and os.path.exists(hooks_path) and not os.path.islink(hooks_path):
+            with open(hooks_path) as f:
+                content = f.read()
+            content = content.replace("python3 ", "python ")
+            with open(hooks_path, "w") as f:
+                f.write(content)
+            print(f"  PATCHED {hooks_rel} for Windows python")
 
 
 def uninstall_dir(target_dir):
@@ -226,6 +227,10 @@ def _read_version():
 def stamp_version(target_dir, manifest_paths):
     """Stamp the current version into JSON manifest files.
 
+    Handles both top-level version fields (plugin.json, gemini-extension.json)
+    and nested marketplace catalog entries (marketplace.json has version inside
+    plugins[].version).
+
     Skips files that are symlinks (development mode).
 
     Args:
@@ -239,7 +244,17 @@ def stamp_version(target_dir, manifest_paths):
             continue
         with open(manifest) as f:
             data = json.load(f)
-        data["version"] = version
+
+        # Stamp top-level version if it exists or this isn't a marketplace file
+        if "version" in data or "plugins" not in data:
+            data["version"] = version
+
+        # Stamp nested plugin entries in marketplace catalogs
+        if "plugins" in data and isinstance(data["plugins"], list):
+            for plugin_entry in data["plugins"]:
+                if isinstance(plugin_entry, dict) and "version" in plugin_entry:
+                    plugin_entry["version"] = version
+
         with open(manifest, "w") as f:
             json.dump(data, f, indent=2)
             f.write("\n")
@@ -260,9 +275,18 @@ CORE_FILES = [
     "install.py",
     "bin/token-saver",
     "bin/token-saver.cmd",
-    "claude/plugin.json",
-    "claude/hook_pretool.py",
-    "claude/wrap.py",
+    # Claude Code plugin structure
+    ".claude-plugin/plugin.json",
+    ".claude-plugin/marketplace.json",
+    "hooks/hooks.json",
+    "scripts/__init__.py",
+    "scripts/hook_pretool.py",
+    "scripts/wrap.py",
+    "scripts/hook_session.py",
+    "skills/token-saver-config/SKILL.md",
+    "commands/token-saver-stats.md",
+    "CLAUDE.md",
+    # Gemini CLI extension
     "gemini/gemini-extension.json",
     "gemini/hooks.json",
     "gemini/hook_aftertool.py",
@@ -273,6 +297,13 @@ def install_core(use_symlink=False):
     """Install core files to ~/.token-saver/ so CLI and update work standalone."""
     data_dir = token_saver_data_dir()
     print(f"\n--- Core ({data_dir}) ---")
+
+    # Clean up legacy claude/ directory from v1.x inside core install
+    legacy_claude = os.path.join(data_dir, "claude")
+    if os.path.isdir(legacy_claude):
+        shutil.rmtree(legacy_claude)
+        print(f"  REMOVED legacy {legacy_claude}")
+
     install_files(data_dir, CORE_FILES, use_symlink)
     # Ensure bin/token-saver is executable in the core install
     bin_path = os.path.join(data_dir, "bin", "token-saver")
