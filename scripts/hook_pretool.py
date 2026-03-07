@@ -12,7 +12,7 @@ import re
 import shlex
 import sys
 
-# Ensure the extension root is importable (claude/ -> extension/)
+# Ensure the extension root is importable (scripts/ -> plugin root)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.chain_utils import CHAIN_SPLIT_RE, SILENT_CMDS_RE, split_chain

@@ -6,7 +6,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from claude.hook_pretool import is_compressible
+from scripts.hook_pretool import is_compressible
 
 
 class TestHookPretool:
@@ -267,9 +267,8 @@ class TestHookPretoolIntegration:
         """Run hook_pretool.py with JSON input, return (stdout, exit_code)."""
         import subprocess
 
-        hook_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "claude", "hook_pretool.py"
-        )
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        hook_path = os.path.join(repo_root, "scripts", "hook_pretool.py")
         result = subprocess.run(  # noqa: S603, PLW1510
             [sys.executable, hook_path],
             input=json.dumps(input_data),
@@ -304,9 +303,8 @@ class TestHookPretoolIntegration:
     def test_invalid_json_exits_cleanly(self):
         import subprocess
 
-        hook_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "claude", "hook_pretool.py"
-        )
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        hook_path = os.path.join(repo_root, "scripts", "hook_pretool.py")
         result = subprocess.run(  # noqa: S603, PLW1510
             [sys.executable, hook_path],
             input="not json",

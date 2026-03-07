@@ -10,6 +10,27 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.tracker import SavingsTracker
 
 
+def _check_migration_message():
+    """Return a one-time migration notice if upgrading to v2.0."""
+    from src import __version__, data_dir  # noqa: PLC0415
+
+    sentinel = os.path.join(data_dir(), ".migrated_v2")
+    if os.path.exists(sentinel):
+        return None
+
+    os.makedirs(data_dir(), exist_ok=True)
+    try:
+        with open(sentinel, "w") as f:
+            f.write(__version__)
+    except OSError:
+        pass
+
+    return (
+        f"token-saver v{__version__} — Now a native Claude Code plugin! "
+        "Manage via /plugin or keep using manual install."
+    )
+
+
 def main():
     message = None
 
@@ -41,6 +62,14 @@ def main():
         update_msg = check_for_update()
         if update_msg:
             message = f"{message} | {update_msg}"
+    except Exception:  # noqa: S110
+        pass
+
+    # One-time migration notice for v2.0
+    try:
+        migration_msg = _check_migration_message()
+        if migration_msg:
+            message = f"{message} | {migration_msg}"
     except Exception:  # noqa: S110
         pass
 
