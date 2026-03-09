@@ -72,6 +72,16 @@ def _plugin_cache_dir(version):
     )
 
 
+def _marketplace_dir():
+    """Return the marketplace directory for token-saver.
+
+    Claude Code reads .claude-plugin/marketplace.json from this path to
+    discover available plugins.  This mirrors the layout produced by
+    ``/plugin marketplace add``.
+    """
+    return os.path.join(_settings_dir(), "plugins", "marketplaces", _MARKETPLACE_NAME)
+
+
 def _settings_path():
     """Return path to Claude Code settings.json."""
     return os.path.join(_settings_dir(), "settings.json")
@@ -110,12 +120,14 @@ def _iso_now():
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
-def _register_plugin(target_dir, version):
+def _register_plugin(marketplace_dir, cache_dir, version):
     """Register token-saver as a native Claude Code plugin.
 
-    Registers the GitHub repo as a known marketplace, writes the plugin
-    entry in installed_plugins.json (v2 format), and enables it in
-    settings.json.
+    Registers the GitHub repo as a known marketplace (pointing
+    ``installLocation`` at *marketplace_dir* so Claude Code can find
+    ``.claude-plugin/marketplace.json``), writes the plugin entry in
+    installed_plugins.json (v2 format, ``installPath`` → *cache_dir*),
+    and enables it in settings.json.
     """
     plugins_dir = os.path.join(_settings_dir(), "plugins")
     os.makedirs(plugins_dir, exist_ok=True)
@@ -135,8 +147,9 @@ def _register_plugin(target_dir, version):
         "source": {
             "source": "github",
             "repo": _GITHUB_REPO,
+            "ref": "production",
         },
-        "installLocation": target_dir,
+        "installLocation": marketplace_dir,
         "lastUpdated": now,
     }
 
@@ -161,7 +174,7 @@ def _register_plugin(target_dir, version):
     registry["plugins"][_PLUGIN_KEY] = [
         {
             "scope": "user",
-            "installPath": target_dir,
+            "installPath": cache_dir,
             "version": version,
             "installedAt": now,
             "lastUpdated": now,
@@ -371,21 +384,25 @@ def install(use_symlink=False):
 
     # 2. Install files to the versioned plugin cache directory
     version = _read_version()
-    target_dir = _plugin_cache_dir(version)
-    print(f"\n--- Claude Code ({target_dir}) ---")
-    install_files(target_dir, CLAUDE_FILES, use_symlink)
+    cache_dir = _plugin_cache_dir(version)
+    print(f"\n--- Claude Code (cache: {cache_dir}) ---")
+    install_files(cache_dir, CLAUDE_FILES, use_symlink)
 
-    # 3. Stamp version in BOTH plugin.json and marketplace.json
-    stamp_version(
-        target_dir,
-        [
-            ".claude-plugin/plugin.json",
-            ".claude-plugin/marketplace.json",
-        ],
-    )
+    # 3. Install files to the marketplace directory (for plugin discovery)
+    mkt_dir = _marketplace_dir()
+    print(f"--- Claude Code (marketplace: {mkt_dir}) ---")
+    install_files(mkt_dir, CLAUDE_FILES, use_symlink)
 
-    # 4. Register marketplace + plugin
-    _register_plugin(target_dir, version)
+    # 4. Stamp version in BOTH plugin.json and marketplace.json (in both dirs)
+    version_files = [
+        ".claude-plugin/plugin.json",
+        ".claude-plugin/marketplace.json",
+    ]
+    stamp_version(cache_dir, version_files)
+    stamp_version(mkt_dir, version_files)
+
+    # 5. Register marketplace + plugin (marketplace dir for discovery, cache for runtime)
+    _register_plugin(mkt_dir, cache_dir, version)
 
     print("  Plugin registered. Restart Claude Code, then /plugin to manage.")
 
@@ -404,6 +421,11 @@ def uninstall():
     )
     if os.path.isdir(cache_root):
         uninstall_dir(cache_root)
+
+    # Remove marketplace discovery directory
+    mkt_dir = _marketplace_dir()
+    if os.path.isdir(mkt_dir):
+        uninstall_dir(mkt_dir)
 
     # Also remove old v1 location if it still exists
     old_dir = _plugin_dir()
