@@ -504,11 +504,13 @@ class TestRegisterPlugin:
 
     def setup_method(self):
         self.tmp_home = tempfile.mkdtemp()
-        self.tmp_target = tempfile.mkdtemp()
+        self.tmp_target = tempfile.mkdtemp()  # cache dir (plugin runtime)
+        self.tmp_marketplace = tempfile.mkdtemp()  # marketplace dir (discovery)
 
     def teardown_method(self):
         shutil.rmtree(self.tmp_home, ignore_errors=True)
         shutil.rmtree(self.tmp_target, ignore_errors=True)
+        shutil.rmtree(self.tmp_marketplace, ignore_errors=True)
 
     def _settings_dir(self):
         return os.path.join(self.tmp_home, ".claude")
@@ -534,7 +536,7 @@ class TestRegisterPlugin:
         from installers.claude import _register_plugin
 
         with mock.patch("installers.claude.home", return_value=self.tmp_home):
-            _register_plugin(self.tmp_target, "2.0.0")
+            _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
 
         with open(self._known_marketplaces_path()) as f:
             known = json.load(f)
@@ -542,13 +544,14 @@ class TestRegisterPlugin:
         entry = known["token-saver-marketplace"]
         assert entry["source"]["source"] == "github"
         assert entry["source"]["repo"] == "ppgranger/token-saver"
-        assert entry["installLocation"] == self.tmp_target
+        assert entry["source"]["ref"] == "production"
+        assert entry["installLocation"] == self.tmp_marketplace
 
     def test_registers_in_installed_plugins_v2_format(self):
         from installers.claude import _register_plugin
 
         with mock.patch("installers.claude.home", return_value=self.tmp_home):
-            _register_plugin(self.tmp_target, "2.0.0")
+            _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
 
         with open(self._installed_plugins_path()) as f:
             data = json.load(f)
@@ -565,7 +568,7 @@ class TestRegisterPlugin:
         from installers.claude import _register_plugin
 
         with mock.patch("installers.claude.home", return_value=self.tmp_home):
-            _register_plugin(self.tmp_target, "2.0.0")
+            _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
 
         with open(self._settings_path()) as f:
             settings = json.load(f)
@@ -576,8 +579,8 @@ class TestRegisterPlugin:
         from installers.claude import _register_plugin
 
         with mock.patch("installers.claude.home", return_value=self.tmp_home):
-            _register_plugin(self.tmp_target, "2.0.0")
-            _register_plugin(self.tmp_target, "2.0.0")
+            _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
+            _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
 
         with open(self._installed_plugins_path()) as f:
             data = json.load(f)
@@ -602,7 +605,7 @@ class TestRegisterPlugin:
             )
 
         with mock.patch("installers.claude.home", return_value=self.tmp_home):
-            _register_plugin(self.tmp_target, "2.0.0")
+            _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
 
         with open(km_path) as f:
             known = json.load(f)
@@ -627,7 +630,7 @@ class TestRegisterPlugin:
             )
 
         with mock.patch("installers.claude.home", return_value=self.tmp_home):
-            _register_plugin(self.tmp_target, "2.0.0")
+            _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
 
         with open(plugins_path) as f:
             data = json.load(f)
