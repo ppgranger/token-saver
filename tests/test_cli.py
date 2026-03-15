@@ -47,7 +47,7 @@ class TestStatsCommand:
     def test_stats_human_readable(self):
         rc, stdout, _ = _run_cli("stats")
         assert rc == 0
-        assert "Token-Saver Statistics" in stdout
+        assert "Token-Saver Savings" in stdout
 
     def test_stats_json(self):
         rc, stdout, _ = _run_cli("stats", "--json")
