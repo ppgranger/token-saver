@@ -12,7 +12,7 @@
       "name": "token-saver",
       "source": "./",
       "description": "Automatically compresses verbose CLI output to save tokens. Supports git, docker, npm, terraform, kubectl, and 13+ other command families.",
-      "version": "2.0.1",
+      "version": "2.0.2",
       "author": {
         "name": "ppgranger"
       },

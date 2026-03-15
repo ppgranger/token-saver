@@ -224,6 +224,39 @@ class SavingsTracker:
             "ratio": round(ratio, 1),
         }
 
+    def get_top_commands(self, limit: int = 10) -> list[dict]:
+        """Get commands with the most token savings."""
+        with self._lock:
+            rows = self.conn.execute(
+                """
+                SELECT command,
+                       COUNT(*) as count,
+                       SUM(original_size) as total_original,
+                       SUM(compressed_size) as total_compressed,
+                       SUM(original_size - compressed_size) as total_saved
+                FROM savings
+                GROUP BY command
+                ORDER BY total_saved DESC
+                LIMIT ?
+            """,
+                (limit,),
+            ).fetchall()
+        results = []
+        for r in rows:
+            orig = r["total_original"]
+            ratio = ((orig - r["total_compressed"]) / orig * 100) if orig > 0 else 0.0
+            results.append(
+                {
+                    "command": r["command"],
+                    "count": r["count"],
+                    "total_original": orig,
+                    "total_compressed": r["total_compressed"],
+                    "total_saved": r["total_saved"],
+                    "avg_ratio": round(ratio, 1),
+                }
+            )
+        return results
+
     def get_top_processors(self, limit: int = 5) -> list[dict]:
         """Get the most effective processors."""
         with self._lock:

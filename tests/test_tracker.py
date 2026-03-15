@@ -120,6 +120,36 @@ class TestSavingsTracker:
         assert len(top) == 2
         assert top[0]["processor"] == "git"  # More saved
 
+    def test_top_commands_grouping_and_order(self):
+        """get_top_commands groups by command and orders by total_saved DESC."""
+        self.tracker.record_saving("git status", "git", 1000, 200, "claude_code")
+        self.tracker.record_saving("git status", "git", 1000, 300, "claude_code")
+        self.tracker.record_saving("git diff", "git", 5000, 1000, "claude_code")
+        self.tracker.record_saving("pytest", "test", 500, 100, "claude_code")
+        top = self.tracker.get_top_commands()
+        assert len(top) == 3
+        # git diff saved 4000, git status saved 1500, pytest saved 400
+        assert top[0]["command"] == "git diff"
+        assert top[0]["total_saved"] == 4000
+        assert top[0]["count"] == 1
+        assert top[1]["command"] == "git status"
+        assert top[1]["total_saved"] == 1500
+        assert top[1]["count"] == 2
+        assert top[2]["command"] == "pytest"
+
+    def test_top_commands_limit(self):
+        """get_top_commands respects the limit parameter."""
+        for i in range(5):
+            self.tracker.record_saving(f"cmd-{i}", "test", 100 * (i + 1), 10, "claude_code")
+        top = self.tracker.get_top_commands(limit=3)
+        assert len(top) == 3
+
+    def test_top_commands_avg_ratio(self):
+        """get_top_commands computes avg_ratio correctly."""
+        self.tracker.record_saving("git status", "git", 1000, 200, "claude_code")
+        top = self.tracker.get_top_commands()
+        assert top[0]["avg_ratio"] == 80.0
+
     def test_concurrent_writes(self):
         """Multiple threads writing should not crash."""
         errors = []
@@ -256,7 +286,7 @@ class TestStatsCLI:
     def test_empty_db_human(self):
         result = self._run_stats()
         assert result.returncode == 0
-        assert "Token-Saver Statistics" in result.stdout
+        assert "Token-Saver Savings" in result.stdout
         assert "No compressions" in result.stdout
 
     def test_empty_db_json(self):
@@ -271,10 +301,10 @@ class TestStatsCLI:
         self._seed_data()
         result = self._run_stats()
         assert result.returncode == 0
-        assert "Lifetime" in result.stdout
-        assert "Commands compressed:" in result.stdout
-        assert "Saved:" in result.stdout
-        assert "Top Processors" in result.stdout
+        assert "Token-Saver Savings" in result.stdout
+        assert "Total commands:" in result.stdout
+        assert "Tokens saved:" in result.stdout
+        assert "By Command" in result.stdout
         assert "git" in result.stdout
 
     def test_with_data_json(self):
@@ -288,6 +318,12 @@ class TestStatsCLI:
         assert data["lifetime"]["saved"] == 14700
         assert len(data["top_processors"]) == 2
         assert data["top_processors"][0]["processor"] == "git"
+        # top_commands should be present
+        assert "top_commands" in data
+        assert len(data["top_commands"]) > 0
+        assert "command" in data["top_commands"][0]
+        assert "total_saved" in data["top_commands"][0]
+        assert "avg_ratio" in data["top_commands"][0]
 
     def test_top_processors_order(self):
         self._seed_data()

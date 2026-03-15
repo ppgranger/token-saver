@@ -14,6 +14,21 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.tracker import SavingsTracker
 
+# ── ANSI escape codes ──────────────────────────────────────────────
+BOLD = "\033[1m"
+DIM = "\033[2m"
+RESET = "\033[0m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+RED = "\033[31m"
+CYAN = "\033[36m"
+WHITE = "\033[97m"
+BOLD_GREEN = "\033[1;32m"
+BOLD_WHITE = "\033[1;97m"
+BOLD_YELLOW = "\033[1;33m"
+
+WIDTH = 50
+
 
 def _chars_to_tokens(n: int) -> int:
     """Estimate token count from character count."""
@@ -25,10 +40,99 @@ def _chars_to_tokens(n: int) -> int:
 def _format_tokens(n: int) -> str:
     """Human-readable token count."""
     if n < 1_000:
-        return f"{n} tokens"
+        return f"{n}"
     if n < 1_000_000:
-        return f"{n / 1_000:.1f}k tokens"
-    return f"{n / 1_000_000:.1f}M tokens"
+        return f"{n / 1_000:.1f}K"
+    return f"{n / 1_000_000:.1f}M"
+
+
+def _ratio_color(ratio: float) -> str:
+    """Return ANSI color code based on compression ratio."""
+    if ratio >= 60:
+        return GREEN
+    if ratio >= 30:
+        return YELLOW
+    return RED
+
+
+def _progress_bar(ratio: float, width: int = 20) -> str:
+    """Render a progress bar with filled/empty blocks."""
+    filled = round(ratio / 100 * width)
+    empty = width - filled
+    return f"{CYAN}{'█' * filled}{'░' * empty}{RESET}"
+
+
+def _impact_bar(value: float, max_value: float, width: int = 10) -> str:
+    """Render an impact bar proportional to max value."""
+    if max_value <= 0:
+        return ""
+    filled = max(1, round(value / max_value * width))
+    return f"{CYAN}{'█' * filled}{RESET}"
+
+
+def _print_header():
+    print()
+    print(f"  {BOLD_GREEN}Token-Saver Savings (Lifetime){RESET}")
+    print(f"  {BOLD_YELLOW}{'═' * WIDTH}{RESET}")
+
+
+def _print_summary(lifetime):
+    orig_tokens = _chars_to_tokens(lifetime["original"])
+    comp_tokens = _chars_to_tokens(lifetime["compressed"])
+    saved_tokens = _chars_to_tokens(lifetime["saved"])
+    ratio = lifetime["ratio"]
+    color = _ratio_color(ratio)
+
+    print()
+    print(f"  {'Total commands:':<20s} {BOLD_WHITE}{lifetime['commands']}{RESET}")
+    print(f"  {'Input tokens:':<20s} {BOLD_WHITE}{_format_tokens(orig_tokens)}{RESET}")
+    print(f"  {'Output tokens:':<20s} {BOLD_WHITE}{_format_tokens(comp_tokens)}{RESET}")
+    print(
+        f"  {'Tokens saved:':<20s} {BOLD_WHITE}{_format_tokens(saved_tokens)}{RESET}"
+        f" {color}({ratio}%){RESET}"
+    )
+    print(f"  {'Efficiency:':<20s} {_progress_bar(ratio)}  {color}{ratio}%{RESET}")
+
+
+def _print_by_command(top_commands):
+    if not top_commands:
+        return
+
+    print()
+    print(f"  {BOLD_GREEN}By Command{RESET}")
+    print(f"  {BOLD_YELLOW}{'─' * WIDTH}{RESET}")
+    print()
+
+    # Header row
+    print(
+        f"  {DIM}{'#':>3s}{RESET}  "
+        f"{'Command':<20s}  "
+        f"{'Count':>5s}  "
+        f"{'Saved':>6s}  "
+        f"{'Avg%':>5s}  "
+        f"Impact"
+    )
+
+    max_saved = top_commands[0]["total_saved"] if top_commands else 1
+    cmd_width = 20
+
+    for i, cmd in enumerate(top_commands, 1):
+        saved_tokens = _chars_to_tokens(cmd["total_saved"])
+        ratio = cmd["avg_ratio"]
+        color = _ratio_color(ratio)
+        bar = _impact_bar(cmd["total_saved"], max_saved)
+        name = cmd["command"][:cmd_width].ljust(cmd_width)
+
+        print(
+            f"  {DIM}{i:>3d}.{RESET} "
+            f"{CYAN}{name}{RESET} "
+            f"{cmd['count']:>5d}  "
+            f"{BOLD_WHITE}{_format_tokens(saved_tokens):>6s}{RESET}  "
+            f"{color}{ratio:>5.1f}%{RESET}  "
+            f"{bar}"
+        )
+
+    print()
 
 
 def main():
@@ -49,47 +153,36 @@ def main():
     tracker = SavingsTracker(session_id=session_id)
     session = tracker.get_session_stats()
     lifetime = tracker.get_lifetime_stats()
-    top = tracker.get_top_processors(limit=5)
+    top_processors = tracker.get_top_processors(limit=5)
+    top_commands = tracker.get_top_commands(limit=10)
     tracker.close()
 
     if as_json:
-        json.dump({"session": session, "lifetime": lifetime, "top_processors": top}, sys.stdout)
+        json.dump(
+            {
+                "session": session,
+                "lifetime": lifetime,
+                "top_processors": top_processors,
+                "top_commands": top_commands,
+            },
+            sys.stdout,
+        )
         sys.stdout.write("\n")
         return
 
     # --- Human-readable output ---
-    print("Token-Saver Statistics")
-    print("=" * 40)
-
-    print("\nSession")
-    print("-" * 40)
-    if session["commands"] == 0:
-        print("  No compressions in this session.")
-    else:
-        print(f"  Commands compressed:  {session['commands']}")
-        print(f"  Original tokens:      {_format_tokens(_chars_to_tokens(session['original']))}")
-        print(f"  Compressed tokens:    {_format_tokens(_chars_to_tokens(session['compressed']))}")
-        saved = _format_tokens(_chars_to_tokens(session["saved"]))
-        print(f"  Saved:                {saved} ({session['ratio']}%)")
-
-    print("\nLifetime")
-    print("-" * 40)
     if lifetime["commands"] == 0:
+        print()
+        print(f"  {BOLD_GREEN}Token-Saver Savings{RESET}")
+        print(f"  {BOLD_YELLOW}{'═' * WIDTH}{RESET}")
+        print()
         print("  No compressions recorded yet.")
-    else:
-        print(f"  Sessions:             {lifetime['sessions']}")
-        print(f"  Commands compressed:  {lifetime['commands']}")
-        print(f"  Original tokens:      {_format_tokens(_chars_to_tokens(lifetime['original']))}")
-        print(f"  Compressed tokens:    {_format_tokens(_chars_to_tokens(lifetime['compressed']))}")
-        saved = _format_tokens(_chars_to_tokens(lifetime["saved"]))
-        print(f"  Saved:                {saved} ({lifetime['ratio']}%)")
+        print()
+        return
 
-    if top:
-        print("\nTop Processors")
-        print("-" * 40)
-        for entry in top:
-            saved = _format_tokens(_chars_to_tokens(entry["saved"]))
-            print(f"  {entry['processor']:<20s} {entry['count']:>4d} cmds, {saved} saved")
+    _print_header()
+    _print_summary(lifetime)
+    _print_by_command(top_commands)
 
 
 if __name__ == "__main__":
