@@ -245,14 +245,16 @@ class SavingsTracker:
         for r in rows:
             orig = r["total_original"]
             ratio = ((orig - r["total_compressed"]) / orig * 100) if orig > 0 else 0.0
-            results.append({
-                "command": r["command"],
-                "count": r["count"],
-                "total_original": orig,
-                "total_compressed": r["total_compressed"],
-                "total_saved": r["total_saved"],
-                "avg_ratio": round(ratio, 1),
-            })
+            results.append(
+                {
+                    "command": r["command"],
+                    "count": r["count"],
+                    "total_original": orig,
+                    "total_compressed": r["total_compressed"],
+                    "total_saved": r["total_saved"],
+                    "avg_ratio": round(ratio, 1),
+                }
+            )
         return results
 
     def get_top_processors(self, limit: int = 5) -> list[dict]:
