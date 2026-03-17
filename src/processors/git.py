@@ -175,6 +175,12 @@ class GitProcessor(Processor):
 
         return "\n".join(result) if result else output
 
+    _LOCK_FILES = {
+        "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+        "poetry.lock", "Pipfile.lock", "Cargo.lock",
+        "composer.lock", "Gemfile.lock", "go.sum", "bun.lockb",
+    }
+
     def _process_diff(self, output: str, command: str = "") -> str:
         lines = output.splitlines()
 
@@ -188,10 +194,55 @@ class GitProcessor(Processor):
         if lines and not any(line.startswith("diff --git") for line in lines):
             return self._process_diff_stat(lines)
 
+        # Pre-scan: separate lockfile diffs from normal diffs
+        non_lock_lines: list[str] = []
+        lockfile_summaries: list[str] = []
+        current_file = ""
+        current_file_lines = 0
+        in_lockfile = False
+
+        for line in lines:
+            if line.startswith("diff --git"):
+                # Flush previous lockfile summary
+                if in_lockfile and current_file:
+                    lockfile_summaries.append(f"diff --git {current_file}")
+                    lockfile_summaries.append(
+                        f"  (lockfile changed, {current_file_lines} lines)"
+                    )
+                # Detect new file
+                m = re.match(r"^diff --git a/(.+?) b/", line)
+                filename = m.group(1).rsplit("/", 1)[-1] if m else ""
+                in_lockfile = filename in self._LOCK_FILES
+                if in_lockfile:
+                    current_file = filename
+                    current_file_lines = 0
+                else:
+                    non_lock_lines.append(line)
+                continue
+
+            if in_lockfile:
+                current_file_lines += 1
+                continue
+
+            non_lock_lines.append(line)
+
+        # Flush last lockfile
+        if in_lockfile and current_file:
+            lockfile_summaries.append(f"diff --git {current_file}")
+            lockfile_summaries.append(
+                f"  (lockfile changed, {current_file_lines} lines)"
+            )
+
+        # Compress the non-lockfile lines, then append lockfile summaries
         max_hunk = config.get("max_diff_hunk_lines")
         max_context = config.get("max_diff_context_lines")
-        result = compress_diff(lines, max_hunk, max_context)
-        return "\n".join(result)
+        if any(line.startswith("diff --git") for line in non_lock_lines):
+            result = compress_diff(non_lock_lines, max_hunk, max_context)
+            result.extend(lockfile_summaries)
+            return "\n".join(result)
+        if lockfile_summaries:
+            return "\n".join(lockfile_summaries)
+        return "\n".join(non_lock_lines)
 
     def _process_name_list(self, lines: list[str]) -> str:
         """Compress --name-only or --name-status output: group by directory."""

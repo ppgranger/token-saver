@@ -2567,6 +2567,66 @@ class TestGitStatusShortBranch:
         assert "On branch feature/foo" in result
 
 
+class TestGitLockfileDiff:
+    """Tests for lockfile detection in git diff output."""
+
+    def setup_method(self):
+        self.p = GitProcessor()
+
+    def test_lockfile_only_diff_summarized(self):
+        """A diff containing only package-lock.json should be summarized."""
+        lock_lines = ["diff --git a/package-lock.json b/package-lock.json"]
+        lock_lines.append("index abc1234..def5678 100644")
+        lock_lines.append("--- a/package-lock.json")
+        lock_lines.append("+++ b/package-lock.json")
+        lock_lines.append("@@ -1,100 +1,100 @@")
+        for i in range(500):
+            lock_lines.append(f'+    "pkg-{i}": "{i}.0.0",')
+        output = "\n".join(lock_lines)
+        result = self.p.process("git diff", output)
+        assert "lockfile changed" in result
+        assert "package-lock.json" in result
+        assert len(result.splitlines()) <= 5
+
+    def test_mixed_lockfile_and_normal(self):
+        """Lockfile should be summarized, normal file compressed normally."""
+        lines = [
+            "diff --git a/src/app.py b/src/app.py",
+            "@@ -1,5 +1,5 @@",
+            "-old line",
+            "+new line",
+            " context",
+            "diff --git a/yarn.lock b/yarn.lock",
+            "index abc..def 100644",
+            "--- a/yarn.lock",
+            "+++ b/yarn.lock",
+            "@@ -1,200 +1,200 @@",
+        ]
+        for i in range(200):
+            lines.append(f'+pkg-{i}@^{i}.0.0:')
+        output = "\n".join(lines)
+        result = self.p.process("git diff", output)
+        # Normal file is preserved
+        assert "app.py" in result
+        assert "+new line" in result
+        # Lockfile is summarized
+        assert "lockfile changed" in result
+        assert "yarn.lock" in result
+
+    def test_normal_files_only_unchanged(self):
+        """Diffs with only normal files should be compressed normally."""
+        output = "\n".join([
+            "diff --git a/src/app.py b/src/app.py",
+            "@@ -1,3 +1,3 @@",
+            "-old",
+            "+new",
+            " context",
+        ])
+        result = self.p.process("git diff", output)
+        assert "lockfile" not in result
+        assert "+new" in result
+
+
 class TestBuildBunCanHandle:
     """Test bun command handling in build processor."""
 
