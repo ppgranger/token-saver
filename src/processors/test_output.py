@@ -77,6 +77,7 @@ class TestOutputProcessor(Processor):
         warning_lines: list[str] = []
         summary_lines = []
         passed_count = 0
+        param_tests: dict[str, dict] = {}  # base_name -> {"passed": int, "failed": [param]}
 
         for line in lines:
             # Skip collection output
@@ -152,11 +153,25 @@ class TestOutputProcessor(Processor):
             # Count passed tests
             if re.search(r"\bPASSED\b", line):
                 passed_count += 1
+                # Track parameterized tests
+                m = re.match(r"^(\S+?)\[(.+)\]\s+PASSED", line.strip())
+                if m:
+                    base = m.group(1)
+                    param_tests.setdefault(base, {"passed": 0, "failed": []})
+                    param_tests[base]["passed"] += 1
                 continue
 
             # Keep FAILED/ERROR individual lines
             if re.search(r"\bFAILED\b|\bERROR\b", line):
-                result.append(line)
+                # Track parameterized test failures
+                m = re.match(r"^(\S+?)\[(.+)\]\s+FAILED", line.strip())
+                if m:
+                    base = m.group(1)
+                    param = m.group(2)
+                    param_tests.setdefault(base, {"passed": 0, "failed": []})
+                    param_tests[base]["failed"].append(param)
+                else:
+                    result.append(line)
                 continue
 
             # Keep final summary lines (skip "test session starts" header)
@@ -174,6 +189,19 @@ class TestOutputProcessor(Processor):
         # Handle unclosed failure block
         if failure_block:
             result.extend(self._truncate_traceback(failure_block))
+
+        # Add grouped summaries for parameterized tests with failures
+        for base, info in param_tests.items():
+            if info["failed"]:
+                total = info["passed"] + len(info["failed"])
+                failed_params = ", ".join(info["failed"][:5])
+                extra = ""
+                if len(info["failed"]) > 5:
+                    extra = f", ... ({len(info['failed']) - 5} more)"
+                result.append(
+                    f"{base}: {info['passed']}/{total} passed, "
+                    f"FAILED: [{failed_params}{extra}]"
+                )
 
         if passed_count > 0:
             result.insert(0, f"[{passed_count} tests passed]")

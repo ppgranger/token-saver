@@ -568,6 +568,51 @@ class TestTestOutputProcessor:
         assert result == block
 
 
+class TestPytestParameterized:
+    """Tests for parameterized test grouping."""
+
+    def setup_method(self):
+        self.p = TestOutputProcessor()
+
+    def test_all_param_passed_grouped(self):
+        """50 parameterized tests all PASSED should show just the count."""
+        lines = []
+        for i in range(50):
+            lines.append(f"tests/test_math.py::test_add[{i}] PASSED")
+        lines.append("======================== 50 passed in 1.0s ========================")
+        output = "\n".join(lines)
+        result = self.p.process("pytest -v", output)
+        assert "50 tests passed" in result
+        # Individual param lines should not appear
+        assert "test_add[0] PASSED" not in result
+
+    def test_param_with_failures_grouped(self):
+        """Parameterized tests with failures should show grouped summary."""
+        lines = []
+        for i in range(47):
+            lines.append(f"tests/test_math.py::test_add[{i}] PASSED")
+        for i in range(47, 50):
+            lines.append(f"tests/test_math.py::test_add[{i}] FAILED")
+        lines.append("======================== 47 passed, 3 failed ========================")
+        output = "\n".join(lines)
+        result = self.p.process("pytest -v", output)
+        assert "47/50 passed" in result
+        assert "FAILED: [47, 48, 49]" in result
+
+    def test_non_param_unchanged(self):
+        """Non-parameterized tests should not trigger grouping."""
+        lines = [
+            "tests/test_app.py::test_one PASSED",
+            "tests/test_app.py::test_two PASSED",
+            "tests/test_app.py::test_three FAILED",
+            "======================== 2 passed, 1 failed ========================",
+        ]
+        output = "\n".join(lines)
+        result = self.p.process("pytest -v", output)
+        assert "2 tests passed" in result
+        assert "test_three FAILED" in result
+
+
 class TestPytestCoverage:
     """Tests for pytest coverage report compression."""
 
