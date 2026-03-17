@@ -4,6 +4,7 @@ import json
 import re
 
 from .base import Processor
+from .utils import compress_json_value
 
 
 class NetworkProcessor(Processor):
@@ -170,34 +171,9 @@ class NetworkProcessor(Processor):
         if len(stripped) < 500:
             return text
 
-        summary = self._summarize_json(data, depth=0, max_depth=2)
+        compressed = compress_json_value(data, max_depth=2)
+        summary = json.dumps(compressed, indent=2, default=str)
         return f"{summary}\n\n({len(stripped)} chars, {len(text.splitlines())} lines)"
-
-    def _summarize_json(self, val, depth: int, max_depth: int) -> str:
-        """Recursively summarize a JSON value."""
-        indent = "  " * depth
-        if isinstance(val, dict):
-            if depth >= max_depth:
-                return f"{{{len(val)} keys}}"
-            items = []
-            for k, v in val.items():
-                summarized = self._summarize_json(v, depth + 1, max_depth)
-                items.append(f'{indent}  "{k}": {summarized}')
-            return "{\n" + ",\n".join(items) + f"\n{indent}}}"
-        elif isinstance(val, list):
-            if len(val) == 0:
-                return "[]"
-            if len(val) <= 2:
-                inner = [self._summarize_json(v, depth + 1, max_depth) for v in val]
-                return "[" + ", ".join(inner) + "]"
-            first = self._summarize_json(val[0], depth + 1, max_depth)
-            return f"[{first}, ... ({len(val)} items total)]"
-        elif isinstance(val, str):
-            if len(val) > 80:
-                return f'"{val[:60]}..." ({len(val)} chars)'
-            return json.dumps(val)
-        else:
-            return json.dumps(val)
 
     def _process_wget(self, output: str) -> str:
         lines = output.splitlines()

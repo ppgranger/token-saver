@@ -4,6 +4,7 @@ import json
 import re
 
 from .base import Processor
+from .utils import compress_json_value
 
 _CLOUD_CMD_RE = re.compile(r"\b(aws|gcloud|az)\s+")
 
@@ -57,7 +58,9 @@ class CloudCliProcessor(Processor):
                 return output
             return self._truncate_text(lines)
 
-        compressed = self._compress_json_value(data, depth=0, max_depth=4)
+        compressed = compress_json_value(
+            data, max_depth=4, important_key_re=_IMPORTANT_KEY_RE,
+        )
         result = json.dumps(compressed, indent=2, default=str)
 
         # Add summary if significant compression
@@ -67,42 +70,6 @@ class CloudCliProcessor(Processor):
             result += f"\n\n({orig_lines + 1} lines compressed to {new_lines + 1})"
 
         return result
-
-    def _compress_json_value(self, value, depth=0, max_depth=4):
-        """Recursively compress JSON, truncating at depth."""
-        if depth >= max_depth:
-            if isinstance(value, dict):
-                return f"{{... {len(value)} keys}}"
-            if isinstance(value, list):
-                return f"[... {len(value)} items]"
-            if isinstance(value, str) and len(value) > 200:
-                return value[:197] + "..."
-            return value
-
-        if isinstance(value, dict):
-            result = {}
-            for k, v in value.items():
-                # Preserve important keys at full depth
-                if _IMPORTANT_KEY_RE.search(k):
-                    result[k] = self._compress_json_value(v, depth, max_depth + 1)
-                else:
-                    result[k] = self._compress_json_value(v, depth + 1, max_depth)
-            return result
-
-        if isinstance(value, list):
-            if len(value) == 0:
-                return value
-            # Don't increment depth for list traversal
-            if len(value) <= 5:
-                return [self._compress_json_value(item, depth, max_depth) for item in value]
-            compressed = [self._compress_json_value(item, depth, max_depth) for item in value[:3]]
-            compressed.append(f"... ({len(value) - 3} more items)")
-            return compressed
-
-        if isinstance(value, str) and len(value) > 200:
-            return value[:197] + "..."
-
-        return value
 
     def _is_table(self, lines: list[str]) -> bool:
         """Detect table output format."""

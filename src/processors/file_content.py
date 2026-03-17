@@ -16,6 +16,7 @@ import re
 
 from .. import config
 from .base import Processor
+from .utils import compress_json_value
 
 # ── File type sets ───────────────────────────────────────────────────
 
@@ -442,33 +443,9 @@ class FileContentProcessor(Processor):
         except (json.JSONDecodeError, ValueError):
             return self._truncate_default(raw.splitlines())
 
-        result = self._summarize_json_value(data, depth=0, max_depth=2)
+        compressed = compress_json_value(data, max_depth=2)
+        result = json.dumps(compressed, indent=2, default=str)
         return f"{result}\n\n({total} total lines)"
-
-    def _summarize_json_value(self, val, depth: int, max_depth: int) -> str:
-        indent = "  " * depth
-        if isinstance(val, dict):
-            if depth >= max_depth:
-                return f"{{{len(val)} keys}}"
-            items = []
-            for k, v in val.items():
-                summarized = self._summarize_json_value(v, depth + 1, max_depth)
-                items.append(f'{indent}  "{k}": {summarized}')
-            return "{\n" + ",\n".join(items) + f"\n{indent}}}"
-        elif isinstance(val, list):
-            if len(val) == 0:
-                return "[]"
-            if len(val) <= 3:
-                inner = [self._summarize_json_value(v, depth + 1, max_depth) for v in val]
-                return "[" + ", ".join(inner) + "]"
-            first_three = [self._summarize_json_value(v, depth + 1, max_depth) for v in val[:3]]
-            return "[" + ", ".join(first_three) + f", ... ({len(val)} items total)]"
-        elif isinstance(val, str):
-            if len(val) > 100:
-                return f'"{val[:80]}..." ({len(val)} chars)'
-            return json.dumps(val)
-        else:
-            return json.dumps(val)
 
     def _compress_yaml(self, lines: list[str], total: int) -> str:
         result = []
