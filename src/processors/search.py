@@ -73,6 +73,11 @@ class SearchProcessor(Processor):
         max_per_file = config.get("search_max_per_file")
         max_files = config.get("search_max_files")
 
+        if total_files > 30:
+            return self._process_grouped_by_dir(
+                by_file, total_matches, total_files,
+            )
+
         result = [f"{total_matches} matches across {total_files} files:"]
 
         sorted_files = sorted(by_file.items(), key=lambda x: -len(x[1]))
@@ -95,6 +100,63 @@ class SearchProcessor(Processor):
 
         if total_files > max_files:
             result.append(f"... ({total_files - max_files} more files)")
+
+        return "\n".join(result)
+
+    def _process_grouped_by_dir(
+        self, by_file: dict, total_matches: int, total_files: int,
+    ) -> str:
+        """Group search results by directory for large result sets."""
+        max_per_file = config.get("search_max_per_file")
+        max_files = config.get("search_max_files")
+
+        by_dir: dict[str, dict[str, list[str]]] = {}
+        for filepath, matches in by_file.items():
+            parts = filepath.rsplit("/", 1)
+            dir_name = parts[0] if len(parts) > 1 else "."
+            by_dir.setdefault(dir_name, {})[filepath] = matches
+
+        result = [
+            f"{total_matches} matches across {total_files} files "
+            f"in {len(by_dir)} directories:"
+        ]
+
+        dirs_shown = 0
+        for dir_name, files in sorted(
+            by_dir.items(), key=lambda x: -sum(len(v) for v in x[1].values())
+        ):
+            if dirs_shown >= max_files:
+                break
+            dir_matches = sum(len(v) for v in files.values())
+            result.append(
+                f"\n{dir_name}/ ({dir_matches} matches in {len(files)} files)"
+            )
+
+            # Show top 3 files in this directory
+            for filepath, matches in sorted(
+                files.items(), key=lambda x: -len(x[1])
+            )[:3]:
+                fname = filepath.rsplit("/", 1)[-1]
+                if len(matches) > max_per_file:
+                    result.append(f"  {fname}: ({len(matches)} matches)")
+                    for m in matches[:max_per_file]:
+                        display = m[len(filepath) + 1 :] if m.startswith(filepath + ":") else m
+                        result.append(f"    {display}")
+                else:
+                    for m in matches:
+                        result.append(f"  {m}")
+
+            remaining_files = len(files) - 3
+            if remaining_files > 0:
+                result.append(
+                    f"  ... ({remaining_files} more files in this directory)"
+                )
+
+            dirs_shown += 1
+
+        remaining_dirs = len(by_dir) - dirs_shown
+        if remaining_dirs > 0:
+            result.append(f"\n... ({remaining_dirs} more directories)")
 
         return "\n".join(result)
 

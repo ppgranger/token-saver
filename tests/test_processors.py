@@ -1945,6 +1945,36 @@ class TestSearchProcessor:
         assert result == output
 
 
+class TestSearchDirectoryGrouping:
+    """Tests for search result directory grouping with large result sets."""
+
+    def setup_method(self):
+        self.p = SearchProcessor()
+
+    def test_many_files_grouped_by_dir(self):
+        """rg with 40+ files should group by directory."""
+        lines = []
+        for d in range(12):
+            for f in range(4):
+                for m in range(3):
+                    lines.append(f"src/dir{d}/file{f}.py:{m + 1}:TODO: fix this {d}-{f}-{m}")
+        output = "\n".join(lines)
+        result = self.p.process("rg TODO", output)
+        assert "directories" in result
+        assert "src/dir0/" in result
+
+    def test_few_files_not_grouped(self):
+        """rg with 10 files should use per-file grouping."""
+        lines = []
+        for f in range(10):
+            lines.append(f"src/file{f}.py:1:TODO fix")
+            lines.append(f"src/file{f}.py:5:TODO cleanup")
+        output = "\n".join(lines)
+        result = self.p.process("rg TODO", output)
+        # Should use normal per-file grouping, not directory grouping
+        assert "directories" not in result
+
+
 class TestDockerComposeLogs:
     """Tests for docker compose log grouping by service."""
 
