@@ -1367,6 +1367,43 @@ class TestGenericProcessor:
         assert "━" not in result
 
 
+class TestEnvVariantDetection:
+    """Tests for .env variant file handling."""
+
+    def setup_method(self):
+        self.p = FileContentProcessor()
+
+    def test_env_production_redacted(self):
+        """cat .env.production should redact sensitive values."""
+        output = "\n".join([
+            "APP_NAME=myapp",
+            "API_KEY=secret123",
+            "DATABASE_URL=postgres://user:pass@host/db",
+            "DEBUG=true",
+        ])
+        result = self.p.process("cat .env.production", output)
+        assert "API_KEY=***" in result
+        assert "DATABASE_URL=***" in result
+        assert "APP_NAME=myapp" in result
+        assert "DEBUG=true" in result
+        assert "sensitive values redacted" in result
+
+    def test_env_example_passthrough(self):
+        """cat .env.example should pass through (template file)."""
+        output = "\n".join([
+            "API_KEY=your_api_key_here",
+            "SECRET=change_me",
+        ])
+        result = self.p.process("cat .env.example", output)
+        assert result == output
+
+    def test_env_exact_passthrough(self):
+        """cat .env should still pass through unchanged (existing behavior)."""
+        output = "\n".join(f"KEY_{i}=value_{i}" for i in range(500))
+        result = self.p.process("cat .env", output)
+        assert result == output
+
+
 class TestMinifiedFileDetection:
     """Tests for minified file detection in file_content processor."""
 

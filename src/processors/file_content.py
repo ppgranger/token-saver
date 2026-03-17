@@ -158,6 +158,10 @@ class FileContentProcessor(Processor):
                 f"Preview: {preview}..."
             )
 
+        # ── Handle .env variants: .env.production, .env.local ────────
+        if self._is_env_file_to_redact(filename):
+            return self._compress_env_file(output.splitlines())
+
         # ── NEVER COMPRESS: source code ──────────────────────────────
         if ext in _SOURCE_CODE_EXTENSIONS:
             return output
@@ -257,6 +261,43 @@ class FileContentProcessor(Processor):
             return True
 
         return False
+
+    # ── .env variant detection ──────────────────────────────────────
+
+    def _is_env_file_to_redact(self, filename: str) -> bool:
+        """Detect .env variant files that should have secrets redacted.
+
+        .env exactly and .env.example/.env.template are handled by existing
+        pass-through logic (model may need exact values for editing).
+        """
+        if filename in (".env", ".env.example", ".env.template"):
+            return False
+        return bool(re.match(r"^\.env\..+$", filename, re.I))
+
+    def _compress_env_file(self, lines: list[str]) -> str:
+        """Compress .env files: redact sensitive values, keep structure."""
+        from .env import _SENSITIVE_PATTERNS  # noqa: PLC0415
+
+        result = []
+        redacted = 0
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                result.append(line)
+                continue
+            if "=" in stripped:
+                key = stripped.split("=", 1)[0]
+                if _SENSITIVE_PATTERNS.search(key):
+                    result.append(f"{key}=***")
+                    redacted += 1
+                else:
+                    result.append(line)
+            else:
+                result.append(line)
+
+        if redacted > 0:
+            result.append(f"\n({redacted} sensitive values redacted)")
+        return "\n".join(result)
 
     # ── Heuristic detection (for extensionless files) ────────────────
 
