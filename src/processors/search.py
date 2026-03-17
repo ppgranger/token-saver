@@ -75,7 +75,9 @@ class SearchProcessor(Processor):
 
         if total_files > 30:
             return self._process_grouped_by_dir(
-                by_file, total_matches, total_files,
+                by_file,
+                total_matches,
+                total_files,
             )
 
         result = [f"{total_matches} matches across {total_files} files:"]
@@ -104,7 +106,10 @@ class SearchProcessor(Processor):
         return "\n".join(result)
 
     def _process_grouped_by_dir(
-        self, by_file: dict, total_matches: int, total_files: int,
+        self,
+        by_file: dict,
+        total_matches: int,
+        total_files: int,
     ) -> str:
         """Group search results by directory for large result sets."""
         max_per_file = config.get("search_max_per_file")
@@ -117,8 +122,7 @@ class SearchProcessor(Processor):
             by_dir.setdefault(dir_name, {})[filepath] = matches
 
         result = [
-            f"{total_matches} matches across {total_files} files "
-            f"in {len(by_dir)} directories:"
+            f"{total_matches} matches across {total_files} files in {len(by_dir)} directories:"
         ]
 
         dirs_shown = 0
@@ -128,14 +132,10 @@ class SearchProcessor(Processor):
             if dirs_shown >= max_files:
                 break
             dir_matches = sum(len(v) for v in files.values())
-            result.append(
-                f"\n{dir_name}/ ({dir_matches} matches in {len(files)} files)"
-            )
+            result.append(f"\n{dir_name}/ ({dir_matches} matches in {len(files)} files)")
 
             # Show top 3 files in this directory
-            for filepath, matches in sorted(
-                files.items(), key=lambda x: -len(x[1])
-            )[:3]:
+            for filepath, matches in sorted(files.items(), key=lambda x: -len(x[1]))[:3]:
                 fname = filepath.rsplit("/", 1)[-1]
                 if len(matches) > max_per_file:
                     result.append(f"  {fname}: ({len(matches)} matches)")
@@ -148,9 +148,7 @@ class SearchProcessor(Processor):
 
             remaining_files = len(files) - 3
             if remaining_files > 0:
-                result.append(
-                    f"  ... ({remaining_files} more files in this directory)"
-                )
+                result.append(f"  ... ({remaining_files} more files in this directory)")
 
             dirs_shown += 1
 

@@ -176,9 +176,16 @@ class GitProcessor(Processor):
         return "\n".join(result) if result else output
 
     _LOCK_FILES = {
-        "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
-        "poetry.lock", "Pipfile.lock", "Cargo.lock",
-        "composer.lock", "Gemfile.lock", "go.sum", "bun.lockb",
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "poetry.lock",
+        "Pipfile.lock",
+        "Cargo.lock",
+        "composer.lock",
+        "Gemfile.lock",
+        "go.sum",
+        "bun.lockb",
     }
 
     def _process_diff(self, output: str, command: str = "") -> str:
@@ -206,9 +213,7 @@ class GitProcessor(Processor):
                 # Flush previous lockfile summary
                 if in_lockfile and current_file:
                     lockfile_summaries.append(f"diff --git {current_file}")
-                    lockfile_summaries.append(
-                        f"  (lockfile changed, {current_file_lines} lines)"
-                    )
+                    lockfile_summaries.append(f"  (lockfile changed, {current_file_lines} lines)")
                 # Detect new file
                 m = re.match(r"^diff --git a/(.+?) b/", line)
                 filename = m.group(1).rsplit("/", 1)[-1] if m else ""
@@ -229,9 +234,7 @@ class GitProcessor(Processor):
         # Flush last lockfile
         if in_lockfile and current_file:
             lockfile_summaries.append(f"diff --git {current_file}")
-            lockfile_summaries.append(
-                f"  (lockfile changed, {current_file_lines} lines)"
-            )
+            lockfile_summaries.append(f"  (lockfile changed, {current_file_lines} lines)")
 
         # Compress the non-lockfile lines, then append lockfile summaries
         max_hunk = config.get("max_diff_hunk_lines")
@@ -277,10 +280,7 @@ class GitProcessor(Processor):
     def _process_diff_stat(self, lines: list[str]) -> str:
         """Compress `git diff --stat` output: strip visual bars, group when many files."""
         # Count stat lines (exclude summary line)
-        stat_lines = [
-            line for line in lines
-            if re.match(r"^\s*.+?\s+\|\s+\d+", line)
-        ]
+        stat_lines = [line for line in lines if re.match(r"^\s*.+?\s+\|\s+\d+", line)]
 
         if len(stat_lines) > 20:
             return self._group_stat_by_dir(lines)
@@ -322,13 +322,9 @@ class GitProcessor(Processor):
         for dir_name, files in sorted(by_dir.items(), key=lambda x: -len(x[1])):
             if len(files) > 5:
                 total_changes = sum(
-                    int(s.group(1))
-                    for _, stats in files
-                    if (s := re.search(r"(\d+)", stats))
+                    int(s.group(1)) for _, stats in files if (s := re.search(r"(\d+)", stats))
                 )
-                result.append(
-                    f" {dir_name}/ ({len(files)} files, ~{total_changes} changes)"
-                )
+                result.append(f" {dir_name}/ ({len(files)} files, ~{total_changes} changes)")
             else:
                 for filepath, stats in files:
                     # Strip +/- visual bars from stats

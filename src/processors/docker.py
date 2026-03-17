@@ -206,19 +206,16 @@ class DockerProcessor(Processor):
             if service == "_other":
                 continue
             error_count = sum(
-                1 for ln in svc_lines
+                1
+                for ln in svc_lines
                 if re.search(r"\b(error|ERROR|exception|fatal|FATAL|panic)\b", ln, re.I)
             )
-            result.append(
-                f"\n--- {service} ({len(svc_lines)} lines, {error_count} errors) ---"
-            )
+            result.append(f"\n--- {service} ({len(svc_lines)} lines, {error_count} errors) ---")
 
             # Show errors with context + last 3 lines
             errors_shown: list[str] = []
             for i, line in enumerate(svc_lines):
-                if re.search(
-                    r"\b(error|ERROR|exception|fatal|FATAL|panic)\b", line, re.I
-                ):
+                if re.search(r"\b(error|ERROR|exception|fatal|FATAL|panic)\b", line, re.I):
                     start = max(0, i - 1)
                     end = min(len(svc_lines), i + 2)
                     for el in svc_lines[start:end]:

@@ -6,6 +6,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.chain_utils import extract_primary_command
+from src.processors.ansible import AnsibleProcessor
 from src.processors.build_output import BuildOutputProcessor
 from src.processors.cloud_cli import CloudCliProcessor
 from src.processors.db_query import DbQueryProcessor
@@ -16,17 +17,16 @@ from src.processors.file_listing import FileListingProcessor
 from src.processors.generic import GenericProcessor
 from src.processors.gh import GhProcessor
 from src.processors.git import GitProcessor
+from src.processors.helm import HelmProcessor
 from src.processors.kubectl import KubectlProcessor
 from src.processors.lint_output import LintOutputProcessor
 from src.processors.network import NetworkProcessor
 from src.processors.package_list import PackageListProcessor
 from src.processors.search import SearchProcessor
+from src.processors.syslog import SyslogProcessor
 from src.processors.system_info import SystemInfoProcessor
 from src.processors.terraform import TerraformProcessor
 from src.processors.test_output import TestOutputProcessor
-from src.processors.ansible import AnsibleProcessor
-from src.processors.helm import HelmProcessor
-from src.processors.syslog import SyslogProcessor
 
 
 class TestGitProcessor:
@@ -1378,12 +1378,14 @@ class TestEnvVariantDetection:
 
     def test_env_production_redacted(self):
         """cat .env.production should redact sensitive values."""
-        output = "\n".join([
-            "APP_NAME=myapp",
-            "API_KEY=secret123",
-            "DATABASE_URL=postgres://user:pass@host/db",
-            "DEBUG=true",
-        ])
+        output = "\n".join(
+            [
+                "APP_NAME=myapp",
+                "API_KEY=secret123",
+                "DATABASE_URL=postgres://user:pass@host/db",
+                "DEBUG=true",
+            ]
+        )
         result = self.p.process("cat .env.production", output)
         assert "API_KEY=***" in result
         assert "DATABASE_URL=***" in result
@@ -1393,10 +1395,12 @@ class TestEnvVariantDetection:
 
     def test_env_example_passthrough(self):
         """cat .env.example should pass through (template file)."""
-        output = "\n".join([
-            "API_KEY=your_api_key_here",
-            "SECRET=change_me",
-        ])
+        output = "\n".join(
+            [
+                "API_KEY=your_api_key_here",
+                "SECRET=change_me",
+            ]
+        )
         result = self.p.process("cat .env.example", output)
         assert result == output
 
@@ -2880,7 +2884,7 @@ class TestGitLockfileDiff:
             "@@ -1,200 +1,200 @@",
         ]
         for i in range(200):
-            lines.append(f'+pkg-{i}@^{i}.0.0:')
+            lines.append(f"+pkg-{i}@^{i}.0.0:")
         output = "\n".join(lines)
         result = self.p.process("git diff", output)
         # Normal file is preserved
@@ -2892,13 +2896,15 @@ class TestGitLockfileDiff:
 
     def test_normal_files_only_unchanged(self):
         """Diffs with only normal files should be compressed normally."""
-        output = "\n".join([
-            "diff --git a/src/app.py b/src/app.py",
-            "@@ -1,3 +1,3 @@",
-            "-old",
-            "+new",
-            " context",
-        ])
+        output = "\n".join(
+            [
+                "diff --git a/src/app.py b/src/app.py",
+                "@@ -1,3 +1,3 @@",
+                "-old",
+                "+new",
+                " context",
+            ]
+        )
         result = self.p.process("git diff", output)
         assert "lockfile" not in result
         assert "+new" in result
@@ -2959,9 +2965,13 @@ class TestTscTypecheck:
         for i in range(30):
             lines.append(f"src/file{i}.ts(10,5): error TS2322: Type 'string' is not assignable.")
         for i in range(15):
-            lines.append(f"src/util{i}.ts:5:3 - error TS2345: Argument of type 'number' not assignable.")
+            lines.append(
+                f"src/util{i}.ts:5:3 - error TS2345: Argument of type 'number' not assignable."
+            )
         for i in range(5):
-            lines.append(f"src/other{i}.ts(1,1): error TS7006: Parameter implicitly has 'any' type.")
+            lines.append(
+                f"src/other{i}.ts(1,1): error TS7006: Parameter implicitly has 'any' type."
+            )
         lines.append("Found 50 errors in 50 files.")
         output = "\n".join(lines)
         result = self.p.process("tsc --noEmit", output)
@@ -2979,11 +2989,13 @@ class TestTscTypecheck:
 
     def test_tsc_error_codes_preserved(self):
         """Error codes and file paths should be preserved in examples."""
-        output = "\n".join([
-            "src/app.ts(10,5): error TS2322: Type 'string' is not assignable.",
-            "src/app.ts(20,3): error TS2322: Type 'number' is not assignable.",
-            "Found 2 errors.",
-        ])
+        output = "\n".join(
+            [
+                "src/app.ts(10,5): error TS2322: Type 'string' is not assignable.",
+                "src/app.ts(20,3): error TS2322: Type 'number' is not assignable.",
+                "Found 2 errors.",
+            ]
+        )
         result = self.p.process("tsc --noEmit", output)
         assert "TS2322" in result
         assert "src/app.ts" in result
@@ -3342,7 +3354,7 @@ class TestAnsibleProcessor:
 
     def test_changed_tasks_preserved(self):
         """Changed tasks should be kept in output."""
-        lines = ["PLAY [all] ****"] + ["*" * 60]
+        lines = ["PLAY [all] ****", "*" * 60]
         for i in range(10):
             lines.append(f"TASK [task-{i}] ****")
             lines.append("*" * 60)
@@ -3358,7 +3370,7 @@ class TestAnsibleProcessor:
 
     def test_recap_host_names_preserved(self):
         """Host names in RECAP should be preserved."""
-        lines = ["PLAY [all] ****"] + ["*" * 60]
+        lines = ["PLAY [all] ****", "*" * 60]
         for i in range(25):
             lines.append(f"TASK [task-{i}] ****")
             lines.append(f"ok: [prod-server-{i}]")

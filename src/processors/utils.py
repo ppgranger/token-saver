@@ -200,9 +200,7 @@ def compress_log_lines(
                 result = result[: keep_head + 1 + max_error_lines]
                 result.append(f"  ... ({len(sorted_indices) - max_error_lines} more error lines)")
         else:
-            result.append(
-                f"\n... ({len(lines) - keep_head - keep_tail} lines truncated) ...\n"
-            )
+            result.append(f"\n... ({len(lines) - keep_head - keep_tail} lines truncated) ...\n")
 
     result.extend(tail)
     return "\n".join(result)

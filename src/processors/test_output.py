@@ -199,8 +199,7 @@ class TestOutputProcessor(Processor):
                 if len(info["failed"]) > 5:
                     extra = f", ... ({len(info['failed']) - 5} more)"
                 result.append(
-                    f"{base}: {info['passed']}/{total} passed, "
-                    f"FAILED: [{failed_params}{extra}]"
+                    f"{base}: {info['passed']}/{total} passed, FAILED: [{failed_params}{extra}]"
                 )
 
         if passed_count > 0:
@@ -220,15 +219,17 @@ class TestOutputProcessor(Processor):
         coverage_end = None
         for i, line in enumerate(lines):
             stripped = line.strip()
-            if re.match(r"^-+ coverage", stripped) or re.match(
-                r"^Name\s+Stmts\s+Miss", stripped
+            if coverage_start is None and (
+                re.match(r"^-+ coverage", stripped) or re.match(r"^Name\s+Stmts\s+Miss", stripped)
             ):
-                if coverage_start is None:
-                    coverage_start = i
-            if coverage_start is not None and i > coverage_start:
-                if re.match(r"^TOTAL\s+", stripped):
-                    coverage_end = i
-                    break
+                coverage_start = i
+            if (
+                coverage_start is not None
+                and i > coverage_start
+                and re.match(r"^TOTAL\s+", stripped)
+            ):
+                coverage_end = i
+                break
         if coverage_start is None:
             return []
         end = coverage_end + 1 if coverage_end is not None else len(lines)
@@ -245,7 +246,7 @@ class TestOutputProcessor(Processor):
             if stripped.startswith("TOTAL"):
                 total_line = stripped
                 continue
-            if stripped.startswith("Name") or stripped.startswith("-"):
+            if stripped.startswith(("Name", "-")):
                 continue
             # Parse: filename  stmts  miss  cover%
             m = re.match(r"^(\S+)\s+\d+\s+\d+\s+(\d+)%", stripped)
@@ -257,9 +258,7 @@ class TestOutputProcessor(Processor):
         if total_line:
             result.append(total_line)
         if low_coverage_files:
-            result.append(
-                f"Files below 80% coverage ({len(low_coverage_files)}):"
-            )
+            result.append(f"Files below 80% coverage ({len(low_coverage_files)}):")
             for f in low_coverage_files[:10]:
                 result.append(f"  {f}")
             if len(low_coverage_files) > 10:

@@ -16,10 +16,13 @@ class HelmProcessor(Processor):
         return "helm"
 
     def can_handle(self, command: str) -> bool:
-        return bool(re.search(
-            r"\bhelm\s+(install|upgrade|list|template|status|rollback|"
-            r"history|uninstall|get)\b", command
-        ))
+        return bool(
+            re.search(
+                r"\bhelm\s+(install|upgrade|list|template|status|rollback|"
+                r"history|uninstall|get)\b",
+                command,
+            )
+        )
 
     def process(self, command: str, output: str) -> str:
         if not output or not output.strip():
@@ -59,9 +62,8 @@ class HelmProcessor(Processor):
                 continue
             if stripped.startswith("kind:"):
                 current_kind = stripped.split(":", 1)[1].strip()
-            elif (
-                stripped.startswith("  name:") or
-                (stripped.startswith("name:") and not current_name)
+            elif stripped.startswith("  name:") or (
+                stripped.startswith("name:") and not current_name
             ):
                 current_name = stripped.split(":", 1)[1].strip()
             current_lines += 1

@@ -257,10 +257,7 @@ class FileContentProcessor(Processor):
         if len(lines) <= 3 and len(output) > 5000:
             return True
         # Average line length > 500 chars
-        if lines and len(output) / len(lines) > 500:
-            return True
-
-        return False
+        return bool(lines and len(output) / len(lines) > 500)
 
     # ── .env variant detection ──────────────────────────────────────
 

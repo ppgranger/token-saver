@@ -44,6 +44,7 @@ ignore = [
     "S101",     # assert in tests is fine
     "PLR2004",  # magic values in comparisons — too noisy for thresholds/processors
     "PLR0912",  # too many branches — some processors are inherently complex
+    "PLR0913",  # too many arguments — shared utilities need flexible signatures
     "PLR0911",  # too many return statements
     "PLR0915",  # too many statements
     "SIM108",   # ternary instead of if/else — less readable for multi-line

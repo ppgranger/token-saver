@@ -59,7 +59,9 @@ class CloudCliProcessor(Processor):
             return self._truncate_text(lines)
 
         compressed = compress_json_value(
-            data, max_depth=4, important_key_re=_IMPORTANT_KEY_RE,
+            data,
+            max_depth=4,
+            important_key_re=_IMPORTANT_KEY_RE,
         )
         result = json.dumps(compressed, indent=2, default=str)
 
