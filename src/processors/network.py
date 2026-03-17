@@ -168,7 +168,7 @@ class NetworkProcessor(Processor):
             return text
 
         # Only compress if the JSON is large
-        if len(stripped) < 500:
+        if len(stripped) < 1500:
             return text
 
         compressed = compress_json_value(data, max_depth=2)
