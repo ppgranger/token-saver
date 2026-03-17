@@ -1,12 +1,14 @@
-"""CLI entry point for token-saver: version, stats, update."""
+"""CLI entry point for token-saver: version, stats, update, benchmark."""
 
 import argparse
+import json as json_mod
 import os
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.error
 import urllib.request
 
@@ -222,6 +224,88 @@ def _update_via_tarball(repo_dir, version):
         print("Files updated from tarball.")
 
 
+def cmd_benchmark(args):
+    """Benchmark compression on a real or dry-run command."""
+    from src import config  # noqa: PLC0415
+    from src.engine import CompressionEngine  # noqa: PLC0415
+
+    command = args.command_str
+    chars_per_token = config.get("chars_per_token")
+    engine = CompressionEngine()
+
+    if args.dry_run:
+        # Dry-run: show which processor would handle it, without executing
+        processor_name = "none"
+        for p in engine.processors:
+            if p.can_handle(command):
+                processor_name = p.name
+                break
+
+        if args.format == "json":
+            print(json_mod.dumps({
+                "command": command,
+                "processor": processor_name,
+                "dry_run": True,
+            }))
+        else:
+            print()
+            print("Token-Saver Benchmark (dry-run)")
+            print("=" * 40)
+            print(f"Command:     {command}")
+            print(f"Processor:   {processor_name}")
+            print("(no execution — use without --dry-run to measure compression)")
+        return
+
+    # Execute the command and measure
+    exec_start = time.monotonic()
+    result = subprocess.run(  # noqa: S603
+        command,
+        shell=True,  # noqa: S602
+        capture_output=True,
+        text=True,
+        timeout=config.get("wrap_timeout"),
+    )
+    exec_elapsed = time.monotonic() - exec_start
+
+    raw_output = result.stdout
+    if result.stderr:
+        raw_output += result.stderr
+
+    compress_start = time.monotonic()
+    compressed, processor_name, was_compressed = engine.compress(command, raw_output)
+    compress_elapsed = time.monotonic() - compress_start
+
+    orig_chars = len(raw_output)
+    comp_chars = len(compressed)
+    orig_tokens = max(1, round(orig_chars / chars_per_token)) if orig_chars > 0 else 0
+    comp_tokens = max(1, round(comp_chars / chars_per_token)) if comp_chars > 0 else 0
+    savings_pct = (orig_chars - comp_chars) / orig_chars * 100 if orig_chars > 0 else 0
+
+    if args.format == "json":
+        print(json_mod.dumps({
+            "command": command,
+            "processor": processor_name,
+            "was_compressed": was_compressed,
+            "original_chars": orig_chars,
+            "compressed_chars": comp_chars,
+            "original_tokens": orig_tokens,
+            "compressed_tokens": comp_tokens,
+            "savings_percent": round(savings_pct, 1),
+            "exec_time_s": round(exec_elapsed, 3),
+            "compress_time_s": round(compress_elapsed, 3),
+        }))
+    else:
+        print()
+        print("Token-Saver Benchmark")
+        print("=" * 40)
+        print(f"Command:     {command}")
+        print(f"Processor:   {processor_name}")
+        print(f"Original:    {orig_chars:,} chars (~{orig_tokens:,} tokens)")
+        print(f"Compressed:  {comp_chars:,} chars (~{comp_tokens:,} tokens)")
+        print(f"Savings:     {savings_pct:.1f}%")
+        print(f"Time:        {exec_elapsed:.2f}s (exec) + {compress_elapsed:.3f}s (compress)")
+
+
 def main():
     """CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -240,6 +324,18 @@ def main():
     # update
     subparsers.add_parser("update", help="Check for and apply updates")
 
+    # benchmark
+    bench_parser = subparsers.add_parser(
+        "benchmark", help="Benchmark compression on a command"
+    )
+    bench_parser.add_argument("command_str", help="Command to benchmark (quote if needed)")
+    bench_parser.add_argument(
+        "--format", choices=["text", "json"], default="text", help="Output format"
+    )
+    bench_parser.add_argument(
+        "--dry-run", action="store_true", help="Show processor match without executing"
+    )
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -250,6 +346,7 @@ def main():
         "version": cmd_version,
         "stats": cmd_stats,
         "update": cmd_update,
+        "benchmark": cmd_benchmark,
     }
     commands[args.command](args)
 

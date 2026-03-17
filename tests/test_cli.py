@@ -64,6 +64,40 @@ class TestNoCommand:
         assert "token-saver" in stdout.lower() or "usage" in stdout.lower()
 
 
+class TestBenchmarkCommand:
+    def test_benchmark_dry_run(self):
+        rc, stdout, _ = _run_cli("benchmark", "git diff HEAD", "--dry-run")
+        assert rc == 0
+        assert "Processor:" in stdout
+        assert "git" in stdout
+
+    def test_benchmark_dry_run_json(self):
+        rc, stdout, _ = _run_cli(
+            "benchmark", "git diff HEAD", "--dry-run", "--format", "json"
+        )
+        assert rc == 0
+        data = json.loads(stdout)
+        assert data["dry_run"] is True
+        assert data["processor"] == "git"
+        assert data["command"] == "git diff HEAD"
+
+    def test_benchmark_real_command(self):
+        rc, stdout, _ = _run_cli("benchmark", "echo hello")
+        assert rc == 0
+        assert "Token-Saver Benchmark" in stdout
+        assert "Original:" in stdout
+        assert "Compressed:" in stdout
+
+    def test_benchmark_json_format(self):
+        rc, stdout, _ = _run_cli("benchmark", "echo hello", "--format", "json")
+        assert rc == 0
+        data = json.loads(stdout)
+        assert "original_chars" in data
+        assert "compressed_chars" in data
+        assert "processor" in data
+        assert "savings_percent" in data
+
+
 class TestBinScript:
     def test_bin_script_exists_and_executable(self):
         bin_path = os.path.join(REPO_DIR, "bin", "token-saver")

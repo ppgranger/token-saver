@@ -215,6 +215,9 @@ token-saver version              # Print current version
 token-saver stats                # Show savings statistics
 token-saver stats --json         # JSON output for scripting
 token-saver update               # Check for and apply updates
+token-saver benchmark 'git diff' # Measure compression on a command
+token-saver benchmark 'pytest' --format json  # JSON output
+token-saver benchmark 'git log' --dry-run     # Show processor without executing
 ```
 
 If `~/.local/bin` is not in your PATH, the installer prints instructions.
