@@ -282,6 +282,20 @@ export TOKEN_SAVER_DEBUG=true
 export TOKEN_SAVER_ENABLED=false
 ```
 
+### Per-Project Configuration
+
+Drop a `.token-saver.json` in your repository root to override global settings:
+
+```json
+{
+  "max_diff_hunk_lines": 300,
+  "generic_truncate_threshold": 1000,
+  "max_log_entries": 50
+}
+```
+
+Project settings are merged with global settings. Token-Saver walks up parent directories (like `.gitignore` resolution) to find the nearest `.token-saver.json`. Useful for monorepos or projects with atypical output patterns (large Terraform plans, verbose test suites, etc.).
+
 ### Complete Parameter List
 
 | Parameter | Default | Description |

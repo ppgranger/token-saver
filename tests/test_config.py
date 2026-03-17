@@ -1,11 +1,13 @@
 """Tests for the configuration system."""
 
+import json
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src import config
+from src.config import _find_project_config
 
 
 class TestConfig:
@@ -61,3 +63,68 @@ class TestConfig:
         finally:
             del os.environ["TOKEN_SAVER_MIN_INPUT_LENGTH"]
             config.reload()
+
+
+class TestProjectConfig:
+    def setup_method(self):
+        config.reload()
+
+    def teardown_method(self):
+        config.reload()
+
+    def test_project_config_overrides_global(self, tmp_path, monkeypatch):
+        """Test that .token-saver.json in cwd overrides global defaults."""
+        project_config = {"max_diff_hunk_lines": 300, "max_log_entries": 50}
+        config_file = tmp_path / ".token-saver.json"
+        config_file.write_text(json.dumps(project_config))
+        monkeypatch.chdir(tmp_path)
+        config.reload()
+
+        assert config.get("max_diff_hunk_lines") == 300
+        assert config.get("max_log_entries") == 50
+        # Non-overridden keys remain default
+        assert config.get("min_input_length") == 1
+
+    def test_parent_directory_walk_up(self, tmp_path, monkeypatch):
+        """Test that config is found in parent directories."""
+        project_config = {"generic_truncate_threshold": 1000}
+        config_file = tmp_path / ".token-saver.json"
+        config_file.write_text(json.dumps(project_config))
+        subdir = tmp_path / "deep" / "nested" / "path"
+        subdir.mkdir(parents=True)
+        monkeypatch.chdir(subdir)
+        config.reload()
+
+        assert config.get("generic_truncate_threshold") == 1000
+
+    def test_missing_project_config_noop(self, tmp_path, monkeypatch):
+        """Test that missing project config is a no-op."""
+        monkeypatch.chdir(tmp_path)
+        config.reload()
+
+        # Defaults still apply
+        assert config.get("max_diff_hunk_lines") == 50
+        assert config.get("min_input_length") == 1
+
+    def test_invalid_project_config_ignored(self, tmp_path, monkeypatch):
+        """Test that invalid JSON in project config is silently ignored."""
+        config_file = tmp_path / ".token-saver.json"
+        config_file.write_text("{ invalid json !!!")
+        monkeypatch.chdir(tmp_path)
+        config.reload()
+
+        # Defaults still apply
+        assert config.get("max_diff_hunk_lines") == 50
+
+    def test_config_source_tracking(self, tmp_path, monkeypatch):
+        """Test that _config_source tracks where values come from."""
+        project_config = {"max_log_entries": 99}
+        config_file = tmp_path / ".token-saver.json"
+        config_file.write_text(json.dumps(project_config))
+        monkeypatch.chdir(tmp_path)
+        config.reload()
+
+        source = config.get("_config_source")
+        assert source is not None
+        assert source["min_input_length"] == "default"
+        assert "project:" in source["max_log_entries"]
