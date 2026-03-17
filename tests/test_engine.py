@@ -257,6 +257,9 @@ class TestProcessorRegistry:
         assert name_to_priority["gh"] == 37
         assert name_to_priority["db_query"] == 38
         assert name_to_priority["cloud_cli"] == 39
+        assert name_to_priority["ansible"] == 40
+        assert name_to_priority["helm"] == 41
+        assert name_to_priority["syslog"] == 42
         assert name_to_priority["file_listing"] == 50
         assert name_to_priority["file_content"] == 51
         assert name_to_priority["generic"] == 999
@@ -383,6 +386,18 @@ class TestProcessorRegistry:
             "aws ec2 describe-instances",
             "gcloud compute instances list",
             "az vm list",
+            # Ansible
+            "ansible-playbook site.yml",
+            "ansible all -m ping",
+            # Helm
+            "helm install my-release chart/",
+            "helm upgrade my-release chart/",
+            "helm list",
+            "helm template chart/",
+            "helm status my-release",
+            # Syslog
+            "journalctl -u nginx",
+            "dmesg",
         ]
 
         for cmd in test_commands:
