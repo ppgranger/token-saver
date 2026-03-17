@@ -316,7 +316,25 @@ export TOKEN_SAVER_ENABLED=false
 | `git_stash_threshold` | 10 | Stash entries before truncation |
 | `max_traceback_lines` | 30 | Max traceback lines before truncation |
 | `db_prune_days` | 90 | Stats retention in days |
+| `user_processors_dir` | `~/.token-saver/processors/` | Directory for custom processors |
 | `debug` | false | Enable debug logging |
+
+## Custom Processors
+
+You can extend Token-Saver with your own processors for commands not covered by the built-in 18.
+
+1. Create a Python file with a class inheriting from `src.processors.base.Processor`
+2. Implement `can_handle()`, `process()`, `name`, and set `priority`
+3. Copy the file to `~/.token-saver/processors/`
+
+```bash
+# Example: install the ansible processor
+cp examples/custom_processor/ansible_output.py ~/.token-saver/processors/
+```
+
+User processors are auto-discovered on every invocation. A broken processor (syntax error, missing import) is skipped with a warning — it never crashes the engine.
+
+See [`examples/custom_processor/`](examples/custom_processor/) for a complete example with documentation.
 
 ## Savings Tracking
 

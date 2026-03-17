@@ -44,6 +44,7 @@ _DEFAULTS = {
     "db_max_rows": 20,
     "db_prune_days": 90,
     "chars_per_token": 4,
+    "user_processors_dir": "",
     "debug": False,
 }
 
