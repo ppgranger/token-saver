@@ -275,7 +275,16 @@ class GitProcessor(Processor):
         return "\n".join(result)
 
     def _process_diff_stat(self, lines: list[str]) -> str:
-        """Compress `git diff --stat` output: strip visual bars."""
+        """Compress `git diff --stat` output: strip visual bars, group when many files."""
+        # Count stat lines (exclude summary line)
+        stat_lines = [
+            line for line in lines
+            if re.match(r"^\s*.+?\s+\|\s+\d+", line)
+        ]
+
+        if len(stat_lines) > 20:
+            return self._group_stat_by_dir(lines)
+
         result = []
         for line in lines:
             # Match stat lines: " path/file | 5 ++-" -> " path/file | 5"
@@ -284,6 +293,50 @@ class GitProcessor(Processor):
                 result.append(m.group(1))
             else:
                 result.append(line)
+        return "\n".join(result)
+
+    def _group_stat_by_dir(self, lines: list[str]) -> str:
+        """Group --stat output by directory when many files changed."""
+        by_dir: dict[str, list[tuple[str, str]]] = {}
+        summary_line = ""
+
+        for line in lines:
+            stripped = line.strip()
+            # Summary line: "N files changed, X insertions(+), Y deletions(-)"
+            if re.match(r"\s*\d+ files? changed", stripped):
+                summary_line = stripped
+                continue
+            # Stat line: " path/to/file.py | 42 +++---"
+            m = re.match(r"^\s*(.+?)\s+\|\s+(.+)$", stripped)
+            if m:
+                filepath = m.group(1).strip()
+                stats = m.group(2).strip()
+                parts = filepath.rsplit("/", 1)
+                dir_name = parts[0] if len(parts) > 1 else "."
+                by_dir.setdefault(dir_name, []).append((filepath, stats))
+
+        if not by_dir:
+            return "\n".join(lines)
+
+        result = []
+        for dir_name, files in sorted(by_dir.items(), key=lambda x: -len(x[1])):
+            if len(files) > 5:
+                total_changes = sum(
+                    int(s.group(1))
+                    for _, stats in files
+                    if (s := re.search(r"(\d+)", stats))
+                )
+                result.append(
+                    f" {dir_name}/ ({len(files)} files, ~{total_changes} changes)"
+                )
+            else:
+                for filepath, stats in files:
+                    # Strip +/- visual bars from stats
+                    clean_stats = re.sub(r"\s+[+\-]+\s*$", "", stats)
+                    result.append(f" {filepath} | {clean_stats}")
+
+        if summary_line:
+            result.append(summary_line)
         return "\n".join(result)
 
     def _process_log(self, output: str, command: str = "") -> str:

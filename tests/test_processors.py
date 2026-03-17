@@ -2567,6 +2567,40 @@ class TestGitStatusShortBranch:
         assert "On branch feature/foo" in result
 
 
+class TestGitDiffStatGrouping:
+    """Tests for --stat directory grouping with many files."""
+
+    def setup_method(self):
+        self.p = GitProcessor()
+
+    def test_stat_many_files_grouped(self):
+        """git diff --stat with 50+ files should group by directory."""
+        lines = []
+        for i in range(25):
+            lines.append(f" src/components/file{i}.tsx | 10 ++++------")
+        for i in range(25):
+            lines.append(f" src/utils/helper{i}.ts | 5 ++---")
+        lines.append(" 50 files changed, 375 insertions(+), 375 deletions(-)")
+        output = "\n".join(lines)
+        result = self.p.process("git diff --stat", output)
+        assert "src/components/" in result
+        assert "25 files" in result
+        assert "src/utils/" in result
+        assert "50 files changed" in result
+
+    def test_stat_few_files_not_grouped(self):
+        """git diff --stat with few files should not group."""
+        lines = [
+            " src/app.py | 5 ++---",
+            " src/utils.py | 3 +--",
+            " 2 files changed, 3 insertions(+), 5 deletions(-)",
+        ]
+        output = "\n".join(lines)
+        result = self.p.process("git diff --stat", output)
+        assert "app.py" in result
+        assert "utils.py" in result
+
+
 class TestGitLockfileDiff:
     """Tests for lockfile detection in git diff output."""
 
