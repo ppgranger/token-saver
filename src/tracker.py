@@ -41,7 +41,9 @@ class SavingsTracker:
             SavingsTracker.DB_DIR = self._default_db_dir()
         if self.DB_PATH is None:
             SavingsTracker.DB_PATH = self._default_db_path()
-        os.makedirs(self.DB_DIR, exist_ok=True)
+        self._db_dir: str = self.DB_DIR or self._default_db_dir()
+        self._db_path: str = self.DB_PATH or self._default_db_path()
+        os.makedirs(self._db_dir, exist_ok=True)
         self._open_connection()
         self._init_db()
         self._maybe_prune()
@@ -50,7 +52,7 @@ class SavingsTracker:
         """Open SQLite connection, handling corrupted DB files."""
         try:
             self.conn = sqlite3.connect(
-                self.DB_PATH,
+                self._db_path,
                 timeout=10,
                 check_same_thread=False,
             )
@@ -59,9 +61,9 @@ class SavingsTracker:
         except sqlite3.DatabaseError:
             # File exists but is corrupted
             with contextlib.suppress(OSError):
-                os.remove(self.DB_PATH)
+                os.remove(self._db_path)
             self.conn = sqlite3.connect(
-                self.DB_PATH,
+                self._db_path,
                 timeout=10,
                 check_same_thread=False,
             )
@@ -97,8 +99,8 @@ class SavingsTracker:
                 # Corrupted DB — recreate
                 self.conn.close()
                 with contextlib.suppress(OSError):
-                    os.remove(self.DB_PATH)
-                self.conn = sqlite3.connect(self.DB_PATH, timeout=10, check_same_thread=False)
+                    os.remove(self._db_path)
+                self.conn = sqlite3.connect(self._db_path, timeout=10, check_same_thread=False)
                 self.conn.row_factory = sqlite3.Row
                 self.conn.executescript("""
                     CREATE TABLE savings (
