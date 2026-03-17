@@ -108,6 +108,18 @@ class TestHookPretool:
         assert not is_compressible("nano file.py")
         assert not is_compressible("ssh server")
 
+    def test_rsync_local_compressible(self):
+        """Local rsync (no remote host) should be compressible."""
+        assert is_compressible("rsync -av src/ dest/")
+        assert is_compressible("rsync -r --delete /tmp/a/ /tmp/b/")
+        assert is_compressible("rsync --progress ./build/ /var/www/html/")
+
+    def test_rsync_remote_excluded(self):
+        """Remote rsync (with host:path) should be excluded."""
+        assert not is_compressible("rsync -av src/ user@server:/path/")
+        assert not is_compressible("rsync -r server:/remote/path /local/path")
+        assert not is_compressible("rsync -e ssh file.tar.gz host:/backup/")
+
     def test_self_wrapping_excluded(self):
         assert not is_compressible("python3 wrap.py git status")
         assert not is_compressible("python3 /path/to/token_saver/wrap.py ls")

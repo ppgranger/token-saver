@@ -10,7 +10,7 @@ from .base import Processor
 class FileListingProcessor(Processor):
     priority = 50
     hook_patterns = [
-        r"^(ls|find|tree|dir|exa|eza)\b",
+        r"^(ls|find|tree|dir|exa|eza|rsync)\b",
     ]
 
     @property
@@ -18,7 +18,7 @@ class FileListingProcessor(Processor):
         return "file_listing"
 
     def can_handle(self, command: str) -> bool:
-        return bool(re.search(r"\b(ls|find|tree|dir|exa|eza)\b", command))
+        return bool(re.search(r"\b(ls|find|tree|dir|exa|eza|rsync)\b", command))
 
     def process(self, command: str, output: str) -> str:
         if not output or not output.strip():
