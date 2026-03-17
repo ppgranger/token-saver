@@ -4,9 +4,12 @@ All thresholds and settings can be overridden via environment variables
 or a JSON config file at ~/.token-saver/config.json.
 """
 
+from __future__ import annotations
+
 import contextlib
 import json
 import os
+from typing import Any
 
 _DEFAULTS = {
     "enabled": True,
@@ -50,12 +53,12 @@ _DEFAULTS = {
 
 ENV_PREFIX = "TOKEN_SAVER_"
 
-_config: dict | None = None
+_config: dict[str, Any] | None = None
 
 
-def _load_config() -> dict:
+def _load_config() -> dict[str, Any]:
     """Load config from file, then overlay env vars."""
-    config = dict(_DEFAULTS)
+    config: dict[str, Any] = dict(_DEFAULTS)
 
     # Load from config file if it exists
     from src import data_dir  # noqa: PLC0415
@@ -88,7 +91,7 @@ def _load_config() -> dict:
     return config
 
 
-def get(key: str):
+def get(key: str) -> Any:
     """Get a config value."""
     global _config  # noqa: PLW0603
     if _config is None:
@@ -96,7 +99,7 @@ def get(key: str):
     return _config.get(key, _DEFAULTS.get(key))
 
 
-def reload():
+def reload() -> None:
     """Force reload of configuration."""
     global _config  # noqa: PLW0603
     _config = None
