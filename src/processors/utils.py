@@ -3,6 +3,11 @@
 import re
 from collections import defaultdict
 
+_DEFAULT_ERROR_RE = re.compile(
+    r"\b(error|Error|ERROR|exception|Exception|EXCEPTION|"
+    r"fatal|Fatal|FATAL|panic|Panic|PANIC|traceback|Traceback)\b"
+)
+
 
 def compress_json_value(value, depth=0, max_depth=4, important_key_re=None):
     """Recursively compress a JSON value, truncating at depth.
@@ -150,3 +155,54 @@ def group_files_by_dir(lines, max_files):
         result.append(f"... ({len(dirs) - max_files} more directories)")
 
     return result
+
+
+def compress_log_lines(
+    lines: list[str],
+    keep_head: int = 10,
+    keep_tail: int = 20,
+    error_re: re.Pattern | None = None,
+    context_lines: int = 2,
+    max_error_lines: int = 50,
+) -> str:
+    """Compress log-style output: keep head, tail, and error lines with context."""
+    if len(lines) <= keep_head + keep_tail:
+        return "\n".join(lines)
+
+    err_re = error_re or _DEFAULT_ERROR_RE
+    head = lines[:keep_head]
+    tail = lines[-keep_tail:]
+    middle = lines[keep_head:-keep_tail] if len(lines) > keep_head + keep_tail else []
+
+    # Find error lines with context in the middle section
+    error_indices: set[int] = set()
+    for idx, line in enumerate(middle):
+        if err_re.search(line):
+            for c in range(idx - context_lines, idx + context_lines + 1):
+                if 0 <= c < len(middle):
+                    error_indices.add(c)
+
+    result = head[:]
+
+    if middle:
+        if error_indices:
+            result.append(f"\n... ({len(lines)} total lines, showing errors) ...\n")
+            sorted_indices = sorted(error_indices)
+            prev = -2
+            for idx in sorted_indices:
+                if idx > prev + 1 and prev >= 0:
+                    gap = idx - prev - 1
+                    result.append(f"  ... ({gap} lines skipped)")
+                result.append(middle[idx])
+                prev = idx
+            # Cap error output
+            if len(sorted_indices) > max_error_lines:
+                result = result[: keep_head + 1 + max_error_lines]
+                result.append(f"  ... ({len(sorted_indices) - max_error_lines} more error lines)")
+        else:
+            result.append(
+                f"\n... ({len(lines) - keep_head - keep_tail} lines truncated) ...\n"
+            )
+
+    result.extend(tail)
+    return "\n".join(result)

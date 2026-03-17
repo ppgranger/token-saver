@@ -16,7 +16,7 @@ import re
 
 from .. import config
 from .base import Processor
-from .utils import compress_json_value
+from .utils import compress_json_value, compress_log_lines
 
 # ── File type sets ───────────────────────────────────────────────────
 
@@ -513,59 +513,14 @@ class FileContentProcessor(Processor):
     # ── Log compression ─────────────────────────────────────────────
 
     def _compress_log(self, lines: list[str]) -> str:
-        total = len(lines)
-        context_lines = config.get("file_log_context_lines")
-
-        head = lines[:5]
-        tail = lines[-5:]
-
-        middle = lines[5:-5] if len(lines) > 10 else []
-        error_indices = set()
-        info_count = 0
-        debug_count = 0
-
-        for idx, line in enumerate(middle):
-            if _LOG_ERROR_RE.search(line):
-                for c in range(idx - context_lines, idx + context_lines + 1):
-                    if 0 <= c < len(middle):
-                        error_indices.add(c)
-            elif re.search(r"\bDEBUG\b", line, re.IGNORECASE):
-                debug_count += 1
-            elif re.search(r"\bINFO\b", line, re.IGNORECASE):
-                info_count += 1
-
-        result = head[:]
-        if middle:
-            if error_indices:
-                result.append(f"\n... (scanning {len(middle)} middle lines) ...\n")
-                sorted_indices = sorted(error_indices)
-                prev = -2
-                for idx in sorted_indices:
-                    if idx > prev + 1:
-                        gap = idx - prev - 1
-                        if prev >= 0:
-                            result.append(f"  ... ({gap} lines skipped)")
-                    result.append(middle[idx])
-                    prev = idx
-                remaining = len(middle) - 1 - prev
-                if remaining > 0:
-                    result.append(f"  ... ({remaining} lines skipped)")
-            else:
-                result.append(f"\n... ({len(middle)} lines, no errors/warnings found) ...\n")
-
-        omitted_parts = []
-        if info_count > 0:
-            omitted_parts.append(f"{info_count} INFO")
-        if debug_count > 0:
-            omitted_parts.append(f"{debug_count} DEBUG")
-        other = len(middle) - len(error_indices) - info_count - debug_count
-        if other > 0:
-            omitted_parts.append(f"{other} other")
-
-        result.extend(tail)
-        summary = ", ".join(omitted_parts) + " lines omitted" if omitted_parts else ""
-        result.append(f"\n({total} total lines{'; ' + summary if summary else ''})")
-        return "\n".join(result)
+        context = config.get("file_log_context_lines")
+        return compress_log_lines(
+            lines,
+            keep_head=5,
+            keep_tail=5,
+            error_re=_LOG_ERROR_RE,
+            context_lines=context,
+        )
 
     # ── CSV compression ─────────────────────────────────────────────
 

@@ -4,6 +4,7 @@ import re
 
 from .. import config
 from .base import Processor
+from .utils import compress_log_lines
 
 # Optional kubectl global options that may appear before the subcommand.
 # Covers: -n <ns>, --namespace <ns>, --context <ctx>, --kubeconfig <path>,
@@ -238,28 +239,12 @@ class KubectlProcessor(Processor):
         if len(lines) <= keep_head + keep_tail:
             return output
 
-        error_lines = []
-        for i, line in enumerate(lines):
-            if re.search(
-                r"\b(error|Error|ERROR|exception|Exception|"
-                r"fatal|Fatal|FATAL|panic|Panic)\b",
-                line,
-            ):
-                start = max(0, i - 1)
-                end = min(len(lines), i + 2)
-                for el in lines[start:end]:
-                    if el not in error_lines:
-                        error_lines.append(el)
-
-        result = lines[:keep_head]
-        if error_lines:
-            result.append(f"\n... ({len(lines)} total lines, showing errors) ...\n")
-            result.extend(error_lines[:40])
-        else:
-            result.append(f"\n... ({len(lines) - keep_head - keep_tail} lines truncated) ...\n")
-        result.extend(lines[-keep_tail:])
-
-        return "\n".join(result)
+        return compress_log_lines(
+            lines,
+            keep_head=keep_head,
+            keep_tail=keep_tail,
+            context_lines=1,
+        )
 
     def _process_mutate(self, output: str) -> str:
         """Compress kubectl apply/delete/create: keep result lines, skip verbose details."""

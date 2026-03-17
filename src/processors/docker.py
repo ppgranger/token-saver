@@ -5,6 +5,7 @@ import re
 
 from .. import config
 from .base import Processor
+from .utils import compress_log_lines
 
 # Optional docker global options that may appear before the subcommand.
 # Covers: --context <ctx>, -H <host>, --host <host>
@@ -174,38 +175,12 @@ class DockerProcessor(Processor):
         if len(lines) <= keep_head + keep_tail:
             return output
 
-        # Collect error lines and their indices
-        error_lines = []
-        for i, line in enumerate(lines):
-            if re.search(
-                r"\b(error|Error|ERROR|exception|Exception|EXCEPTION|"
-                r"fatal|Fatal|FATAL|panic|Panic|PANIC|traceback|Traceback)\b",
-                line,
-            ):
-                # Include context: 2 lines before, the error line, 2 after
-                start = max(0, i - 2)
-                end = min(len(lines), i + 3)
-                error_lines.extend(lines[start:end])
-                if end < len(lines):
-                    error_lines.append("")  # separator
-
-        # Deduplicate error context (overlapping windows)
-        seen = set()
-        unique_errors = []
-        for line in error_lines:
-            if line not in seen:
-                unique_errors.append(line)
-                seen.add(line)
-
-        result = lines[:keep_head]
-        if unique_errors:
-            result.append(f"\n... ({len(lines)} total lines, showing errors) ...\n")
-            result.extend(unique_errors[:50])  # Cap error lines
-        else:
-            result.append(f"\n... ({len(lines) - keep_head - keep_tail} lines truncated) ...\n")
-        result.extend(lines[-keep_tail:])
-
-        return "\n".join(result)
+        return compress_log_lines(
+            lines,
+            keep_head=keep_head,
+            keep_tail=keep_tail,
+            context_lines=2,
+        )
 
     def _process_pull(self, output: str) -> str:
         """Compress docker pull/push: strip layer progress, keep digest and status."""
