@@ -136,10 +136,9 @@ class GitProcessor(Processor):
                 code, filepath = "UD", stripped.split(":", 1)[1].strip()
             # Parse short-format status: XY filename
             # Supports all status codes: M, A, D, R, C, U, ?, !
-            elif re.match(r"^([MADRCTU?! ]{1,2})\s+(.+)$", stripped):
-                m = re.match(r"^([MADRCTU?! ]{1,2})\s+(.+)$", stripped)
-                code_raw = m.group(1).strip()
-                filepath = m.group(2).strip().strip('"')
+            elif status_m := re.match(r"^([MADRCTU?! ]{1,2})\s+(.+)$", stripped):
+                code_raw = status_m.group(1).strip()
+                filepath = status_m.group(2).strip().strip('"')
                 code = code_raw[0] if code_raw[0] != " " else code_raw[-1]
             # Untracked files section: just bare filenames (tab-indented in raw output)
             elif in_untracked and not stripped.startswith("("):
@@ -164,7 +163,7 @@ class GitProcessor(Processor):
 
         for dir_name, files in sorted(files_by_dir.items()):
             if len(files) > 8:
-                codes = {}
+                codes: dict[str, int] = {}
                 for f in files:
                     c = f.split(" ", 1)[0]
                     codes[c] = codes.get(c, 0) + 1

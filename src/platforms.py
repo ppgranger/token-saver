@@ -28,10 +28,12 @@ def get_command(input_data: dict, platform: Platform) -> str | None:
     """Extract the command string from hook input."""
     if platform == Platform.CLAUDE_CODE:
         tool_input = input_data.get("tool_input", {})
-        return tool_input.get("command")
+        cmd = tool_input.get("command")
+        return str(cmd) if cmd is not None else None
     if platform == Platform.GEMINI_CLI:
         tool_input = input_data.get("tool_input", {})
-        return tool_input.get("command") or tool_input.get("cmd")
+        cmd = tool_input.get("command") or tool_input.get("cmd")
+        return str(cmd) if cmd is not None else None
     return None
 
 

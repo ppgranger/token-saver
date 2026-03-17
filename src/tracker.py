@@ -26,8 +26,8 @@ class SavingsTracker:
         return os.path.join(SavingsTracker._default_db_dir(), "savings.db")
 
     # Class-level defaults — can be overridden (e.g. by stats.py for testing)
-    DB_DIR = None
-    DB_PATH = None
+    DB_DIR: str | None = None
+    DB_PATH: str | None = None
 
     _lock = threading.RLock()
 

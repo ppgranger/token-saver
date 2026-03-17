@@ -80,9 +80,9 @@ class SearchProcessor(Processor):
             count = len(matches)
             if count > max_per_file:
                 result.append(f"{filepath}: ({count} matches)")
-                for m in matches[:max_per_file]:
+                for match_line in matches[:max_per_file]:
                     # Strip the filepath prefix to avoid repetition
-                    display = m
+                    display = match_line
                     if display.startswith(filepath + ":"):
                         display = "  " + display[len(filepath) + 1 :]
                     else:
@@ -90,8 +90,8 @@ class SearchProcessor(Processor):
                     result.append(display)
                 result.append(f"  ... ({count - max_per_file} more)")
             else:
-                for m in matches:
-                    result.append(m)
+                for match_line in matches:
+                    result.append(match_line)
 
         if total_files > max_files:
             result.append(f"... ({total_files - max_files} more files)")

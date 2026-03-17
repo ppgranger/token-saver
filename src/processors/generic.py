@@ -108,7 +108,7 @@ class GenericProcessor(Processor):
         """Collapse consecutive identical lines into `line (xN)`."""
         if not lines:
             return lines
-        result = []
+        result: list[str] = []
         current = lines[0]
         count = 1
         for line in lines[1:]:
@@ -130,7 +130,7 @@ class GenericProcessor(Processor):
         """
         if not lines:
             return lines
-        result = []
+        result: list[str] = []
         current = lines[0]
         current_normalized = self._normalize_numbers(current)
         group: list[str] = [current]

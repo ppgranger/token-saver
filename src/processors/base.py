@@ -28,6 +28,10 @@ class Processor(ABC):
     def process(self, command: str, output: str) -> str:
         """Process and compress the output. Return compressed version."""
 
+    def clean(self, text: str) -> str:
+        """Light cleanup pass (default: no-op). Overridden by GenericProcessor."""
+        return text
+
     @property
     @abstractmethod
     def name(self) -> str:

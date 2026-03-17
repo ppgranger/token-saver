@@ -105,9 +105,9 @@ class GhProcessor(Processor):
         if len(lines) <= 30:
             return output
 
-        result = []
+        result: list[str] = []
         in_body = False
-        body_lines = []
+        body_lines: list[str] = []
 
         for line in lines:
             stripped = line.strip()
