@@ -2,13 +2,11 @@
 
 import os
 import sys
-import tempfile
 import textwrap
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src import config
-from src.engine import CompressionEngine
 from src.processors import _load_user_processors, discover_processors
 from src.processors.base import Processor
 

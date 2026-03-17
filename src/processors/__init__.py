@@ -39,7 +39,7 @@ def _load_user_processors(user_dir: str) -> None:
             mod = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = mod
             spec.loader.exec_module(mod)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             _debug_log(f"Skipping user processor {filename}: {exc}")
 
 

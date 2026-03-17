@@ -242,11 +242,15 @@ def cmd_benchmark(args):
                 break
 
         if args.format == "json":
-            print(json_mod.dumps({
-                "command": command,
-                "processor": processor_name,
-                "dry_run": True,
-            }))
+            print(
+                json_mod.dumps(
+                    {
+                        "command": command,
+                        "processor": processor_name,
+                        "dry_run": True,
+                    }
+                )
+            )
         else:
             print()
             print("Token-Saver Benchmark (dry-run)")
@@ -258,12 +262,13 @@ def cmd_benchmark(args):
 
     # Execute the command and measure
     exec_start = time.monotonic()
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(  # noqa: S602
         command,
-        shell=True,  # noqa: S602
+        shell=True,
         capture_output=True,
         text=True,
         timeout=config.get("wrap_timeout"),
+        check=False,
     )
     exec_elapsed = time.monotonic() - exec_start
 
@@ -282,18 +287,22 @@ def cmd_benchmark(args):
     savings_pct = (orig_chars - comp_chars) / orig_chars * 100 if orig_chars > 0 else 0
 
     if args.format == "json":
-        print(json_mod.dumps({
-            "command": command,
-            "processor": processor_name,
-            "was_compressed": was_compressed,
-            "original_chars": orig_chars,
-            "compressed_chars": comp_chars,
-            "original_tokens": orig_tokens,
-            "compressed_tokens": comp_tokens,
-            "savings_percent": round(savings_pct, 1),
-            "exec_time_s": round(exec_elapsed, 3),
-            "compress_time_s": round(compress_elapsed, 3),
-        }))
+        print(
+            json_mod.dumps(
+                {
+                    "command": command,
+                    "processor": processor_name,
+                    "was_compressed": was_compressed,
+                    "original_chars": orig_chars,
+                    "compressed_chars": comp_chars,
+                    "original_tokens": orig_tokens,
+                    "compressed_tokens": comp_tokens,
+                    "savings_percent": round(savings_pct, 1),
+                    "exec_time_s": round(exec_elapsed, 3),
+                    "compress_time_s": round(compress_elapsed, 3),
+                }
+            )
+        )
     else:
         print()
         print("Token-Saver Benchmark")
@@ -325,9 +334,7 @@ def main():
     subparsers.add_parser("update", help="Check for and apply updates")
 
     # benchmark
-    bench_parser = subparsers.add_parser(
-        "benchmark", help="Benchmark compression on a command"
-    )
+    bench_parser = subparsers.add_parser("benchmark", help="Benchmark compression on a command")
     bench_parser.add_argument("command_str", help="Command to benchmark (quote if needed)")
     bench_parser.add_argument(
         "--format", choices=["text", "json"], default="text", help="Output format"

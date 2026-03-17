@@ -72,9 +72,7 @@ class TestBenchmarkCommand:
         assert "git" in stdout
 
     def test_benchmark_dry_run_json(self):
-        rc, stdout, _ = _run_cli(
-            "benchmark", "git diff HEAD", "--dry-run", "--format", "json"
-        )
+        rc, stdout, _ = _run_cli("benchmark", "git diff HEAD", "--dry-run", "--format", "json")
         assert rc == 0
         data = json.loads(stdout)
         assert data["dry_run"] is True

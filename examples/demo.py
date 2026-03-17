@@ -21,7 +21,6 @@ CHARS_PER_TOKEN = config.get("chars_per_token")
 
 engine = CompressionEngine()
 
-# (label, command, fixture_filename)
 DEMOS = [
     ("git diff (large refactor)", "git diff", "large_git_diff.txt"),
     ("pytest (50 pass, 2 fail)", "pytest", "pytest_output.txt"),
@@ -75,8 +74,10 @@ def main() -> None:
     if total_orig > 0:
         total_savings = (total_orig - total_comp) / total_orig * 100
         print("-" * 80)
-        print(f"  Total: {to_tokens(total_orig):,} -> {to_tokens(total_comp):,} tokens"
-              f"  ({total_savings:.1f}% overall savings)")
+        print(
+            f"  Total: {to_tokens(total_orig):,} -> {to_tokens(total_comp):,} tokens"
+            f"  ({total_savings:.1f}% overall savings)"
+        )
     print()
 
 

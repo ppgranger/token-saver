@@ -7,7 +7,6 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src import config
-from src.config import _find_project_config
 
 
 class TestConfig:

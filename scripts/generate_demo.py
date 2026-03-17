@@ -39,7 +39,7 @@ def demo_fixture(label: str, command: str, fixture_file: str) -> None:
     with open(fixture_path) as f:
         raw_output = f.read()
 
-    compressed, processor, was_compressed = engine.compress(command, raw_output)
+    compressed, processor, _was_compressed = engine.compress(command, raw_output)
 
     orig_chars = len(raw_output)
     comp_chars = len(compressed)
@@ -47,8 +47,10 @@ def demo_fixture(label: str, command: str, fixture_file: str) -> None:
     comp_tokens = to_tokens(comp_chars)
     savings_pct = (orig_chars - comp_chars) / orig_chars * 100 if orig_chars > 0 else 0
 
-    print(f"  {label:<35} {orig_tokens:>8} tokens -> {comp_tokens:>8} tokens   "
-          f"{savings_pct:5.1f}%  [{processor}]")
+    print(
+        f"  {label:<35} {orig_tokens:>8} tokens -> {comp_tokens:>8} tokens   "
+        f"{savings_pct:5.1f}%  [{processor}]"
+    )
 
 
 def main() -> None:

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from . import config
 from .processors import discover_processors
-from .processors.base import Processor
+
+if TYPE_CHECKING:
+    from .processors.base import Processor
 
 
 class CompressionEngine:

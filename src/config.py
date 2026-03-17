@@ -74,7 +74,7 @@ def _find_project_config() -> str | None:
 
         parent = os.path.dirname(current)
         # Stop at filesystem root or home directory
-        if parent == current or current == home:
+        if current in (parent, home):
             break
         current = parent
 
@@ -84,7 +84,7 @@ def _find_project_config() -> str | None:
 def _load_config() -> dict[str, Any]:
     """Load config: defaults -> global file -> project file -> env vars."""
     config: dict[str, Any] = dict(_DEFAULTS)
-    config["_config_source"] = {k: "default" for k in _DEFAULTS}
+    config["_config_source"] = dict.fromkeys(_DEFAULTS, "default")
 
     # Load from global config file if it exists
     from src import data_dir  # noqa: PLC0415
@@ -108,9 +108,7 @@ def _load_config() -> dict[str, Any]:
                 project_config = json.load(f)
             config.update(project_config)
             for k in project_config:
-                config.setdefault("_config_source", {})[k] = (
-                    f"project:{project_config_path}"
-                )
+                config.setdefault("_config_source", {})[k] = f"project:{project_config_path}"
         except (json.JSONDecodeError, OSError):
             # Invalid project config is silently ignored
             pass
