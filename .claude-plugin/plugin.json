@@ -1,7 +1,7 @@
 {
   "name": "token-saver",
   "description": "Automatically compresses verbose CLI output (git, docker, npm, terraform, kubectl, etc.) to save tokens in Claude Code sessions. 21 specialized processors with content-aware compression.",
-  "version": "2.1.1",
+  "version": "2.2.1",
   "author": {
     "name": "ppgranger",
     "url": "https://github.com/ppgranger"

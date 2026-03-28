@@ -12,7 +12,7 @@
       "name": "token-saver",
       "source": "./",
       "description": "Automatically compresses verbose CLI output to save tokens. 21 specialized processors for git, docker, npm, terraform, kubectl, helm, ansible, and more.",
-      "version": "2.1.1",
+      "version": "2.2.1",
       "author": {
         "name": "ppgranger"
       },
