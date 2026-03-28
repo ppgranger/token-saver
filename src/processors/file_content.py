@@ -401,8 +401,8 @@ class FileContentProcessor(Processor):
             result.append(f"  ... ({len(deps) - 50} more)")
         return "\n".join(result)
 
-    def _compress_poetry_lock(self, lines: list[str], total: int) -> str:
-        """poetry.lock: extract [[package]] name and version."""
+    def _compress_toml_lock(self, lines: list[str], total: int, label: str) -> str:
+        """Extract [[package]] name and version from TOML lock files (poetry.lock, Cargo.lock)."""
         deps = []
         current_name = None
         for line in lines:
@@ -417,35 +417,20 @@ class FileContentProcessor(Processor):
                 deps.append(f"{current_name}@{val}")
                 current_name = None
 
-        result = [f"poetry.lock ({len(deps)} packages, {total} lines):"]
+        result = [f"{label} ({len(deps)} packages, {total} lines):"]
         for d in deps[:50]:
             result.append(f"  {d}")
         if len(deps) > 50:
             result.append(f"  ... ({len(deps) - 50} more)")
         return "\n".join(result)
+
+    def _compress_poetry_lock(self, lines: list[str], total: int) -> str:
+        """poetry.lock: extract [[package]] name and version."""
+        return self._compress_toml_lock(lines, total, "poetry.lock")
 
     def _compress_cargo_lock(self, lines: list[str], total: int) -> str:
         """Cargo.lock: extract [[package]] name and version."""
-        deps = []
-        current_name = None
-        for line in lines:
-            stripped = line.strip()
-            if stripped == "[[package]]":
-                current_name = None
-            elif stripped.startswith("name = "):
-                val = stripped.split('"')[1] if '"' in stripped else stripped.split("=")[1].strip()
-                current_name = val
-            elif stripped.startswith("version = ") and current_name:
-                val = stripped.split('"')[1] if '"' in stripped else stripped.split("=")[1].strip()
-                deps.append(f"{current_name}@{val}")
-                current_name = None
-
-        result = [f"Cargo.lock ({len(deps)} packages, {total} lines):"]
-        for d in deps[:50]:
-            result.append(f"  {d}")
-        if len(deps) > 50:
-            result.append(f"  ... ({len(deps) - 50} more)")
-        return "\n".join(result)
+        return self._compress_toml_lock(lines, total, "Cargo.lock")
 
     def _compress_json_lock(self, raw: str, total: int) -> str:
         """composer.lock / Pipfile.lock: extract package names + versions from JSON."""
@@ -465,7 +450,7 @@ class FileContentProcessor(Processor):
         for section in ("default", "develop"):
             for name, info in data.get(section, {}).items():
                 version = info.get("version", "?") if isinstance(info, dict) else "?"
-                deps.append(f"{name}{version}")
+                deps.append(f"{name}@{version}")
 
         result = [f"lock file ({len(deps)} packages, {total} lines):"]
         for d in deps[:50]:

@@ -209,6 +209,6 @@ class GenericProcessor(Processor):
         removed = total - keep_head - keep_tail
         return [
             *lines[:keep_head],
-            f"\n... ({removed} lines truncated, {total} total) ...\n",
+            f"... ({removed} lines truncated, {total} total) ...",
             *lines[-keep_tail:],
         ]

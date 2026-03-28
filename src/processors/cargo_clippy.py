@@ -5,15 +5,16 @@ from collections import defaultdict
 
 from .. import config
 from .base import Processor
+from .utils import (
+    RUST_COMPILING_RE,
+    RUST_ERROR_START_RE,
+    RUST_FINISHED_RE,
+    RUST_WARNING_START_RE,
+    RUST_WARNING_SUMMARY_RE,
+)
 
 _CLIPPY_CMD_RE = re.compile(r"\bcargo\s+clippy\b")
-_WARNING_START_RE = re.compile(r"^warning(?:\[(\S+)\])?:\s+(.+)")
-_ERROR_START_RE = re.compile(r"^error(?:\[(\S+)\])?:\s+(.+)")
-_SPAN_LINE_RE = re.compile(r"^\s*(-->|\d+\s*\||=\s+)")
-_WARNING_SUMMARY_RE = re.compile(r"^warning:\s+.+generated\s+\d+\s+warning")
-_FINISHED_RE = re.compile(r"^\s*Finished\s+")
 _CHECKING_RE = re.compile(r"^\s*Checking\s+\S+\s+v")
-_COMPILING_RE = re.compile(r"^\s*Compiling\s+\S+\s+v")
 
 # Clippy lint categories
 _CLIPPY_CATEGORIES = {
@@ -83,12 +84,12 @@ class CargoClippyProcessor(Processor):
             if _CHECKING_RE.match(stripped):
                 checking_count += 1
                 continue
-            if _COMPILING_RE.match(stripped):
+            if RUST_COMPILING_RE.match(stripped):
                 compiling_count += 1
                 continue
 
             # Error start
-            if _ERROR_START_RE.match(stripped):
+            if RUST_ERROR_START_RE.match(stripped):
                 # Flush current warning block
                 if current_rule and current_block:
                     warnings_by_rule[current_rule].append(current_block)
@@ -102,8 +103,8 @@ class CargoClippyProcessor(Processor):
                 continue
 
             # Warning start
-            wm = _WARNING_START_RE.match(stripped)
-            if wm and not _WARNING_SUMMARY_RE.match(stripped):
+            wm = RUST_WARNING_START_RE.match(stripped)
+            if wm and not RUST_WARNING_SUMMARY_RE.match(stripped):
                 # Flush previous
                 if in_error and current_error:
                     error_blocks.append(current_error)
@@ -117,7 +118,7 @@ class CargoClippyProcessor(Processor):
                 current_block = [line]
                 continue
 
-            if _WARNING_SUMMARY_RE.match(stripped):
+            if RUST_WARNING_SUMMARY_RE.match(stripped):
                 if current_rule and current_block:
                     warnings_by_rule[current_rule].append(current_block)
                     current_block = []
@@ -129,7 +130,7 @@ class CargoClippyProcessor(Processor):
                 summary_lines.append(line)
                 continue
 
-            if _FINISHED_RE.match(stripped):
+            if RUST_FINISHED_RE.match(stripped):
                 if current_rule and current_block:
                     warnings_by_rule[current_rule].append(current_block)
                     current_block = []

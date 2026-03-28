@@ -3,6 +3,14 @@
 import re
 from collections import defaultdict
 
+# Shared Rust compiler output patterns (used by cargo and cargo_clippy processors)
+RUST_WARNING_START_RE = re.compile(r"^warning(?:\[(\S+)\])?:\s+(.+)")
+RUST_ERROR_START_RE = re.compile(r"^error(?:\[(\S+)\])?:\s+(.+)")
+RUST_SPAN_LINE_RE = re.compile(r"^\s*(-->|\d+\s*\||=\s+)")
+RUST_WARNING_SUMMARY_RE = re.compile(r"^warning:\s+.+generated\s+\d+\s+warning")
+RUST_FINISHED_RE = re.compile(r"^\s*Finished\s+")
+RUST_COMPILING_RE = re.compile(r"^\s*Compiling\s+\S+\s+v")
+
 _DEFAULT_ERROR_RE = re.compile(
     r"\b(error|Error|ERROR|exception|Exception|EXCEPTION|"
     r"fatal|Fatal|FATAL|panic|Panic|PANIC|traceback|Traceback)\b"

@@ -169,7 +169,7 @@ class FileListingProcessor(Processor):
         # Find the summary line (usually last line like "X directories, Y files")
         summary = ""
         for line in reversed(lines):
-            if re.match(r"\d+\s+director", line):
+            if re.match(r"\d+\s+director(?:ies|y)\b", line):
                 summary = line
                 break
 

@@ -5,17 +5,19 @@ from collections import defaultdict
 
 from .. import config
 from .base import Processor
+from .utils import (
+    RUST_COMPILING_RE,
+    RUST_ERROR_START_RE,
+    RUST_FINISHED_RE,
+    RUST_SPAN_LINE_RE,
+    RUST_WARNING_START_RE,
+    RUST_WARNING_SUMMARY_RE,
+)
 
 _CARGO_CMD_RE = re.compile(r"\bcargo\s+(build|check|doc|update|bench)\b")
-_COMPILING_RE = re.compile(r"^\s*Compiling\s+\S+\s+v")
 _DOWNLOADING_RE = re.compile(r"^\s*Downloading\s+\S+\s+v")
 _DOCUMENTING_RE = re.compile(r"^\s*Documenting\s+\S+\s+v")
 _RUNNING_RE = re.compile(r"^\s*Running\s+")
-_FINISHED_RE = re.compile(r"^\s*Finished\s+")
-_WARNING_START_RE = re.compile(r"^warning(?:\[(\S+)\])?:\s+(.+)")
-_ERROR_START_RE = re.compile(r"^error(?:\[(\S+)\])?:\s+(.+)")
-_SPAN_LINE_RE = re.compile(r"^\s*(-->|\d+\s*\||=\s+)")
-_WARNING_SUMMARY_RE = re.compile(r"^warning:\s+.+generated\s+\d+\s+warning")
 _UPDATE_LINE_RE = re.compile(
     r"^\s*(Updating|Removing|Adding)\s+(\S+)\s+v([\d.]+)(?:\s*->\s*v([\d.]+))?"
 )
@@ -89,7 +91,7 @@ class CargoProcessor(Processor):
         for line in lines:
             stripped = line.strip()
 
-            if _COMPILING_RE.match(stripped):
+            if RUST_COMPILING_RE.match(stripped):
                 compiling_count += 1
                 continue
             if _DOWNLOADING_RE.match(stripped):
@@ -97,7 +99,7 @@ class CargoProcessor(Processor):
                 continue
 
             # Error start
-            if _ERROR_START_RE.match(stripped):
+            if RUST_ERROR_START_RE.match(stripped):
                 # Flush current warning block
                 if current_type and current_block:
                     warnings_by_type[current_type].append(current_block)
@@ -111,8 +113,8 @@ class CargoProcessor(Processor):
                 continue
 
             # Warning start
-            wm = _WARNING_START_RE.match(stripped)
-            if wm and not _WARNING_SUMMARY_RE.match(stripped):
+            wm = RUST_WARNING_START_RE.match(stripped)
+            if wm and not RUST_WARNING_SUMMARY_RE.match(stripped):
                 # Flush previous
                 if in_error and current_error:
                     error_blocks.append(current_error)
@@ -127,7 +129,7 @@ class CargoProcessor(Processor):
                 current_block = [line]
                 continue
 
-            if _WARNING_SUMMARY_RE.match(stripped):
+            if RUST_WARNING_SUMMARY_RE.match(stripped):
                 if current_type and current_block:
                     warnings_by_type[current_type].append(current_block)
                     current_block = []
@@ -139,7 +141,7 @@ class CargoProcessor(Processor):
                 warning_summary_lines.append(line)
                 continue
 
-            if _FINISHED_RE.match(stripped):
+            if RUST_FINISHED_RE.match(stripped):
                 if current_type and current_block:
                     warnings_by_type[current_type].append(current_block)
                     current_block = []
@@ -201,16 +203,16 @@ class CargoProcessor(Processor):
 
         for line in lines:
             stripped = line.strip()
-            if _COMPILING_RE.match(stripped):
+            if RUST_COMPILING_RE.match(stripped):
                 compiling_count += 1
             elif _DOCUMENTING_RE.match(stripped):
                 documenting_count += 1
             elif (
-                _FINISHED_RE.match(stripped)
+                RUST_FINISHED_RE.match(stripped)
                 or re.match(r"^\s*Generated\s+", stripped)
                 or re.search(r"\bwarning\b", stripped)
-                or _ERROR_START_RE.match(stripped)
-                or (_SPAN_LINE_RE.match(stripped) and result)
+                or RUST_ERROR_START_RE.match(stripped)
+                or (RUST_SPAN_LINE_RE.match(stripped) and result)
             ):
                 result.append(line)
 
@@ -274,15 +276,15 @@ class CargoProcessor(Processor):
 
         for line in lines:
             stripped = line.strip()
-            if _COMPILING_RE.match(stripped):
+            if RUST_COMPILING_RE.match(stripped):
                 compiling_count += 1
             elif _RUNNING_RE.match(stripped):
                 continue
             elif (
                 re.match(r"^test\s+.+\s+bench:", stripped)
                 or re.match(r"^test result:", stripped)
-                or _FINISHED_RE.match(stripped)
-                or _ERROR_START_RE.match(stripped)
+                or RUST_FINISHED_RE.match(stripped)
+                or RUST_ERROR_START_RE.match(stripped)
             ):
                 result.append(line)
 
