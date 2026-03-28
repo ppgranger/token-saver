@@ -20,10 +20,12 @@ class CompressionEngine:
 
     processors: list[Processor]
     _generic: Processor
+    _by_name: dict[str, Processor]
 
     def __init__(self) -> None:
         self.processors = discover_processors()
         self._generic = self.processors[-1]  # Last = GenericProcessor (priority 999)
+        self._by_name = {p.name: p for p in self.processors}
 
     def compress(self, command: str, output: str) -> tuple[str, str, bool]:
         """Compress output for a given command.
@@ -48,6 +50,17 @@ class CompressionEngine:
                 # Respect the processor's decision — no generic fallback.
                 if compressed is output or compressed == output:
                     return output, processor.name, False
+
+                # Chain to secondary processor if declared (max depth = 1)
+                if (
+                    processor.chain_to
+                    and processor.chain_to != processor.name
+                    and processor.chain_to in self._by_name
+                ):
+                    secondary = self._by_name[processor.chain_to]
+                    chained = secondary.process(command, compressed)
+                    if chained is not compressed and chained != compressed:
+                        compressed = chained
 
                 # If a specialized processor handled it, also run generic
                 # cleanup (ANSI strip, blank line collapse) but not truncation

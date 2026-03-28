@@ -210,9 +210,9 @@ class TestProcessorRegistry:
     """Tests for auto-discovery and the processor registry."""
 
     def test_discover_processors_finds_all(self):
-        """Auto-discovery should find all 21 processors."""
+        """Auto-discovery should find all 25 processors."""
         processors = discover_processors()
-        assert len(processors) == 21
+        assert len(processors) == 25
 
     def test_discover_processors_sorted_by_priority(self):
         """Processors must be returned in ascending priority order."""
@@ -245,6 +245,8 @@ class TestProcessorRegistry:
         assert name_to_priority["package_list"] == 15
         assert name_to_priority["git"] == 20
         assert name_to_priority["test"] == 21
+        assert name_to_priority["cargo"] == 22
+        assert name_to_priority["go"] == 23
         assert name_to_priority["build"] == 25
         assert name_to_priority["lint"] == 27
         assert name_to_priority["network"] == 30
@@ -260,6 +262,8 @@ class TestProcessorRegistry:
         assert name_to_priority["ansible"] == 40
         assert name_to_priority["helm"] == 41
         assert name_to_priority["syslog"] == 42
+        assert name_to_priority["ssh"] == 43
+        assert name_to_priority["jq_yq"] == 44
         assert name_to_priority["file_listing"] == 50
         assert name_to_priority["file_content"] == 51
         assert name_to_priority["generic"] == 999
@@ -398,6 +402,21 @@ class TestProcessorRegistry:
             # Syslog
             "journalctl -u nginx",
             "dmesg",
+            # Cargo (dedicated processor)
+            "cargo doc",
+            "cargo update",
+            "cargo bench",
+            # Go (dedicated processor)
+            "go build ./...",
+            "go vet ./...",
+            "go mod tidy",
+            "go generate ./...",
+            "go install ./cmd/...",
+            # JQ/YQ
+            "jq . file.json",
+            "yq . config.yaml",
+            "ssh host 'ls -la'",
+            "scp file.txt host:/tmp/",
         ]
 
         for cmd in test_commands:
@@ -412,3 +431,22 @@ class TestProcessorRegistry:
         for ep, dp in zip(engine.processors, discovered, strict=False):
             assert ep.name == dp.name
             assert ep.priority == dp.priority
+
+
+class TestProcessorChaining:
+    """Tests for multi-processor chaining infrastructure."""
+
+    def setup_method(self):
+        self.engine = CompressionEngine()
+
+    def test_chain_to_attribute_default_none(self):
+        for p in self.engine.processors:
+            assert p.chain_to is None
+
+    def test_processor_by_name_lookup(self):
+        assert "git" in self.engine._by_name
+        assert "build" in self.engine._by_name
+        assert "cargo" in self.engine._by_name
+        assert "go" in self.engine._by_name
+        assert "ssh" in self.engine._by_name
+        assert "jq_yq" in self.engine._by_name

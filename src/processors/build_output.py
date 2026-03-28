@@ -28,6 +28,9 @@ class BuildOutputProcessor(Processor):
         # Exclude cargo clippy (handled by LintOutputProcessor)
         if re.search(r"\bcargo\s+clippy\b", command):
             return False
+        # Exclude cargo build/check (handled by CargoProcessor)
+        if re.search(r"\bcargo\s+(build|check)\b", command):
+            return False
         return bool(
             re.search(
                 r"\b(npm\s+(run|install|ci|build|audit)|yarn\s+(run|install|build|add|audit)|pnpm\s+(run|install|build|add|audit)|"

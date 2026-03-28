@@ -48,6 +48,9 @@ _DEFAULTS = {
     "db_prune_days": 90,
     "chars_per_token": 4,
     "user_processors_dir": "",
+    "cargo_warning_example_count": 2,
+    "cargo_warning_group_threshold": 3,
+    "jq_passthrough_threshold": 50,
     "debug": False,
 }
 

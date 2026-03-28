@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.chain_utils import extract_primary_command
 from src.processors.ansible import AnsibleProcessor
 from src.processors.build_output import BuildOutputProcessor
+from src.processors.cargo import CargoProcessor
 from src.processors.cloud_cli import CloudCliProcessor
 from src.processors.db_query import DbQueryProcessor
 from src.processors.docker import DockerProcessor
@@ -17,12 +18,15 @@ from src.processors.file_listing import FileListingProcessor
 from src.processors.generic import GenericProcessor
 from src.processors.gh import GhProcessor
 from src.processors.git import GitProcessor
+from src.processors.go import GoProcessor
 from src.processors.helm import HelmProcessor
+from src.processors.jq_yq import JqYqProcessor
 from src.processors.kubectl import KubectlProcessor
 from src.processors.lint_output import LintOutputProcessor
 from src.processors.network import NetworkProcessor
 from src.processors.package_list import PackageListProcessor
 from src.processors.search import SearchProcessor
+from src.processors.ssh import SshProcessor
 from src.processors.syslog import SyslogProcessor
 from src.processors.system_info import SystemInfoProcessor
 from src.processors.terraform import TerraformProcessor
@@ -678,7 +682,7 @@ class TestBuildOutputProcessor:
 
     def test_can_handle_build_commands(self):
         assert self.p.can_handle("npm run build")
-        assert self.p.can_handle("cargo build")
+        assert not self.p.can_handle("cargo build")  # handled by CargoProcessor
         assert self.p.can_handle("make")
         assert self.p.can_handle("pip install -r requirements.txt")
         assert self.p.can_handle("yarn add lodash")
@@ -3495,4 +3499,412 @@ class TestSyslogProcessor:
         assert "Normal kernel message 0" in result
         # Tail preserved
         assert "Normal kernel message 199" in result
+        assert len(result) < len(output)
+
+
+# --- Cargo Processor ---
+
+
+class TestCargoProcessor:
+    def setup_method(self):
+        self.p = CargoProcessor()
+
+    def test_can_handle_cargo_commands(self):
+        assert self.p.can_handle("cargo build")
+        assert self.p.can_handle("cargo check")
+        assert self.p.can_handle("cargo build --release")
+        assert self.p.can_handle("cargo doc")
+        assert self.p.can_handle("cargo doc --open")
+        assert self.p.can_handle("cargo update")
+        assert self.p.can_handle("cargo bench")
+
+    def test_cannot_handle_cargo_test(self):
+        assert not self.p.can_handle("cargo test")
+
+    def test_cannot_handle_cargo_clippy(self):
+        assert not self.p.can_handle("cargo clippy")
+
+    def test_cannot_handle_non_cargo(self):
+        assert not self.p.can_handle("npm run build")
+        assert not self.p.can_handle("git status")
+
+    def test_empty_output(self):
+        assert self.p.process("cargo build", "") == ""
+
+    def test_cargo_build_collapses_compiling(self):
+        lines = [f"   Compiling dep-{i} v1.{i}.0" for i in range(50)]
+        lines.append("    Finished dev [unoptimized + debuginfo] target(s) in 12.34s")
+        output = "\n".join(lines)
+        result = self.p.process("cargo build", output)
+        assert "50 crates compiled" in result
+        assert "Finished" in result
+        assert "Compiling dep-" not in result
+
+    def test_cargo_build_preserves_all_errors(self):
+        output = "\n".join(
+            [
+                "   Compiling myapp v0.1.0",
+                "error[E0308]: mismatched types",
+                " --> src/main.rs:10:5",
+                "  |",
+                '10 |     let x: i32 = "hello";',
+                "  |                  ^^^^^^^ expected i32, found &str",
+                "",
+                "error: aborting due to previous error",
+            ]
+        )
+        result = self.p.process("cargo build", output)
+        assert "mismatched types" in result
+        assert "src/main.rs:10:5" in result
+        assert "expected i32" in result
+        assert "aborting" in result
+
+    def test_cargo_build_groups_warnings_by_type(self):
+        warnings = []
+        for i in range(6):
+            warnings.extend(
+                [
+                    f"warning: unused variable: `x{i}`",
+                    f" --> src/file{i}.rs:{i + 1}:5",
+                    "  |",
+                    f"{i + 1} |     let x{i} = 42;",
+                    "  |         ^^ help: if this is intentional, prefix it with an underscore",
+                    "",
+                ]
+            )
+        warnings.append("warning: `myapp` (lib) generated 6 warnings")
+        warnings.append("    Finished dev [unoptimized + debuginfo] target(s)")
+        output = "\n".join(warnings)
+        result = self.p.process("cargo build", output)
+        assert "unused_variable" in result
+        assert "6 occurrences" in result
+        assert "Finished" in result
+
+    def test_cargo_build_keeps_finished_line(self):
+        output = "\n".join(
+            [
+                "   Compiling myapp v0.1.0",
+                "    Finished dev [unoptimized + debuginfo] target(s) in 2.34s",
+            ]
+        )
+        result = self.p.process("cargo build", output)
+        assert "Finished" in result
+
+    def test_cargo_build_mixed_errors_and_warnings(self):
+        output = "\n".join(
+            [
+                "   Compiling myapp v0.1.0",
+                "warning: unused import: `std::io`",
+                " --> src/main.rs:1:5",
+                "",
+                "error[E0425]: cannot find value `x`",
+                " --> src/main.rs:5:5",
+                "  |",
+                '5 |     println!("{}", x);',
+                "  |                     ^ not found",
+                "",
+                "error: aborting due to previous error",
+            ]
+        )
+        result = self.p.process("cargo build", output)
+        assert "cannot find value" in result
+        assert "src/main.rs:5:5" in result
+
+    def test_cargo_doc_collapses_documenting(self):
+        lines = [f" Documenting dep-{i} v1.{i}.0" for i in range(20)]
+        lines.append("    Finished `doc` profile [unoptimized]")
+        lines.append("   Generated /target/doc/myapp/index.html")
+        output = "\n".join(lines)
+        result = self.p.process("cargo doc", output)
+        assert "20 documented" in result
+        assert "Finished" in result
+        assert "Generated" in result
+        assert "Documenting dep-" not in result
+
+    def test_cargo_update_shows_major_bumps(self):
+        output = "\n".join(
+            [
+                "    Updating serde v1.0.0 -> v2.0.0",
+                "    Updating tokio v1.28.0 -> v1.29.0",
+                "    Updating rand v0.8.0 -> v0.8.1",
+                "    Adding new-dep v0.1.0",
+                "    Removing old-dep v0.5.0",
+            ]
+        )
+        result = self.p.process("cargo update", output)
+        assert "MAJOR" in result
+        assert "serde" in result
+        assert "new-dep" in result
+        assert "old-dep" in result
+
+    def test_cargo_update_collapses_patch_bumps(self):
+        lines = [f"    Updating dep-{i} v1.0.{i} -> v1.0.{i + 1}" for i in range(20)]
+        output = "\n".join(lines)
+        result = self.p.process("cargo update", output)
+        assert "20 dependencies updated" in result
+        assert "Minor/patch updates: 20" in result
+
+    def test_cargo_bench_keeps_results(self):
+        output = "\n".join(
+            [
+                "   Compiling myapp v0.1.0",
+                "   Compiling myapp-bench v0.1.0",
+                "    Running benches/bench.rs",
+                "test bench_add      ... bench:         10 ns/iter (+/- 2)",
+                "test bench_multiply ... bench:         25 ns/iter (+/- 5)",
+                "test result: ok. 2 passed; 0 failed; 0 ignored; 2 measured",
+            ]
+        )
+        result = self.p.process("cargo bench", output)
+        assert "bench_add" in result
+        assert "bench_multiply" in result
+        assert "10 ns/iter" in result
+        assert "test result:" in result
+        assert "2 crates compiled" in result
+        assert "Running" not in result
+
+    def test_cargo_build_downloading_and_compiling(self):
+        lines = [f"  Downloading dep-{i} v1.0.{i}" for i in range(10)]
+        lines.extend([f"   Compiling dep-{i} v1.0.{i}" for i in range(10)])
+        lines.append("    Finished dev [unoptimized] target(s) in 30.5s")
+        output = "\n".join(lines)
+        result = self.p.process("cargo build", output)
+        assert "10 crates downloaded" in result
+        assert "10 crates compiled" in result
+        assert "Finished" in result
+
+
+# --- Go Processor ---
+
+
+class TestGoProcessor:
+    def setup_method(self):
+        self.p = GoProcessor()
+
+    def test_can_handle_go_commands(self):
+        assert self.p.can_handle("go build ./...")
+        assert self.p.can_handle("go build -o myapp ./cmd/server")
+        assert self.p.can_handle("go vet ./...")
+        assert self.p.can_handle("go mod tidy")
+        assert self.p.can_handle("go mod download")
+        assert self.p.can_handle("go generate ./...")
+        assert self.p.can_handle("go install ./cmd/...")
+
+    def test_cannot_handle_go_test(self):
+        assert not self.p.can_handle("go test ./...")
+
+    def test_cannot_handle_golangci_lint(self):
+        assert not self.p.can_handle("golangci-lint run")
+
+    def test_cannot_handle_non_go(self):
+        assert not self.p.can_handle("git status")
+
+    def test_empty_output(self):
+        assert self.p.process("go build ./...", "") == ""
+
+    def test_go_build_preserves_errors(self):
+        output = "\n".join(
+            [
+                "# myapp/pkg/handler",
+                "pkg/handler/main.go:15:2: undefined: DoSomething",
+                "pkg/handler/main.go:20:10: cannot use x (variable of type string) as int",
+            ]
+        )
+        result = self.p.process("go build ./...", output)
+        assert "undefined: DoSomething" in result
+        assert "main.go:15:2" in result
+        assert "main.go:20:10" in result
+
+    def test_go_vet_groups_warnings(self):
+        warnings = []
+        for i in range(6):
+            warnings.append(f"pkg/file{i}.go:{i + 1}:5: printf format %d has arg of wrong type")
+        for i in range(3):
+            warnings.append(f"pkg/util{i}.go:{i + 1}:3: unreachable code")
+        output = "\n".join(warnings)
+        result = self.p.process("go vet ./...", output)
+        assert "printf" in result
+        assert "6 warnings" in result
+        assert "unreachable" in result
+
+    def test_go_mod_tidy_collapses_downloads(self):
+        lines = [f"go: downloading github.com/pkg/dep{i} v1.0.{i}" for i in range(30)]
+        lines.append("go: added github.com/new/pkg v0.5.0")
+        lines.append("go: removed github.com/old/pkg v1.0.0")
+        output = "\n".join(lines)
+        result = self.p.process("go mod tidy", output)
+        assert "30 packages downloaded" in result
+        assert "added" in result
+        assert "removed" in result
+        assert "downloading" not in result
+
+    def test_go_mod_keeps_added_removed(self):
+        output = "\n".join(
+            [
+                "go: downloading github.com/pkg/a v1.0.0",
+                "go: added github.com/pkg/a v1.0.0",
+                "go: upgraded github.com/pkg/b v1.0.0 => v1.1.0",
+            ]
+        )
+        result = self.p.process("go mod tidy", output)
+        assert "added" in result
+        assert "upgraded" in result
+
+    def test_go_generate_collapses_running(self):
+        lines = [f"main.go:{i}: running mockgen" for i in range(10)]
+        lines.append("Generated output.go")
+        output = "\n".join(lines)
+        result = self.p.process("go generate ./...", output)
+        assert "10 generators ran" in result
+        assert "Generated output.go" in result
+
+    def test_go_generate_keeps_errors(self):
+        output = "\n".join(
+            [
+                "main.go:5: running stringer",
+                "error: stringer: can't find type Foo",
+            ]
+        )
+        result = self.p.process("go generate ./...", output)
+        assert "error" in result
+        assert "can't find type Foo" in result
+
+    def test_go_install_delegates_to_build(self):
+        output = "\n".join(
+            [
+                "# myapp/cmd/server",
+                "cmd/server/main.go:10:5: undefined: handler.New",
+            ]
+        )
+        result = self.p.process("go install ./cmd/...", output)
+        assert "undefined: handler.New" in result
+
+
+# --- SSH Processor ---
+
+
+class TestSshProcessor:
+    def setup_method(self):
+        self.p = SshProcessor()
+
+    def test_can_handle_non_interactive_ssh(self):
+        assert self.p.can_handle("ssh host 'ls -la'")
+        assert self.p.can_handle('ssh host "uname -a"')
+        assert self.p.can_handle("ssh -o StrictHostKeyChecking=no host 'uptime'")
+
+    def test_cannot_handle_interactive_ssh(self):
+        assert not self.p.can_handle("ssh host")
+        assert not self.p.can_handle("ssh -p 22 host")
+
+    def test_can_handle_scp(self):
+        assert self.p.can_handle("scp file.txt host:/tmp/")
+        assert self.p.can_handle("scp -r dir/ user@host:/path/")
+
+    def test_empty_output(self):
+        assert self.p.process("ssh host 'ls'", "") == ""
+
+    def test_ssh_large_output_compressed(self):
+        lines = [f"line {i}: some output data" for i in range(200)]
+        output = "\n".join(lines)
+        result = self.p.process("ssh host 'ls -la'", output)
+        assert len(result) < len(output)
+        # Head preserved
+        assert "line 0" in result
+        # Tail preserved
+        assert "line 199" in result
+
+    def test_ssh_preserves_errors(self):
+        lines = [f"data line {i}" for i in range(50)]
+        lines.insert(25, "ERROR: connection failed at step 25")
+        output = "\n".join(lines)
+        result = self.p.process("ssh host 'run_job'", output)
+        assert "ERROR: connection failed" in result
+
+    def test_scp_collapses_progress(self):
+        output = "\n".join(
+            [
+                "file1.tar.gz   10%  24MB  12.3MB/s   00:02",
+                "file1.tar.gz   50%  120MB  12.3MB/s   00:10",
+                "file1.tar.gz  100%  245MB  12.3MB/s   00:20",
+                "file2.tar.gz   10%  10MB   5.0MB/s    00:01",
+                "file2.tar.gz  100%  100MB  5.0MB/s    00:20",
+            ]
+        )
+        result = self.p.process("scp file1.tar.gz file2.tar.gz host:/tmp/", output)
+        assert len(result) < len(output)
+
+    def test_scp_keeps_errors(self):
+        output = "\n".join(
+            [
+                "file.txt  100%  1MB  1.0MB/s   00:01",
+                "scp: /remote/path: Permission denied",
+            ]
+        )
+        result = self.p.process("scp file.txt host:/remote/path", output)
+        assert "Permission denied" in result
+
+
+# --- JQ/YQ Processor ---
+
+
+class TestJqYqProcessor:
+    def setup_method(self):
+        self.p = JqYqProcessor()
+
+    def test_can_handle_jq(self):
+        assert self.p.can_handle("jq . file.json")
+        assert self.p.can_handle("jq '.items[]' data.json")
+        assert self.p.can_handle("jq -r .name file.json")
+
+    def test_can_handle_yq(self):
+        assert self.p.can_handle("yq . config.yaml")
+        assert self.p.can_handle("yq eval '.spec' deployment.yaml")
+
+    def test_cannot_handle_non_jq(self):
+        assert not self.p.can_handle("cat file.json")
+        assert not self.p.can_handle("grep pattern file")
+
+    def test_empty_output(self):
+        assert self.p.process("jq . file.json", "") == ""
+
+    def test_jq_small_output_passthrough(self):
+        data = {"key": "value", "count": 42}
+        import json
+
+        output = json.dumps(data, indent=2)
+        result = self.p.process("jq . file.json", output)
+        assert result == output
+
+    def test_jq_large_json_compressed(self):
+        import json
+
+        data = [
+            {"id": i, "name": f"item-{i}", "data": {"nested": "value" * 10}} for i in range(100)
+        ]
+        output = json.dumps(data, indent=2)
+        assert len(output.splitlines()) > 50
+        result = self.p.process("jq . file.json", output)
+        assert len(result) < len(output)
+
+    def test_jq_streaming_output(self):
+        import json
+
+        lines = [json.dumps({"id": i, "name": f"item-{i}"}) for i in range(100)]
+        output = "\n".join(lines)
+        result = self.p.process("jq -c '.[]' file.json", output)
+        assert len(result) < len(output)
+        assert "same structure" in result
+
+    def test_yq_small_output_passthrough(self):
+        output = "key: value\ncount: 42\n"
+        result = self.p.process("yq . config.yaml", output)
+        assert result == output
+
+    def test_yq_large_output_summarized(self):
+        lines = ["root:"]
+        for i in range(80):
+            lines.append(f"- name: item-{i}")
+            lines.append(f"  value: {i}")
+        output = "\n".join(lines)
+        result = self.p.process("yq . config.yaml", output)
         assert len(result) < len(output)

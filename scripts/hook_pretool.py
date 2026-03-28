@@ -86,7 +86,7 @@ _SAFE_TRAILING_PIPE_RE = re.compile(
 EXCLUDED_PATTERNS = [
     r"(?<!['\"])\|(?!['\"])",  # unquoted pipe (complex pipelines)
     r"^\s*(vi|vim|nano|emacs|code)\b",
-    r"^\s*(ssh|scp)\b",
+    r"^\s*ssh\s+(?:-\S+\s+)*\S+\s*$",  # interactive ssh only (no remote command)
     r"^\s*rsync\b.*\S+:\S+",  # only exclude remote rsync (host:path)
     r"(?:^|\s)token[-_]saver\s",  # avoid wrapping token-saver CLI itself
     r"wrap\.py",
@@ -106,7 +106,7 @@ _SEGMENT_EXCLUDED_PATTERNS = [
     r"<\(",  # process substitution
     r"^\s*sudo\b",
     r"^\s*(vi|vim|nano|emacs|code)\b",
-    r"^\s*(ssh|scp)\b",
+    r"^\s*ssh\s+(?:-\S+\s+)*\S+\s*$",  # interactive ssh only
     r"^\s*rsync\b.*\S+:\S+",  # only exclude remote rsync (host:path)
     r"^\s*env\s+\S+=",
     r"(?:^|\s)token[-_]saver\s",

@@ -511,3 +511,70 @@ class TestChainedCommands:
     def test_three_segment_chain(self):
         assert is_compressible("cd /a && cd /b && git status")
         assert is_compressible("touch f && chmod 644 f && ls -la f")
+
+    def test_cd_then_go_build(self):
+        assert is_compressible("cd /project && go build ./...")
+
+    def test_cd_then_cargo_bench(self):
+        assert is_compressible("cd /project && cargo bench")
+
+
+class TestNewProcessorHookPatterns:
+    """Tests for hook patterns of newly added processors."""
+
+    # --- Cargo ---
+    def test_cargo_doc_compressible(self):
+        assert is_compressible("cargo doc")
+        assert is_compressible("cargo doc --open")
+
+    def test_cargo_update_compressible(self):
+        assert is_compressible("cargo update")
+
+    def test_cargo_bench_compressible(self):
+        assert is_compressible("cargo bench")
+
+    def test_cargo_build_still_compressible(self):
+        assert is_compressible("cargo build")
+        assert is_compressible("cargo build --release")
+        assert is_compressible("cargo check")
+
+    # --- Go ---
+    def test_go_build_compressible(self):
+        assert is_compressible("go build ./...")
+        assert is_compressible("go build -o myapp ./cmd/server")
+
+    def test_go_vet_compressible(self):
+        assert is_compressible("go vet ./...")
+
+    def test_go_mod_compressible(self):
+        assert is_compressible("go mod tidy")
+        assert is_compressible("go mod download")
+
+    def test_go_generate_compressible(self):
+        assert is_compressible("go generate ./...")
+
+    def test_go_install_compressible(self):
+        assert is_compressible("go install ./cmd/...")
+
+    # --- SSH non-interactive ---
+    def test_ssh_non_interactive_compressible(self):
+        assert is_compressible("ssh host 'ls -la'")
+        assert is_compressible('ssh host "uname -a"')
+        assert is_compressible("ssh -o StrictHostKeyChecking=no host 'uptime'")
+
+    def test_ssh_interactive_still_excluded(self):
+        assert not is_compressible("ssh host")
+        assert not is_compressible("ssh -p 22 host")
+
+    def test_scp_compressible(self):
+        assert is_compressible("scp file.txt host:/tmp/")
+        assert is_compressible("scp -r dir/ user@host:/path/")
+
+    # --- JQ/YQ ---
+    def test_jq_compressible(self):
+        assert is_compressible("jq . file.json")
+        assert is_compressible("jq '.items[]' data.json")
+
+    def test_yq_compressible(self):
+        assert is_compressible("yq . config.yaml")
+        assert is_compressible("yq eval '.spec' deployment.yaml")

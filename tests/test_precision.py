@@ -1024,3 +1024,125 @@ class TestLockFilePrecision:
         assert "40 packages" in compressed
         assert "lib-0" in compressed
         assert "lib-39" in compressed
+
+
+class TestCargoPrecision:
+    def setup_method(self):
+        self.engine = CompressionEngine()
+
+    def test_cargo_build_preserves_all_errors_with_spans(self):
+        lines = [f"   Compiling dep-{i} v1.0.{i}" for i in range(100)]
+        lines.extend(
+            [
+                "error[E0308]: mismatched types",
+                " --> src/main.rs:10:5",
+                "  |",
+                '10 |     let x: i32 = "hello";',
+                "  |                  ^^^^^^^ expected i32, found &str",
+                "",
+                "error[E0425]: cannot find value `y`",
+                " --> src/lib.rs:20:10",
+                "  |",
+                "20 |     y + 1",
+                "  |     ^ not found in this scope",
+            ]
+        )
+        output = "\n".join(lines)
+        compressed, proc, was_compressed = self.engine.compress("cargo build", output)
+        assert was_compressed
+        assert proc == "cargo"
+        assert "mismatched types" in compressed
+        assert "src/main.rs:10:5" in compressed
+        assert "expected i32" in compressed
+        assert "cannot find value" in compressed
+        assert "src/lib.rs:20:10" in compressed
+        assert "Compiling dep-" not in compressed
+
+    def test_cargo_build_preserves_warning_types(self):
+        warnings = []
+        for i in range(10):
+            warnings.extend(
+                [
+                    f"warning: unused variable: `var{i}`",
+                    f" --> src/file{i}.rs:{i + 1}:5",
+                    "",
+                ]
+            )
+        for i in range(5):
+            warnings.extend(
+                [
+                    f"warning: unused import: `mod{i}`",
+                    f" --> src/lib.rs:{i + 10}:5",
+                    "",
+                ]
+            )
+        warnings.append("warning: `myapp` (lib) generated 15 warnings")
+        warnings.append("    Finished dev [unoptimized + debuginfo] target(s)")
+        output = "\n".join(warnings)
+        compressed, proc, was_compressed = self.engine.compress("cargo build", output)
+        assert was_compressed
+        assert proc == "cargo"
+        assert "unused_variable" in compressed
+        assert "unused_import" in compressed
+        assert "Finished" in compressed
+
+
+class TestGoPrecision:
+    def setup_method(self):
+        self.engine = CompressionEngine()
+
+    def test_go_build_preserves_all_errors(self):
+        # Need enough package headers to trigger compression (multi-package build)
+        lines = [f"# myapp/pkg/module{i}" for i in range(10)]
+        lines.extend(
+            [
+                "# myapp/pkg/handler",
+                "pkg/handler/main.go:15:2: undefined: DoSomething",
+                "pkg/handler/main.go:20:10: cannot use x (variable of type string) as int",
+                "# myapp/pkg/db",
+                'pkg/db/conn.go:5:3: imported and not used: "fmt"',
+            ]
+        )
+        output = "\n".join(lines)
+        compressed, proc, was_compressed = self.engine.compress("go build ./...", output)
+        assert was_compressed
+        assert proc == "go"
+        assert "undefined: DoSomething" in compressed
+        assert "main.go:15:2" in compressed
+        assert "main.go:20:10" in compressed
+        assert "conn.go:5:3" in compressed
+
+    def test_go_mod_tidy_preserves_additions(self):
+        lines = [f"go: downloading github.com/pkg/dep{i} v1.0.{i}" for i in range(50)]
+        lines.append("go: added github.com/new/important v1.0.0")
+        lines.append("go: removed github.com/old/unused v0.5.0")
+        output = "\n".join(lines)
+        compressed, proc, was_compressed = self.engine.compress("go mod tidy", output)
+        assert was_compressed
+        assert proc == "go"
+        assert "added" in compressed
+        assert "removed" in compressed
+        assert "50 packages downloaded" in compressed
+
+
+class TestJqPrecision:
+    def setup_method(self):
+        self.engine = CompressionEngine()
+
+    def test_jq_preserves_top_level_structure(self):
+        import json
+
+        data = {
+            "users": [
+                {"id": i, "name": f"user-{i}", "email": f"user{i}@test.com"} for i in range(50)
+            ],
+            "metadata": {"total": 50, "page": 1},
+            "status": "ok",
+        }
+        output = json.dumps(data, indent=2)
+        compressed, proc, was_compressed = self.engine.compress("jq . data.json", output)
+        assert was_compressed
+        assert proc == "jq_yq"
+        assert "users" in compressed
+        assert "metadata" in compressed
+        assert "status" in compressed
