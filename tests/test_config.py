@@ -54,6 +54,47 @@ class TestConfig:
             del os.environ["TOKEN_SAVER_DEBUG"]
             config.reload()
 
+    def test_default_disabled_processors(self, monkeypatch):
+        for key in list(os.environ):
+            if key.startswith("TOKEN_SAVER_"):
+                monkeypatch.delenv(key)
+        config.reload()
+        assert config.get("disabled_processors") == []
+
+    def test_env_override_list(self):
+        os.environ["TOKEN_SAVER_DISABLED_PROCESSORS"] = "git,docker"  # noqa: S105
+        config.reload()
+        try:
+            assert config.get("disabled_processors") == ["git", "docker"]
+        finally:
+            del os.environ["TOKEN_SAVER_DISABLED_PROCESSORS"]
+            config.reload()
+
+    def test_env_override_list_single_value(self):
+        os.environ["TOKEN_SAVER_DISABLED_PROCESSORS"] = "git"  # noqa: S105
+        config.reload()
+        try:
+            assert config.get("disabled_processors") == ["git"]
+        finally:
+            del os.environ["TOKEN_SAVER_DISABLED_PROCESSORS"]
+            config.reload()
+
+    def test_default_max_chain_depth(self, monkeypatch):
+        for key in list(os.environ):
+            if key.startswith("TOKEN_SAVER_"):
+                monkeypatch.delenv(key)
+        config.reload()
+        assert config.get("max_chain_depth") == 3
+
+    def test_env_override_list_empty_string(self):
+        os.environ["TOKEN_SAVER_DISABLED_PROCESSORS"] = ""
+        config.reload()
+        try:
+            assert config.get("disabled_processors") == []
+        finally:
+            del os.environ["TOKEN_SAVER_DISABLED_PROCESSORS"]
+            config.reload()
+
     def test_invalid_env_value_ignored(self):
         os.environ["TOKEN_SAVER_MIN_INPUT_LENGTH"] = "not_a_number"  # noqa: S105
         config.reload()

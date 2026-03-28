@@ -20,7 +20,7 @@ cargo build, cargo check, cargo doc, cargo update, cargo bench.
 ## Exclusions
 
 - `cargo test` is routed to `TestOutputProcessor`
-- `cargo clippy` is routed to `LintOutputProcessor`
+- `cargo clippy` is routed to `CargoClippyProcessor`
 
 ## Configuration
 

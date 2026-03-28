@@ -19,7 +19,7 @@ class Processor(ABC):
 
     priority: int = 50
     hook_patterns: list[str] = []
-    chain_to: str | None = None
+    chain_to: str | list[str] | None = None
 
     @abstractmethod
     def can_handle(self, command: str) -> bool:

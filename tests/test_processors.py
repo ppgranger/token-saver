@@ -9,6 +9,7 @@ from src.chain_utils import extract_primary_command
 from src.processors.ansible import AnsibleProcessor
 from src.processors.build_output import BuildOutputProcessor
 from src.processors.cargo import CargoProcessor
+from src.processors.cargo_clippy import CargoClippyProcessor
 from src.processors.cloud_cli import CloudCliProcessor
 from src.processors.db_query import DbQueryProcessor
 from src.processors.docker import DockerProcessor
@@ -23,10 +24,13 @@ from src.processors.helm import HelmProcessor
 from src.processors.jq_yq import JqYqProcessor
 from src.processors.kubectl import KubectlProcessor
 from src.processors.lint_output import LintOutputProcessor
+from src.processors.maven_gradle import MavenGradleProcessor
 from src.processors.network import NetworkProcessor
 from src.processors.package_list import PackageListProcessor
+from src.processors.python_install import PythonInstallProcessor
 from src.processors.search import SearchProcessor
 from src.processors.ssh import SshProcessor
+from src.processors.structured_log import StructuredLogProcessor
 from src.processors.syslog import SyslogProcessor
 from src.processors.system_info import SystemInfoProcessor
 from src.processors.terraform import TerraformProcessor
@@ -684,10 +688,13 @@ class TestBuildOutputProcessor:
         assert self.p.can_handle("npm run build")
         assert not self.p.can_handle("cargo build")  # handled by CargoProcessor
         assert self.p.can_handle("make")
-        assert self.p.can_handle("pip install -r requirements.txt")
+        assert not self.p.can_handle("pip install -r requirements.txt")  # PythonInstallProcessor
         assert self.p.can_handle("yarn add lodash")
         assert self.p.can_handle("next build")
         assert not self.p.can_handle("git status")
+        assert not self.p.can_handle("mvn clean install")  # MavenGradleProcessor
+        assert not self.p.can_handle("gradle build")  # MavenGradleProcessor
+        assert not self.p.can_handle("./gradlew assemble")  # MavenGradleProcessor
 
     def test_empty_output(self):
         assert self.p.process("npm run build", "") == ""
@@ -821,20 +828,10 @@ class TestBuildOutputProcessor:
         assert "high" in result
         assert "vulnerabilities" in result.lower() or "found" in result.lower()
 
-    def test_pip_progress_skipped(self):
-        output = "\n".join(
-            [
-                "Collecting requests",
-                "  Downloading requests-2.31.0-py3-none-any.whl",
-                "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 62.6/62.6 kB 1.2 MB/s",
-                "Installing collected packages: requests",
-                "Successfully installed requests-2.31.0",
-            ]
-        )
-        result = self.p.process("pip install requests", output)
-        assert "━" not in result
-        assert "Collecting" not in result
-        assert "Build succeeded" in result
+    def test_pip_install_not_handled(self):
+        """pip install is now handled by PythonInstallProcessor."""
+        assert not self.p.can_handle("pip install requests")
+        assert not self.p.can_handle("pip3 install flask")
 
     def test_yarn_berry_step_progress_skipped(self):
         """Yarn Berry (v2+) outputs step lines prefixed with ➤ YN0000: ┌/└."""
@@ -3908,3 +3905,359 @@ class TestJqYqProcessor:
         output = "\n".join(lines)
         result = self.p.process("yq . config.yaml", output)
         assert len(result) < len(output)
+
+
+# ───────────────────────────────────────────────────────────────
+# PythonInstallProcessor
+# ───────────────────────────────────────────────────────────────
+
+
+class TestPythonInstallProcessor:
+    def setup_method(self):
+        self.p = PythonInstallProcessor()
+
+    def test_can_handle_pip_install(self):
+        assert self.p.can_handle("pip install flask")
+        assert self.p.can_handle("pip3 install -r requirements.txt")
+
+    def test_can_handle_poetry(self):
+        assert self.p.can_handle("poetry install")
+        assert self.p.can_handle("poetry update")
+        assert self.p.can_handle("poetry add requests")
+
+    def test_can_handle_uv(self):
+        assert self.p.can_handle("uv pip install flask")
+        assert self.p.can_handle("uv sync")
+
+    def test_not_handle_pip_list(self):
+        assert not self.p.can_handle("pip list")
+        assert not self.p.can_handle("pip freeze")
+
+    def test_not_handle_unrelated(self):
+        assert not self.p.can_handle("npm install")
+        assert not self.p.can_handle("git status")
+
+    def test_empty_output(self):
+        assert self.p.process("pip install flask", "") == ""
+
+    def test_pip_install_compressed(self):
+        lines = []
+        for i in range(30):
+            lines.append(f"Collecting package-{i}>=1.0")
+        for i in range(30):
+            lines.append(f"  Downloading package_{i}-1.2.3-py3-none-any.whl (10 kB)")
+        lines.append("Installing collected packages: " + ", ".join(f"p{i}" for i in range(30)))
+        lines.append("Successfully installed " + " ".join(f"package-{i}-1.2.3" for i in range(30)))
+        output = "\n".join(lines)
+
+        result = self.p.process("pip install -r requirements.txt", output)
+        assert len(result) < len(output)
+        assert "30 packages collected" in result
+        assert "30 downloads" in result
+        assert "Successfully installed 30 packages" in result
+
+    def test_pip_errors_preserved(self):
+        output = (
+            "Collecting nonexistent-pkg\n"
+            "  ERROR: Could not find a version that satisfies the requirement\n"
+            "ERROR: No matching distribution found for nonexistent-pkg"
+        )
+        result = self.p.process("pip install nonexistent-pkg", output)
+        assert "ERROR" in result
+        assert "Could not find" in result
+
+    def test_pip_already_satisfied(self):
+        lines = [f"Requirement already satisfied: pkg-{i} in /usr/lib" for i in range(20)]
+        output = "\n".join(lines)
+        result = self.p.process("pip install flask", output)
+        assert "20 already satisfied" in result
+
+    def test_poetry_install_compressed(self):
+        lines = ["Resolving dependencies..."]
+        for i in range(20):
+            lines.append(f"  Installing package-{i} (1.{i}.0)")
+        output = "\n".join(lines)
+
+        result = self.p.process("poetry install", output)
+        assert len(result) < len(output)
+        assert "Installed 20 packages" in result
+        assert "dependency resolution" in result
+
+    def test_uv_sync_compressed(self):
+        output = (
+            "Resolved 42 packages in 1.2s\n"
+            "Downloading flask-2.0.0\n"
+            "Downloading requests-2.28.0\n"
+            "Installed 5 packages in 0.5s"
+        )
+        result = self.p.process("uv sync", output)
+        assert "Resolved 42 packages" in result
+        assert "Installed 5 packages" in result
+
+
+# ───────────────────────────────────────────────────────────────
+# CargoClippyProcessor
+# ───────────────────────────────────────────────────────────────
+
+
+class TestCargoClippyProcessor:
+    def setup_method(self):
+        self.p = CargoClippyProcessor()
+
+    def test_can_handle_cargo_clippy(self):
+        assert self.p.can_handle("cargo clippy")
+        assert self.p.can_handle("cargo clippy --all-targets")
+        assert self.p.can_handle("cargo clippy -- -W clippy::all")
+
+    def test_not_handle_cargo_build(self):
+        assert not self.p.can_handle("cargo build")
+        assert not self.p.can_handle("cargo test")
+
+    def test_empty_output(self):
+        assert self.p.process("cargo clippy", "") == ""
+
+    def test_warning_blocks_grouped(self):
+        lines = []
+        # 5 warnings of same rule
+        for i in range(5):
+            lines.append("warning[clippy::needless_return]: unneeded `return` statement")
+            lines.append(f"  --> src/file{i}.rs:10:5")
+            lines.append("   |")
+            lines.append("10 |     return x;")
+            lines.append("   |     ^^^^^^^^^ help: remove `return`")
+            lines.append("   |")
+        lines.append("warning: `my_crate` (bin) generated 5 warnings")
+        output = "\n".join(lines)
+
+        result = self.p.process("cargo clippy", output)
+        assert "clippy::needless_return" in result
+        assert "5 occurrences" in result
+        assert len(result) < len(output)
+
+    def test_errors_preserved(self):
+        output = (
+            "error[E0308]: mismatched types\n"
+            "  --> src/main.rs:5:5\n"
+            "   |\n"
+            '5  |     let x: i32 = "hello";\n'
+            "   |                  ^^^^^^^ expected `i32`, found `&str`"
+        )
+        result = self.p.process("cargo clippy", output)
+        assert "error[E0308]" in result
+        assert "mismatched types" in result
+
+    def test_checking_count(self):
+        output = (
+            "    Checking serde v1.0.0\n"
+            "    Checking tokio v1.0.0\n"
+            "    Checking my-crate v0.1.0\n"
+            "    Finished `dev` profile\n"
+        )
+        result = self.p.process("cargo clippy", output)
+        assert "3 checked" in result
+
+    def test_mixed_warnings_and_errors(self):
+        output = (
+            "    Checking my-crate v0.1.0\n"
+            "warning[clippy::unused_imports]: unused import\n"
+            "  --> src/lib.rs:1:5\n"
+            "   |\n"
+            "1  | use std::io;\n"
+            "   |     ^^^^^^^\n"
+            "error[E0599]: method not found\n"
+            "  --> src/main.rs:10:5\n"
+            "   |\n"
+            "10 |     x.foo();\n"
+            "   |       ^^^ method not found\n"
+        )
+        result = self.p.process("cargo clippy", output)
+        assert "error[E0599]" in result
+        assert "method not found" in result
+
+
+# ───────────────────────────────────────────────────────────────
+# MavenGradleProcessor
+# ───────────────────────────────────────────────────────────────
+
+
+class TestMavenGradleProcessor:
+    def setup_method(self):
+        self.p = MavenGradleProcessor()
+
+    def test_can_handle_mvn(self):
+        assert self.p.can_handle("mvn clean install")
+        assert self.p.can_handle("mvn package")
+        assert self.p.can_handle("./mvnw verify")
+
+    def test_can_handle_gradle(self):
+        assert self.p.can_handle("gradle build")
+        assert self.p.can_handle("./gradlew assemble")
+        assert self.p.can_handle("gradle test")
+
+    def test_not_handle_unrelated(self):
+        assert not self.p.can_handle("npm run build")
+        assert not self.p.can_handle("cargo build")
+
+    def test_empty_output(self):
+        assert self.p.process("mvn clean install", "") == ""
+
+    def test_maven_downloads_stripped(self):
+        lines = []
+        for i in range(50):
+            lines.append(
+                f"[INFO] Downloading from central: https://repo.maven.org/artifact-{i}.jar"
+            )
+            lines.append(
+                f"[INFO] Downloaded from central: https://repo.maven.org/artifact-{i}.jar (10 kB)"
+            )
+        lines.append("[INFO] Building my-project 1.0.0 [1/3]")
+        lines.append("[INFO] BUILD SUCCESS")
+        lines.append("[INFO] Total time: 45.2 s")
+        output = "\n".join(lines)
+
+        result = self.p.process("mvn clean install", output)
+        assert len(result) < len(output)
+        assert "100 downloads" in result
+        assert "BUILD SUCCESS" in result
+
+    def test_maven_errors_preserved(self):
+        output = (
+            "[INFO] Building my-project 1.0.0\n"
+            "[ERROR] Failed to execute goal: compilation failure\n"
+            "[ERROR] src/main/java/App.java:[10,5] cannot find symbol\n"
+            "[INFO] BUILD FAILURE\n"
+            "[INFO] Total time: 5.1 s"
+        )
+        result = self.p.process("mvn compile", output)
+        assert "ERROR" in result
+        assert "cannot find symbol" in result
+        assert "BUILD FAILURE" in result
+
+    def test_maven_test_results_preserved(self):
+        output = (
+            "[INFO] Building my-project 1.0.0\n"
+            "[INFO] Tests run: 42, Failures: 1, Errors: 0, Skipped: 2\n"
+            "[INFO] BUILD FAILURE"
+        )
+        result = self.p.process("mvn test", output)
+        assert "Tests run: 42" in result
+
+    def test_gradle_tasks_compressed(self):
+        lines = []
+        for i in range(20):
+            lines.append(f"> Task :sub{i}:compileJava UP-TO-DATE")
+        lines.append("> Task :app:compileJava")
+        lines.append("> Task :app:processResources NO-SOURCE")
+        lines.append("> Task :app:jar")
+        lines.append("")
+        lines.append("BUILD SUCCESSFUL in 12s")
+        lines.append("23 actionable tasks: 2 executed, 21 up-to-date")
+        output = "\n".join(lines)
+
+        result = self.p.process("gradle build", output)
+        assert len(result) < len(output)
+        assert "2 executed" in result
+        assert "21 up-to-date" in result
+        assert "BUILD SUCCESSFUL" in result
+
+    def test_gradle_errors_preserved(self):
+        output = (
+            "> Task :app:compileJava\n"
+            "FAILURE: Build failed with an exception.\n"
+            "\n"
+            "* What went wrong:\n"
+            "Execution failed for task ':app:compileJava'.\n"
+            "> Compilation failed\n"
+            "\n"
+            "BUILD FAILED in 5s"
+        )
+        result = self.p.process("./gradlew build", output)
+        assert "FAILURE" in result
+        assert "Compilation failed" in result
+        assert "BUILD FAILED" in result
+
+    def test_gradle_test_results(self):
+        output = "> Task :test\n10 tests completed, 2 failed\n\nBUILD FAILED in 8s"
+        result = self.p.process("gradle test", output)
+        assert "10 tests completed, 2 failed" in result
+
+
+# ───────────────────────────────────────────────────────────────
+# StructuredLogProcessor
+# ───────────────────────────────────────────────────────────────
+
+
+class TestStructuredLogProcessor:
+    def setup_method(self):
+        self.p = StructuredLogProcessor()
+
+    def test_can_handle_stern(self):
+        assert self.p.can_handle("stern my-pod")
+        assert self.p.can_handle("stern -n default my-pod")
+
+    def test_can_handle_kubetail(self):
+        assert self.p.can_handle("kubetail my-service")
+
+    def test_not_handle_unrelated(self):
+        assert not self.p.can_handle("kubectl logs my-pod")
+        assert not self.p.can_handle("docker logs container")
+
+    def test_empty_output(self):
+        assert self.p.process("stern my-pod", "") == ""
+
+    def test_json_lines_compressed(self):
+        import json
+
+        lines = []
+        for i in range(30):
+            entry = {
+                "level": "info",
+                "msg": f"processing item {i}",
+                "ts": f"2024-01-01T00:00:{i:02d}Z",
+            }
+            lines.append(json.dumps(entry))
+        for i in range(5):
+            entry = {
+                "level": "error",
+                "msg": f"failed to process item {i}",
+                "ts": f"2024-01-01T00:01:{i:02d}Z",
+            }
+            lines.append(json.dumps(entry))
+        output = "\n".join(lines)
+
+        result = self.p.process("stern my-pod", output)
+        assert len(result) < len(output)
+        assert "35 log entries" in result
+        assert "info: 30" in result
+        assert "error: 5" in result
+        assert "Errors (5)" in result
+
+    def test_non_json_fallback(self):
+        lines = [f"plain log line {i}" for i in range(50)]
+        output = "\n".join(lines)
+        result = self.p.process("stern my-pod", output)
+        # Should still compress via log compression fallback
+        assert len(result) < len(output)
+
+    def test_mixed_json_non_json(self):
+        import json
+
+        lines = ["plain text line"]
+        for i in range(20):
+            lines.append(json.dumps({"level": "info", "msg": f"msg {i}"}))
+        lines.append("another plain line")
+        output = "\n".join(lines)
+        result = self.p.process("stern my-pod", output)
+        assert "log entries" in result
+
+    def test_error_messages_shown(self):
+        import json
+
+        lines = []
+        for i in range(10):
+            lines.append(json.dumps({"level": "info", "msg": f"ok {i}"}))
+        lines.append(json.dumps({"level": "error", "msg": "database connection failed"}))
+        output = "\n".join(lines)
+
+        result = self.p.process("stern my-pod", output)
+        assert "database connection failed" in result

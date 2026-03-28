@@ -237,24 +237,28 @@ processor is in [`docs/processors/`](docs/processors/).
 | 1 | **Package List** | 15 | pip list/freeze, npm ls, conda list, gem list, brew list | [package_list.md](docs/processors/package_list.md) |
 | 2 | **Git** | 20 | status, diff, log, show, push/pull/fetch, branch, stash, reflog, blame, cherry-pick, rebase, merge | [git.md](docs/processors/git.md) |
 | 3 | **Test** | 21 | pytest, jest, vitest, mocha, cargo test, go test, rspec, phpunit, bun test, npm/yarn/pnpm test, dotnet test, swift test, mix test | [test_output.md](docs/processors/test_output.md) |
-| 4 | **Build** | 25 | npm/yarn/pnpm build/install, cargo build, make, cmake, gradle, mvn, pip install, tsc, webpack, vite, next build, turbo, nx, bazel, sbt, mix compile, docker build | [build_output.md](docs/processors/build_output.md) |
-| 5 | **Lint** | 27 | eslint, ruff, flake8, pylint, clippy, mypy, prettier, biome, shellcheck, hadolint, rubocop, golangci-lint | [lint_output.md](docs/processors/lint_output.md) |
-| 6 | **Network** | 30 | curl, wget, http/https (httpie) | [network.md](docs/processors/network.md) |
-| 7 | **Docker** | 31 | ps, images, logs, pull/push, inspect, stats, compose up/down/build/ps/logs | [docker.md](docs/processors/docker.md) |
-| 8 | **Kubernetes** | 32 | kubectl/oc get, describe, logs, top, apply, delete, create | [kubectl.md](docs/processors/kubectl.md) |
-| 9 | **Terraform** | 33 | terraform/tofu plan, apply, destroy, init, output, state list/show | [terraform.md](docs/processors/terraform.md) |
-| 10 | **Environment** | 34 | env, printenv (with secret redaction) | [env.md](docs/processors/env.md) |
-| 11 | **Search** | 35 | grep -r, rg, ag, fd, fdfind | [search.md](docs/processors/search.md) |
-| 12 | **System Info** | 36 | du, wc, df | [system_info.md](docs/processors/system_info.md) |
-| 13 | **GitHub CLI** | 37 | gh pr/issue/run list/view/diff/checks/status | [gh.md](docs/processors/gh.md) |
-| 14 | **Database Query** | 38 | psql, mysql, sqlite3, pgcli, mycli, litecli | [db_query.md](docs/processors/db_query.md) |
-| 15 | **Cloud CLI** | 39 | aws, gcloud, az (JSON/table/text output compression) | [cloud_cli.md](docs/processors/cloud_cli.md) |
-| 16 | **Ansible** | 40 | ansible-playbook, ansible (ok/skipped counting, error preservation) | [ansible.md](docs/processors/ansible.md) |
-| 17 | **Helm** | 41 | helm install/upgrade/list/template/status/history | [helm.md](docs/processors/helm.md) |
-| 18 | **Syslog** | 42 | journalctl, dmesg (head/tail with error extraction) | [syslog.md](docs/processors/syslog.md) |
-| 19 | **File Listing** | 50 | ls, find, tree, exa, eza, rsync | [file_listing.md](docs/processors/file_listing.md) |
-| 20 | **File Content** | 51 | cat, head, tail, bat, less, more (content-aware: code, config, log, CSV) | [file_content.md](docs/processors/file_content.md) |
-| 21 | **Generic** | 999 | Any command (fallback: ANSI strip, dedup, truncation) | [generic.md](docs/processors/generic.md) |
+| 4 | **Python Install** | 24 | pip install, poetry install/update/add, uv pip install, uv sync | [python_install.md](docs/processors/python_install.md) |
+| 5 | **Build** | 25 | npm/yarn/pnpm build/install, cargo build, make, cmake, tsc, webpack, vite, next build, turbo, nx, bazel, sbt, mix compile, docker build | [build_output.md](docs/processors/build_output.md) |
+| 6 | **Cargo Clippy** | 26 | cargo clippy (multi-line block grouping with span/help preservation) | [cargo_clippy.md](docs/processors/cargo_clippy.md) |
+| 7 | **Lint** | 27 | eslint, ruff, flake8, pylint, clippy, mypy, prettier, biome, shellcheck, hadolint, rubocop, golangci-lint | [lint_output.md](docs/processors/lint_output.md) |
+| 8 | **Maven/Gradle** | 28 | mvn, ./mvnw, gradle, ./gradlew (download stripping, task noise removal) | [maven_gradle.md](docs/processors/maven_gradle.md) |
+| 9 | **Network** | 30 | curl, wget, http/https (httpie) | [network.md](docs/processors/network.md) |
+| 10 | **Docker** | 31 | ps, images, logs, pull/push, inspect, stats, compose up/down/build/ps/logs | [docker.md](docs/processors/docker.md) |
+| 11 | **Kubernetes** | 32 | kubectl/oc get, describe, logs, top, apply, delete, create | [kubectl.md](docs/processors/kubectl.md) |
+| 12 | **Terraform** | 33 | terraform/tofu plan, apply, destroy, init, output, state list/show | [terraform.md](docs/processors/terraform.md) |
+| 13 | **Environment** | 34 | env, printenv (with secret redaction) | [env.md](docs/processors/env.md) |
+| 14 | **Search** | 35 | grep -r, rg, ag, fd, fdfind | [search.md](docs/processors/search.md) |
+| 15 | **System Info** | 36 | du, wc, df | [system_info.md](docs/processors/system_info.md) |
+| 16 | **GitHub CLI** | 37 | gh pr/issue/run list/view/diff/checks/status | [gh.md](docs/processors/gh.md) |
+| 17 | **Database Query** | 38 | psql, mysql, sqlite3, pgcli, mycli, litecli | [db_query.md](docs/processors/db_query.md) |
+| 18 | **Cloud CLI** | 39 | aws, gcloud, az (JSON/table/text output compression) | [cloud_cli.md](docs/processors/cloud_cli.md) |
+| 19 | **Ansible** | 40 | ansible-playbook, ansible (ok/skipped counting, error preservation) | [ansible.md](docs/processors/ansible.md) |
+| 20 | **Helm** | 41 | helm install/upgrade/list/template/status/history | [helm.md](docs/processors/helm.md) |
+| 21 | **Syslog** | 42 | journalctl, dmesg (head/tail with error extraction) | [syslog.md](docs/processors/syslog.md) |
+| 22 | **Structured Log** | 45 | stern, kubetail (JSON Lines grouping by level) | [structured_log.md](docs/processors/structured_log.md) |
+| 23 | **File Listing** | 50 | ls, find, tree, exa, eza, rsync | [file_listing.md](docs/processors/file_listing.md) |
+| 24 | **File Content** | 51 | cat, head, tail, bat, less, more (content-aware: code, config, log, CSV) | [file_content.md](docs/processors/file_content.md) |
+| 25 | **Generic** | 999 | Any command (fallback: ANSI strip, dedup, truncation) | [generic.md](docs/processors/generic.md) |
 
 ## Configuration
 
@@ -341,11 +345,13 @@ Project settings are merged with global settings. Token-Saver walks up parent di
 | `max_traceback_lines` | 30 | Max traceback lines before truncation |
 | `db_prune_days` | 90 | Stats retention in days |
 | `user_processors_dir` | `~/.token-saver/processors/` | Directory for custom processors |
+| `disabled_processors` | `[]` | List of processor names to disable (env: comma-separated) |
+| `max_chain_depth` | 3 | Maximum processor chain depth |
 | `debug` | false | Enable debug logging |
 
 ## Custom Processors
 
-You can extend Token-Saver with your own processors for commands not covered by the built-in 21.
+You can extend Token-Saver with your own processors for commands not covered by the built-in 25.
 
 1. Create a Python file with a class inheriting from `src.processors.base.Processor`
 2. Implement `can_handle()`, `process()`, `name`, and set `priority`

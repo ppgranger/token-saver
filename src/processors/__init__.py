@@ -108,8 +108,14 @@ def collect_hook_patterns() -> list[str]:
     """Collect all hook_patterns from discovered processors.
 
     Returns a flat list of regex pattern strings, used by hook_pretool.py.
+    Disabled processors are excluded so their commands are not intercepted.
     """
+    from .. import config  # noqa: PLC0415
+
+    raw_disabled = config.get("disabled_processors") or []
+    disabled = set(raw_disabled if isinstance(raw_disabled, list) else [])
     patterns: list[str] = []
     for processor in discover_processors():
-        patterns.extend(processor.hook_patterns)
+        if processor.name not in disabled:
+            patterns.extend(processor.hook_patterns)
     return patterns

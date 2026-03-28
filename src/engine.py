@@ -23,7 +23,12 @@ class CompressionEngine:
     _by_name: dict[str, Processor]
 
     def __init__(self) -> None:
-        self.processors = discover_processors()
+        all_processors = discover_processors()
+        raw_disabled = config.get("disabled_processors") or []
+        disabled = set(raw_disabled if isinstance(raw_disabled, list) else [])
+        # Never disable generic — it's the fallback and provides clean()
+        disabled.discard("generic")
+        self.processors = [p for p in all_processors if p.name not in disabled]
         self._generic = self.processors[-1]  # Last = GenericProcessor (priority 999)
         self._by_name = {p.name: p for p in self.processors}
 
@@ -51,16 +56,25 @@ class CompressionEngine:
                 if compressed is output or compressed == output:
                     return output, processor.name, False
 
-                # Chain to secondary processor if declared (max depth = 1)
-                if (
-                    processor.chain_to
-                    and processor.chain_to != processor.name
-                    and processor.chain_to in self._by_name
-                ):
-                    secondary = self._by_name[processor.chain_to]
-                    chained = secondary.process(command, compressed)
-                    if chained is not compressed and chained != compressed:
-                        compressed = chained
+                # Chain to secondary processors if declared
+                chain_list = processor.chain_to
+                if chain_list:
+                    if isinstance(chain_list, str):
+                        chain_list = [chain_list]
+                    max_depth = config.get("max_chain_depth")
+                    visited = {processor.name}
+                    depth = 0
+                    for chain_name in chain_list:
+                        if depth >= max_depth:
+                            break
+                        if chain_name in visited or chain_name not in self._by_name:
+                            continue
+                        secondary = self._by_name[chain_name]
+                        visited.add(chain_name)
+                        chained = secondary.process(command, compressed)
+                        if chained is not compressed and chained != compressed:
+                            compressed = chained
+                        depth += 1
 
                 # If a specialized processor handled it, also run generic
                 # cleanup (ANSI strip, blank line collapse) but not truncation

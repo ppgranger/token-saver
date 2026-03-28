@@ -49,6 +49,25 @@ class TestHookPretool:
         assert is_compressible("webpack")
         assert is_compressible("next build")
 
+    def test_python_install_commands_compressible(self):
+        assert is_compressible("pip install flask")
+        assert is_compressible("pip3 install -r requirements.txt")
+        assert is_compressible("poetry install")
+        assert is_compressible("poetry update")
+        assert is_compressible("poetry add requests")
+        assert is_compressible("uv pip install flask")
+        assert is_compressible("uv sync")
+
+    def test_maven_gradle_commands_compressible(self):
+        assert is_compressible("mvn clean install")
+        assert is_compressible("mvn package")
+        assert is_compressible("gradle build")
+        assert is_compressible("./gradlew assemble")
+
+    def test_structured_log_commands_compressible(self):
+        assert is_compressible("stern my-pod")
+        assert is_compressible("kubetail my-service")
+
     def test_lint_commands_compressible(self):
         assert is_compressible("eslint src/")
         assert is_compressible("ruff check .")

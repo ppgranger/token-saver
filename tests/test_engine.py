@@ -210,9 +210,9 @@ class TestProcessorRegistry:
     """Tests for auto-discovery and the processor registry."""
 
     def test_discover_processors_finds_all(self):
-        """Auto-discovery should find all 25 processors."""
+        """Auto-discovery should find all 29 processors."""
         processors = discover_processors()
-        assert len(processors) == 25
+        assert len(processors) == 29
 
     def test_discover_processors_sorted_by_priority(self):
         """Processors must be returned in ascending priority order."""
@@ -247,8 +247,11 @@ class TestProcessorRegistry:
         assert name_to_priority["test"] == 21
         assert name_to_priority["cargo"] == 22
         assert name_to_priority["go"] == 23
+        assert name_to_priority["python_install"] == 24
         assert name_to_priority["build"] == 25
+        assert name_to_priority["cargo_clippy"] == 26
         assert name_to_priority["lint"] == 27
+        assert name_to_priority["maven_gradle"] == 28
         assert name_to_priority["network"] == 30
         assert name_to_priority["docker"] == 31
         assert name_to_priority["kubectl"] == 32
@@ -264,6 +267,7 @@ class TestProcessorRegistry:
         assert name_to_priority["syslog"] == 42
         assert name_to_priority["ssh"] == 43
         assert name_to_priority["jq_yq"] == 44
+        assert name_to_priority["structured_log"] == 45
         assert name_to_priority["file_listing"] == 50
         assert name_to_priority["file_content"] == 51
         assert name_to_priority["generic"] == 999
@@ -417,6 +421,25 @@ class TestProcessorRegistry:
             "yq . config.yaml",
             "ssh host 'ls -la'",
             "scp file.txt host:/tmp/",
+            # Python install (dedicated processor)
+            "pip install flask",
+            "pip3 install -r requirements.txt",
+            "poetry install",
+            "poetry update",
+            "poetry add requests",
+            "uv pip install flask",
+            "uv sync",
+            # Cargo clippy (dedicated processor)
+            "cargo clippy",
+            # Maven/Gradle (dedicated processor)
+            "mvn clean install",
+            "mvn package",
+            "./mvnw verify",
+            "gradle build",
+            "./gradlew assemble",
+            # Structured log
+            "stern my-pod",
+            "kubetail my-service",
         ]
 
         for cmd in test_commands:
@@ -433,6 +456,78 @@ class TestProcessorRegistry:
             assert ep.priority == dp.priority
 
 
+class TestDisabledProcessors:
+    """Tests for per-processor enable/disable."""
+
+    def test_disabled_processor_excluded(self, monkeypatch):
+        monkeypatch.setenv("TOKEN_SAVER_DISABLED_PROCESSORS", "git")
+        from src import config
+
+        config.reload()
+        engine = CompressionEngine()
+        names = [p.name for p in engine.processors]
+        assert "git" not in names
+        assert "build" in names  # Other processors still present
+        monkeypatch.delenv("TOKEN_SAVER_DISABLED_PROCESSORS")
+        config.reload()
+
+    def test_disabled_generic_ignored(self, monkeypatch):
+        """Generic processor cannot be disabled."""
+        monkeypatch.setenv("TOKEN_SAVER_DISABLED_PROCESSORS", "generic")
+        from src import config
+
+        config.reload()
+        engine = CompressionEngine()
+        names = [p.name for p in engine.processors]
+        assert "generic" in names
+        monkeypatch.delenv("TOKEN_SAVER_DISABLED_PROCESSORS")
+        config.reload()
+
+    def test_disabled_multiple_processors(self, monkeypatch):
+        monkeypatch.setenv("TOKEN_SAVER_DISABLED_PROCESSORS", "git,docker,lint")
+        from src import config
+
+        config.reload()
+        engine = CompressionEngine()
+        names = [p.name for p in engine.processors]
+        assert "git" not in names
+        assert "docker" not in names
+        assert "lint" not in names
+        assert "build" in names
+        monkeypatch.delenv("TOKEN_SAVER_DISABLED_PROCESSORS")
+        config.reload()
+
+    def test_disabled_processors_string_in_json_ignored(self, monkeypatch):
+        """If disabled_processors is a string (wrong type from JSON), treat as empty."""
+        from src import config
+
+        # Simulate a JSON config with wrong type: "lint" instead of ["lint"]
+        cfg = {**config._load_config(), "disabled_processors": "lint"}
+        monkeypatch.setattr(config, "_config", cfg)
+        engine = CompressionEngine()
+        names = [p.name for p in engine.processors]
+        # "lint" as string should NOT disable any processor (would be {"l","i","n","t"} otherwise)
+        assert "lint" in names
+        config.reload()
+
+    def test_disabled_processors_hook_patterns(self, monkeypatch):
+        """Disabled processors should not contribute hook patterns."""
+        import re
+
+        monkeypatch.setenv("TOKEN_SAVER_DISABLED_PROCESSORS", "git")
+        from src import config
+
+        config.reload()
+        patterns = collect_hook_patterns()
+        compiled = [re.compile(p) for p in patterns]
+        # git status should NOT match any pattern
+        assert not any(p.search("git status") for p in compiled)
+        # Other commands should still match
+        assert any(p.search("pytest tests/") for p in compiled)
+        monkeypatch.delenv("TOKEN_SAVER_DISABLED_PROCESSORS")
+        config.reload()
+
+
 class TestProcessorChaining:
     """Tests for multi-processor chaining infrastructure."""
 
@@ -441,7 +536,10 @@ class TestProcessorChaining:
 
     def test_chain_to_attribute_default_none(self):
         for p in self.engine.processors:
-            assert p.chain_to is None
+            if p.name == "cargo_clippy":
+                assert p.chain_to == ["lint"]
+            else:
+                assert p.chain_to is None
 
     def test_processor_by_name_lookup(self):
         assert "git" in self.engine._by_name
@@ -450,3 +548,226 @@ class TestProcessorChaining:
         assert "go" in self.engine._by_name
         assert "ssh" in self.engine._by_name
         assert "jq_yq" in self.engine._by_name
+        assert "python_install" in self.engine._by_name
+        assert "cargo_clippy" in self.engine._by_name
+        assert "maven_gradle" in self.engine._by_name
+        assert "structured_log" in self.engine._by_name
+
+    def test_chain_to_string_backward_compat(self):
+        """String chain_to should work (normalized to single-element list)."""
+        from src.processors.base import Processor
+
+        class FakeA(Processor):
+            priority = 1
+            hook_patterns = []
+            chain_to = "generic"
+
+            @property
+            def name(self):
+                return "fake_a"
+
+            def can_handle(self, command):
+                return command == "fake_chain"
+
+            def process(self, command, output):
+                return output.replace("AAA", "BBB")
+
+        engine = self.engine
+        # Inject fake processor
+        engine.processors.insert(0, FakeA())
+        engine._by_name["fake_a"] = engine.processors[0]
+
+        output = "AAA\n" * 300
+        _compressed, proc, _was = engine.compress("fake_chain", output)
+        # FakeA transforms AAA->BBB, then chains to generic
+        assert proc in ("fake_a", "generic")
+
+    def test_chain_to_list(self):
+        """List chain_to should apply processors in sequence."""
+        from src.processors.base import Processor
+
+        class ProcA(Processor):
+            priority = 1
+            hook_patterns = []
+            chain_to = ["proc_b"]
+
+            @property
+            def name(self):
+                return "proc_a"
+
+            def can_handle(self, command):
+                return command == "chain_list_test"
+
+            def process(self, command, output):
+                return output.replace("STEP1", "STEP2")
+
+        class ProcB(Processor):
+            priority = 2
+            hook_patterns = []
+
+            @property
+            def name(self):
+                return "proc_b"
+
+            def can_handle(self, command):
+                return False
+
+            def process(self, command, output):
+                return output.replace("STEP2", "STEP3")
+
+        engine = self.engine
+        a, b = ProcA(), ProcB()
+        engine.processors.insert(0, a)
+        engine.processors.insert(1, b)
+        engine._by_name["proc_a"] = a
+        engine._by_name["proc_b"] = b
+
+        output = "STEP1\n" * 100
+        compressed, _proc, was = engine.compress("chain_list_test", output)
+        if was:
+            assert "STEP3" in compressed
+
+    def test_chain_cycle_detection(self):
+        """Cycle in chain_to should not cause infinite loop."""
+        from src.processors.base import Processor
+
+        class CycleA(Processor):
+            priority = 1
+            hook_patterns = []
+            chain_to = ["cycle_b"]
+
+            @property
+            def name(self):
+                return "cycle_a"
+
+            def can_handle(self, command):
+                return command == "cycle_test"
+
+            def process(self, command, output):
+                return output + "\nA"
+
+        class CycleB(Processor):
+            priority = 2
+            hook_patterns = []
+            chain_to = ["cycle_a"]
+
+            @property
+            def name(self):
+                return "cycle_b"
+
+            def can_handle(self, command):
+                return False
+
+            def process(self, command, output):
+                return output + "\nB"
+
+        engine = self.engine
+        a, b = CycleA(), CycleB()
+        engine.processors.insert(0, a)
+        engine.processors.insert(1, b)
+        engine._by_name["cycle_a"] = a
+        engine._by_name["cycle_b"] = b
+
+        output = "start\n" * 100
+        # Should not hang
+        _compressed, proc, _was = engine.compress("cycle_test", output)
+        assert proc in ("cycle_a", "generic", "none")
+
+    def test_chain_unknown_name_skipped(self):
+        """Unknown processor name in chain_to should be silently skipped."""
+        from src.processors.base import Processor
+
+        class UnknownChain(Processor):
+            priority = 1
+            hook_patterns = []
+            chain_to = ["nonexistent_processor"]
+
+            @property
+            def name(self):
+                return "unknown_chain"
+
+            def can_handle(self, command):
+                return command == "unknown_chain_test"
+
+            def process(self, command, output):
+                return output.replace("X", "Y")
+
+        engine = self.engine
+        p = UnknownChain()
+        engine.processors.insert(0, p)
+        engine._by_name["unknown_chain"] = p
+
+        output = "X\n" * 100
+        # Should not raise
+        _compressed, proc, _was = engine.compress("unknown_chain_test", output)
+        assert proc in ("unknown_chain", "generic", "none")
+
+    def test_chain_max_depth(self, monkeypatch):
+        """max_chain_depth config should limit chaining."""
+        from src import config
+        from src.processors.base import Processor
+
+        monkeypatch.setenv("TOKEN_SAVER_MAX_CHAIN_DEPTH", "1")
+        config.reload()
+
+        class DepthA(Processor):
+            priority = 1
+            hook_patterns = []
+            chain_to = ["depth_b", "depth_c"]
+
+            @property
+            def name(self):
+                return "depth_a"
+
+            def can_handle(self, command):
+                return command == "depth_test"
+
+            def process(self, command, output):
+                return output.replace("D0", "D1")
+
+        class DepthB(Processor):
+            priority = 2
+            hook_patterns = []
+
+            @property
+            def name(self):
+                return "depth_b"
+
+            def can_handle(self, command):
+                return False
+
+            def process(self, command, output):
+                return output.replace("D1", "D2")
+
+        class DepthC(Processor):
+            priority = 3
+            hook_patterns = []
+
+            @property
+            def name(self):
+                return "depth_c"
+
+            def can_handle(self, command):
+                return False
+
+            def process(self, command, output):
+                return output.replace("D2", "D3")
+
+        engine = CompressionEngine()
+        a, b, c = DepthA(), DepthB(), DepthC()
+        engine.processors.insert(0, a)
+        engine.processors.insert(1, b)
+        engine.processors.insert(2, c)
+        engine._by_name["depth_a"] = a
+        engine._by_name["depth_b"] = b
+        engine._by_name["depth_c"] = c
+
+        output = "D0\n" * 100
+        compressed, _proc, was = engine.compress("depth_test", output)
+        if was:
+            # With max_depth=1, only depth_b should run (not depth_c)
+            assert "D2" in compressed
+            assert "D3" not in compressed
+
+        monkeypatch.delenv("TOKEN_SAVER_MAX_CHAIN_DEPTH")
+        config.reload()

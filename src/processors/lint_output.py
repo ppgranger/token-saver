@@ -10,9 +10,9 @@ from .base import Processor
 class LintOutputProcessor(Processor):
     priority = 27
     hook_patterns = [
-        r"^(eslint|ruff(\s+check)?|flake8|pylint|clippy|rubocop|golangci-lint|stylelint|biome\s+(check|lint))\b",
+        r"^(eslint|ruff(\s+check)?|flake8|pylint|rubocop|golangci-lint|stylelint|biome\s+(check|lint))\b",
         r"^python3?\s+-m\s+(flake8|pylint|ruff|mypy)\b",
-        r"^(mypy|prettier\s+--check|shellcheck|hadolint|tflint|ktlint|swiftlint|cargo\s+clippy)\b",
+        r"^(mypy|prettier\s+--check|shellcheck|hadolint|tflint|ktlint|swiftlint)\b",
         r"^(oxlint|deno\s+lint)\b",
     ]
 

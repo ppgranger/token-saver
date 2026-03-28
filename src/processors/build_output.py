@@ -9,10 +9,9 @@ class BuildOutputProcessor(Processor):
     priority = 25
     hook_patterns = [
         r"^(npm\s+(run|install|build|ci|audit)|yarn\s+(run|install|build|add|audit)|pnpm\s+(run|install|build|add|audit))\b",
-        r"^(cargo\s+(build|check)|make\b|cmake\b|gradle\b|mvn\b|ant\b)",
-        r"^(pip3?\s+install|poetry\s+(install|update)|uv\s+(pip|sync))\b",
+        r"^(make|cmake|ant)\b",
         r"^(tsc|webpack|vite(\s+build)?|esbuild|rollup|next\s+build|nuxt\s+build)\b",
-        r"^(turbo\s+run|turbo\s+build|nx\s+(run|build)|bazel\s+build|sbt\s|mix\s+compile)\b",
+        r"^(turbo\s+run|turbo\s+build|nx\s+(run|build)|bazel\s+build|sbt\b|mix\s+compile)\b",
         r"^docker\s+(build|compose\s+build)\b",
         r"^bun\s+(install|build|run)\b",
     ]
@@ -25,17 +24,19 @@ class BuildOutputProcessor(Processor):
         # Exclude package listing commands (handled by PackageListProcessor)
         if re.search(r"\b(pip3?\s+(list|freeze)|npm\s+(ls|list)|conda\s+list)\b", command):
             return False
-        # Exclude cargo clippy (handled by LintOutputProcessor)
-        if re.search(r"\bcargo\s+clippy\b", command):
+        # Exclude Python install (handled by PythonInstallProcessor)
+        if re.search(
+            r"\b(pip3?\s+install|poetry\s+(install|update|add)|uv\s+(pip\s+install|sync))\b",
+            command,
+        ):
             return False
-        # Exclude cargo build/check (handled by CargoProcessor)
-        if re.search(r"\bcargo\s+(build|check)\b", command):
+        # Exclude Maven/Gradle (handled by MavenGradleProcessor)
+        if re.search(r"\b(mvn|mvnw|gradle|gradlew)\b", command):
             return False
         return bool(
             re.search(
                 r"\b(npm\s+(run|install|ci|build|audit)|yarn\s+(run|install|build|add|audit)|pnpm\s+(run|install|build|add|audit)|"
-                r"cargo\s+(build|check)|make\b|cmake\b|gradle\b|mvn\b|ant\b|"
-                r"pip3?\s+install|poetry\s+(install|update)|uv\s+(pip|sync)|"
+                r"make\b|cmake\b|ant\b|"
                 r"tsc\b|webpack\b|vite(\s+build)?|esbuild\b|rollup\b|next\s+build|nuxt\s+build|"
                 r"docker\s+(build|compose\s+build)|"
                 r"turbo\s+(run|build)|nx\s+(run|build)|bazel\s+build|sbt\b|mix\s+compile|"
