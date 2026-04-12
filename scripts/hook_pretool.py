@@ -98,6 +98,18 @@ EXCLUDED_PATTERNS = [
 
 COMPILED_EXCLUDED = [re.compile(p) for p in EXCLUDED_PATTERNS]
 
+# Strip leading path prefix so '/usr/bin/git status' → 'git status',
+# './node_modules/.bin/jest' → 'jest', '.venv/bin/pip' → 'pip', etc.
+# Greedy match: captures everything up to and including the last '/'
+# in the first token (before any space).
+_PATH_PREFIX_RE = re.compile(r"^(\S*/)(?=\S)")
+
+
+def _normalize_cmd(cmd: str) -> str:
+    """Strip leading path prefix for pattern matching."""
+    return _PATH_PREFIX_RE.sub("", cmd)
+
+
 # Per-segment safety checks applied inside _is_chain_compressible().
 # These catch dangerous constructs within individual chain segments.
 _SEGMENT_EXCLUDED_PATTERNS = [
@@ -138,8 +150,11 @@ def _is_chain_compressible(command: str) -> bool:
         check_seg = _SAFE_TRAILING_PIPE_RE.sub("", seg) if i == len(segments) - 1 else seg
         if not _is_segment_safe(check_seg):
             return False
-        is_silent = bool(SILENT_CMDS_RE.match(check_seg))
-        is_comp = any(p.search(check_seg) for p in COMPILED_PATTERNS)
+        norm_seg = _normalize_cmd(check_seg)
+        is_silent = bool(SILENT_CMDS_RE.match(check_seg)) or bool(SILENT_CMDS_RE.match(norm_seg))
+        is_comp = any(p.search(check_seg) for p in COMPILED_PATTERNS) or any(
+            p.search(norm_seg) for p in COMPILED_PATTERNS
+        )
         if not is_silent and not is_comp:
             return False  # unknown command in chain -> reject
         if is_comp:
@@ -176,7 +191,11 @@ def is_compressible(command: str) -> bool:
     for pattern in COMPILED_EXCLUDED:
         if pattern.search(check_cmd):
             return False
-    return any(pattern.search(check_cmd) for pattern in COMPILED_PATTERNS)
+    # Try original first, then path-normalized version
+    norm_cmd = _normalize_cmd(check_cmd)
+    return any(pattern.search(check_cmd) for pattern in COMPILED_PATTERNS) or any(
+        pattern.search(norm_cmd) for pattern in COMPILED_PATTERNS
+    )
 
 
 def main():

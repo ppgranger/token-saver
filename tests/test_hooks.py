@@ -597,3 +597,130 @@ class TestNewProcessorHookPatterns:
     def test_yq_compressible(self):
         assert is_compressible("yq . config.yaml")
         assert is_compressible("yq eval '.spec' deployment.yaml")
+
+
+class TestPathPrefixNormalization:
+    """Commands invoked via full or relative paths should still be detected."""
+
+    def test_absolute_path_git(self):
+        assert is_compressible("/usr/bin/git status")
+        assert is_compressible("/usr/local/bin/git log --oneline")
+
+    def test_absolute_path_npm(self):
+        assert is_compressible("/usr/local/bin/npm install")
+        assert is_compressible("/usr/local/bin/npm test")
+
+    def test_venv_path_pip(self):
+        assert is_compressible(".venv/bin/pip install flask")
+        assert is_compressible(".venv/bin/pip3 install -r requirements.txt")
+        assert is_compressible(".venv/bin/pip list")
+
+    def test_venv_path_pytest(self):
+        assert is_compressible(".venv/bin/pytest tests/")
+
+    def test_node_modules_path(self):
+        assert is_compressible("./node_modules/.bin/jest --coverage")
+        assert is_compressible("./node_modules/.bin/eslint src/")
+        assert is_compressible("./node_modules/.bin/tsc")
+
+    def test_relative_path(self):
+        assert is_compressible("./bin/ruff check .")
+
+    def test_nvm_path(self):
+        assert is_compressible("/home/user/.nvm/versions/node/v18/bin/npm run build")
+
+    def test_cargo_path(self):
+        assert is_compressible("/home/user/.cargo/bin/cargo build")
+        assert is_compressible("/home/user/.cargo/bin/cargo test")
+
+    def test_pyenv_path(self):
+        assert is_compressible("/home/user/.pyenv/shims/pip install flask")
+
+    def test_vendor_path(self):
+        assert is_compressible("./vendor/bin/phpunit tests/")
+
+    def test_path_prefix_in_chain(self):
+        assert is_compressible("cd /project && /usr/bin/git status")
+        assert is_compressible("cd /project && .venv/bin/pytest tests/")
+
+    def test_path_prefix_with_trailing_pipe(self):
+        assert is_compressible("/usr/bin/git log --oneline | head -20")
+        assert is_compressible(".venv/bin/pip list | grep torch")
+
+
+class TestWrapperRunners:
+    """Commands invoked via wrapper runners (npx, poetry run, uv run, etc.)."""
+
+    # --- npx ---
+    def test_npx_jest(self):
+        assert is_compressible("npx jest --coverage")
+        assert is_compressible("npx jest tests/")
+
+    def test_npx_vitest(self):
+        assert is_compressible("npx vitest run")
+
+    def test_npx_mocha(self):
+        assert is_compressible("npx mocha tests/")
+
+    def test_npx_playwright(self):
+        assert is_compressible("npx playwright test")
+
+    def test_npx_eslint(self):
+        assert is_compressible("npx eslint src/")
+        assert is_compressible("npx eslint --fix src/")
+
+    def test_npx_prettier(self):
+        assert is_compressible("npx prettier --check src/")
+
+    def test_npx_build_tools(self):
+        assert is_compressible("npx webpack")
+        assert is_compressible("npx vite build")
+        assert is_compressible("npx tsc")
+        assert is_compressible("npx next build")
+        assert is_compressible("npx turbo run build")
+
+    # --- poetry run ---
+    def test_poetry_run_pytest(self):
+        assert is_compressible("poetry run pytest tests/")
+        assert is_compressible("poetry run pytest -v")
+
+    def test_poetry_run_lint(self):
+        assert is_compressible("poetry run flake8 src/")
+        assert is_compressible("poetry run pylint src/")
+        assert is_compressible("poetry run ruff check .")
+        assert is_compressible("poetry run mypy src/")
+
+    # --- uv run ---
+    def test_uv_run_pytest(self):
+        assert is_compressible("uv run pytest tests/")
+        assert is_compressible("uv run pytest -v")
+
+    def test_uv_run_lint(self):
+        assert is_compressible("uv run flake8 src/")
+        assert is_compressible("uv run pylint src/")
+        assert is_compressible("uv run ruff check .")
+        assert is_compressible("uv run mypy src/")
+
+    # --- pipx run ---
+    def test_pipx_run_pytest(self):
+        assert is_compressible("pipx run pytest tests/")
+
+    # --- bundle exec ---
+    def test_bundle_exec_rspec(self):
+        assert is_compressible("bundle exec rspec spec/")
+
+    def test_bundle_exec_rubocop(self):
+        assert is_compressible("bundle exec rubocop")
+
+    # --- python -m pip install ---
+    def test_python_m_pip_install(self):
+        assert is_compressible("python -m pip install flask")
+        assert is_compressible("python3 -m pip install -r requirements.txt")
+        assert is_compressible("python3.11 -m pip install flask")
+        assert is_compressible(".venv/bin/python -m pip install flask")
+
+    # --- Wrapper in chain ---
+    def test_wrapper_in_chain(self):
+        assert is_compressible("cd /project && npx jest --coverage")
+        assert is_compressible("cd /project && poetry run pytest tests/")
+        assert is_compressible("cd /project && uv run ruff check .")

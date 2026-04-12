@@ -4,16 +4,17 @@ import re
 from collections import defaultdict
 
 from .. import config
-from .base import Processor
+from .base import PYTHON_CMD, Processor
 
 
 class LintOutputProcessor(Processor):
     priority = 27
     hook_patterns = [
         r"^(eslint|ruff(\s+check)?|flake8|pylint|rubocop|golangci-lint|stylelint|biome\s+(check|lint))\b",
-        r"^python3?\s+-m\s+(flake8|pylint|ruff|mypy)\b",
+        rf"^{PYTHON_CMD}\s+-m\s+(flake8|pylint|ruff|mypy)\b",
         r"^(mypy|prettier\s+--check|shellcheck|hadolint|tflint|ktlint|swiftlint)\b",
         r"^(oxlint|deno\s+lint)\b",
+        r"^(npx\s+(eslint|prettier|stylelint|biome)\b|poetry\s+run\s+(flake8|pylint|ruff|mypy)\b|uv\s+run\s+(flake8|pylint|ruff|mypy|ruff\s+check)\b|bundle\s+exec\s+rubocop\b)",
     ]
 
     @property
@@ -25,9 +26,13 @@ class LintOutputProcessor(Processor):
             re.search(
                 r"\b(eslint|ruff(\s+check)?|flake8|pylint|clippy|rubocop|"
                 r"golangci-lint|stylelint|prettier\s+--check|biome\s+(check|lint)|"
-                r"python3?\s+-m\s+(flake8|pylint|ruff|mypy)|mypy|"
+                rf"{PYTHON_CMD}\s+-m\s+(flake8|pylint|ruff|mypy)|mypy|"
                 r"shellcheck|hadolint|tflint|ktlint|swiftlint|cargo\s+clippy|"
-                r"oxlint|deno\s+lint)\b",
+                r"oxlint|deno\s+lint|"
+                r"npx\s+(eslint|prettier|stylelint|biome)|"
+                r"poetry\s+run\s+(flake8|pylint|ruff|mypy)|"
+                r"uv\s+run\s+(flake8|pylint|ruff|mypy|ruff\s+check)|"
+                r"bundle\s+exec\s+rubocop)\b",
                 command,
             )
         )

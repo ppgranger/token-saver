@@ -14,6 +14,7 @@ class BuildOutputProcessor(Processor):
         r"^(turbo\s+run|turbo\s+build|nx\s+(run|build)|bazel\s+build|sbt\b|mix\s+compile)\b",
         r"^docker\s+(build|compose\s+build)\b",
         r"^bun\s+(install|build|run)\b",
+        r"^npx\s+(webpack|vite|esbuild|tsc|next\s+build|nuxt\s+build|turbo\s+run)\b",
     ]
 
     @property
@@ -40,7 +41,8 @@ class BuildOutputProcessor(Processor):
                 r"tsc\b|webpack\b|vite(\s+build)?|esbuild\b|rollup\b|next\s+build|nuxt\s+build|"
                 r"docker\s+(build|compose\s+build)|"
                 r"turbo\s+(run|build)|nx\s+(run|build)|bazel\s+build|sbt\b|mix\s+compile|"
-                r"bun\s+(install|build|run))\b",
+                r"bun\s+(install|build|run)|"
+                r"npx\s+(webpack|vite|esbuild|tsc|next\s+build|nuxt\s+build|turbo\s+run))\b",
                 command,
             )
         )

@@ -2,6 +2,10 @@
 
 from abc import ABC, abstractmethod
 
+# Matches any Python invocation: python, python3, python3.11,
+# .venv/bin/python3, /usr/bin/python, etc.
+PYTHON_CMD = r"(?:\S+/)?python[23]?(?:\.\d+)?"
+
 
 class Processor(ABC):
     """Base class for all output processors.

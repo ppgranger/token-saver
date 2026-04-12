@@ -2,9 +2,9 @@
 
 import re
 
-from .base import Processor
+from .base import PYTHON_CMD, Processor
 
-_PIP_INSTALL_RE = re.compile(r"\bpip3?\s+install\b")
+_PIP_INSTALL_RE = re.compile(rf"\bpip3?\s+install\b|{PYTHON_CMD}\s+-m\s+pip\s+install\b")
 _POETRY_RE = re.compile(r"\bpoetry\s+(install|update|add)\b")
 _UV_RE = re.compile(r"\buv\s+(pip\s+install|sync)\b")
 
@@ -30,6 +30,7 @@ class PythonInstallProcessor(Processor):
     priority = 24
     hook_patterns = [
         r"^(pip3?\s+install|poetry\s+(install|update|add)|uv\s+(pip\s+install|sync))\b",
+        rf"^{PYTHON_CMD}\s+-m\s+pip\s+install\b",
     ]
 
     @property

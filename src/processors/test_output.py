@@ -3,14 +3,15 @@
 import re
 
 from .. import config
-from .base import Processor
+from .base import PYTHON_CMD, Processor
 
 
 class TestOutputProcessor(Processor):
     priority = 21
     hook_patterns = [
-        r"^(pytest|py\.test|python3?\s+-m\s+pytest|jest|mocha|vitest|cargo\s+test|go\s+test|rspec|phpunit|bun\s+test|dotnet\s+test|swift\s+test|mix\s+test)\b",
+        rf"^(pytest|py\.test|{PYTHON_CMD}\s+-m\s+pytest|jest|mocha|vitest|cargo\s+test|go\s+test|rspec|phpunit|bun\s+test|dotnet\s+test|swift\s+test|mix\s+test)\b",
         r"^(npm\s+test|yarn\s+test|pnpm\s+test)\b",
+        r"^(npx\s+(jest|mocha|vitest|playwright)\b|poetry\s+run\s+(pytest|py\.test)\b|uv\s+run\s+(pytest|py\.test)\b|pipx\s+run\s+pytest\b|bundle\s+exec\s+(rspec|rails\s+test)\b)",
     ]
 
     @property
@@ -20,10 +21,13 @@ class TestOutputProcessor(Processor):
     def can_handle(self, command: str) -> bool:
         return bool(
             re.search(
-                r"\b(pytest|py\.test|python3?\s+-m\s+pytest|jest|mocha|"
+                rf"\b(pytest|py\.test|{PYTHON_CMD}\s+-m\s+pytest|jest|mocha|"
                 r"cargo\s+test|go\s+test|rspec|phpunit|vitest|bun\s+test|"
                 r"npm\s+test|yarn\s+test|pnpm\s+test|"
-                r"dotnet\s+test|swift\s+test|mix\s+test)\b",
+                r"dotnet\s+test|swift\s+test|mix\s+test|"
+                r"npx\s+(jest|mocha|vitest|playwright)|"
+                r"poetry\s+run\s+(pytest|py\.test)|uv\s+run\s+(pytest|py\.test)|"
+                r"pipx\s+run\s+pytest|bundle\s+exec\s+(rspec|rails\s+test))\b",
                 command,
             )
         )
@@ -34,17 +38,23 @@ class TestOutputProcessor(Processor):
 
         lines = output.splitlines()
 
-        if re.search(r"\bpytest\b|py\.test|python3?\s+-m\s+pytest", command):
+        if re.search(
+            rf"\bpytest\b|py\.test|{PYTHON_CMD}\s+-m\s+pytest"
+            r"|\b(poetry|uv|pipx)\s+run\s+pytest",
+            command,
+        ):
             return self._process_pytest(lines)
         if re.search(
-            r"\bjest\b|\bvitest\b|\bnpm\s+test\b|\byarn\s+test\b|\bpnpm\s+test\b", command
+            r"\bjest\b|\bvitest\b|\bnpm\s+test\b|\byarn\s+test\b"
+            r"|\bpnpm\s+test\b|\bnpx\s+(jest|vitest)\b",
+            command,
         ):
             return self._process_jest(lines)
         if re.search(r"\bcargo\s+test\b", command):
             return self._process_cargo_test(lines)
         if re.search(r"\bgo\s+test\b", command):
             return self._process_go_test(lines)
-        if re.search(r"\brspec\b", command):
+        if re.search(r"\brspec\b|\bbundle\s+exec\s+rspec\b", command):
             return self._process_rspec(lines)
         if re.search(r"\bdotnet\s+test\b", command):
             return self._process_dotnet_test(lines)
