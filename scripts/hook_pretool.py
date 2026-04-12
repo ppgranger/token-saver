@@ -109,6 +109,7 @@ def _normalize_cmd(cmd: str) -> str:
     """Strip leading path prefix for pattern matching."""
     return _PATH_PREFIX_RE.sub("", cmd)
 
+
 # Per-segment safety checks applied inside _is_chain_compressible().
 # These catch dangerous constructs within individual chain segments.
 _SEGMENT_EXCLUDED_PATTERNS = [
