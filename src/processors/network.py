@@ -215,17 +215,13 @@ class NetworkProcessor(Processor):
         )
 
         h1_m = self._HTML_H1_RE.search(stripped)
-        h1 = (
-            self._HTML_TAG_STRIP_RE.sub("", h1_m.group(1)).strip()[:120] if h1_m else None
-        )
+        h1 = self._HTML_TAG_STRIP_RE.sub("", h1_m.group(1)).strip()[:120] if h1_m else None
 
         counts = {
             "links": len(re.findall(r"<a\b", stripped, re.IGNORECASE)),
             "images": len(re.findall(r"<img\b", stripped, re.IGNORECASE)),
             "scripts": len(re.findall(r"<script\b", stripped, re.IGNORECASE)),
-            "stylesheets": len(
-                re.findall(r"<link\b[^>]*stylesheet", stripped, re.IGNORECASE)
-            ),
+            "stylesheets": len(re.findall(r"<link\b[^>]*stylesheet", stripped, re.IGNORECASE)),
             "forms": len(re.findall(r"<form\b", stripped, re.IGNORECASE)),
             "inputs": len(re.findall(r"<input\b", stripped, re.IGNORECASE)),
         }
@@ -236,10 +232,7 @@ class NetworkProcessor(Processor):
         ]
         if h1 and h1 != title:
             parts.append(f"<h1>: {h1}")
-        parts.append(
-            "Structure: "
-            + ", ".join(f"{n} {k}" for k, n in counts.items() if n > 0)
-        )
+        parts.append("Structure: " + ", ".join(f"{n} {k}" for k, n in counts.items() if n > 0))
 
         # Surface any obvious error markers — useful for debugging server responses
         error_m = self._HTML_ERROR_RE.search(stripped)
