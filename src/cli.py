@@ -42,51 +42,51 @@ def cmd_stats(args):
 
 
 def cmd_update(_args):
-    """Check for updates and apply if available."""
+    """Check for updates, then always refresh the local install.
+
+    Remote fetch is best-effort: if it fails or matches the local version,
+    we still re-run the installer so the Claude/Gemini plugin caches stay
+    in sync with the source files on disk.
+    """
     repo_dir = _repo_dir()
     print(f"token-saver v{__version__}")
 
     print("Checking for updates...")
+    latest = None
     try:
         latest = _fetch_latest_version(timeout=10)
     except urllib.error.HTTPError as e:
-        if e.code == 404:
-            print("No releases found on GitHub. Is the repository public with releases?")
-        else:
-            print(f"Failed to check for updates: HTTP {e.code}")
-        sys.exit(1)
+        print(f"Could not check remote: HTTP {e.code} (continuing with local refresh)")
     except Exception as e:
-        print(f"Failed to check for updates: {e}")
-        sys.exit(1)
+        print(f"Could not check remote: {e} (continuing with local refresh)")
 
-    try:
-        is_newer = _parse_version(latest) > _parse_version(__version__)
-    except (ValueError, TypeError):
-        print(f"Could not compare versions: local={__version__}, remote={latest}")
-        sys.exit(1)
+    is_newer = False
+    if latest is not None:
+        try:
+            is_newer = _parse_version(latest) > _parse_version(__version__)
+        except (ValueError, TypeError):
+            print(f"Could not compare versions: local={__version__}, remote={latest}")
 
-    if not is_newer:
-        print(f"Already up to date (v{__version__}).")
-        return
+    if is_newer:
+        print(f"Update available: v{__version__} -> v{latest}")
+        git_dir = os.path.join(repo_dir, ".git")
+        if os.path.isdir(git_dir):
+            _update_via_git(repo_dir, latest)
+        else:
+            _update_via_tarball(repo_dir, latest)
+    elif latest is not None:
+        print(f"Already on v{__version__} (no remote update).")
 
-    print(f"Update available: v{__version__} -> v{latest}")
-
-    git_dir = os.path.join(repo_dir, ".git")
-    if os.path.isdir(git_dir):
-        _update_via_git(repo_dir, latest)
-    else:
-        _update_via_tarball(repo_dir, latest)
-
-    # Re-run installer — detect which platforms are currently installed
     targets = _detect_installed_targets()
-    print(f"Re-running installer for: {targets}...")
+    print(f"Refreshing plugin install for: {targets}...")
     install_script = os.path.join(repo_dir, "install.py")
     subprocess.run(  # noqa: S603
         [sys.executable, install_script, "--target", targets],
         check=True,
     )
 
-    print(f"Update complete! Now running v{latest}.")
+    final_version = latest if is_newer else __version__
+    print(f"Done. Running v{final_version}.")
 
 
 def _detect_installed_targets():
