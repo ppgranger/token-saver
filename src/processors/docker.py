@@ -16,15 +16,16 @@ _DOCKER_OPTS = (
 
 _DOCKER_CMD_RE = re.compile(
     rf"\bdocker\s+{_DOCKER_OPTS}"
-    r"(ps|images|logs|pull|push|inspect|stats|"
-    r"compose\s+(?:ps|logs|up|down|build))\b"
+    r"(ps|images|logs|pull|push|inspect|stats|run|exec|"
+    r"compose\s+(?:ps|logs|up|down|build|run|exec))\b"
 )
 
 
 class DockerProcessor(Processor):
     priority = 31
     hook_patterns = [
-        rf"^docker\s+{_DOCKER_OPTS}(pull|push|images|ps|logs|inspect|stats|compose)\b",
+        rf"^docker\s+{_DOCKER_OPTS}"
+        r"(pull|push|images|ps|logs|inspect|stats|run|exec|compose)\b",
     ]
 
     @property
@@ -55,6 +56,8 @@ class DockerProcessor(Processor):
                 return self._process_compose_down(output)
             if "build" in subcmd:
                 return self._process_compose_build(output)
+            if "run" in subcmd or "exec" in subcmd:
+                return self._process_logs(output)
             return output
         if subcmd == "ps":
             return self._process_ps(output)
@@ -68,6 +71,8 @@ class DockerProcessor(Processor):
             return self._process_inspect(output)
         if subcmd == "stats":
             return self._process_stats(output)
+        if subcmd in ("run", "exec"):
+            return self._process_logs(output)
         return output
 
     def _process_ps(self, output: str) -> str:

@@ -1,6 +1,6 @@
 import os
 
-__version__ = "2.4.1"
+__version__ = "2.4.2"
 
 
 def data_dir() -> str:
