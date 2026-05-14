@@ -41,9 +41,9 @@ class NetworkProcessor(Processor):
 
         is_verbose = re.search(r"\s-[a-zA-Z]*v|--verbose", command)
         if not is_verbose:
-            # Non-verbose curl: strip progress meter, then try JSON compression
+            # Non-verbose curl: strip progress meter, then try body compression
             stripped = self._strip_curl_progress(lines)
-            return self._maybe_compress_json(stripped)
+            return self._maybe_compress_body(stripped)
 
         # Verbose curl: strip TLS, connection, boilerplate headers
         result = []
@@ -125,10 +125,10 @@ class NetworkProcessor(Processor):
             else:
                 result.append(line)
 
-        # Try to compress body if it's JSON
+        # Try to compress body (HTML or JSON)
         if body_lines:
             body_text = "\n".join(body_lines)
-            compressed_body = self._maybe_compress_json(body_text)
+            compressed_body = self._maybe_compress_body(body_text)
             result.append(compressed_body)
 
         return "\n".join(result)
@@ -156,6 +156,15 @@ class NetworkProcessor(Processor):
             result.append(line)
         return "\n".join(result)
 
+    def _maybe_compress_body(self, text: str) -> str:
+        """Try compressing the body as HTML first, then JSON. Returns the original
+        text if neither applies or the body is small enough to keep verbatim.
+        """
+        html_summary = self._maybe_compress_html(text)
+        if html_summary is not None:
+            return html_summary
+        return self._maybe_compress_json(text)
+
     def _maybe_compress_json(self, text: str) -> str:
         """If the text is a large JSON response, summarize its structure."""
         stripped = text.strip()
@@ -174,6 +183,70 @@ class NetworkProcessor(Processor):
         compressed = compress_json_value(data, max_depth=2)
         summary = json.dumps(compressed, indent=2, default=str)
         return f"{summary}\n\n({len(stripped)} chars, {len(text.splitlines())} lines)"
+
+    _HTML_DETECT_RE = re.compile(r"<!doctype\s+html|<html\b", re.IGNORECASE)
+    _HTML_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+    _HTML_H1_RE = re.compile(r"<h1[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
+    _HTML_TAG_STRIP_RE = re.compile(r"<[^>]+>")
+    _HTML_ERROR_RE = re.compile(
+        r"(?:fatal\s+error|uncaught\s+(?:exception|error)|"
+        r"warning:|notice:|deprecated:|stack\s+trace|traceback)"
+        r"[^<\n]{0,200}",
+        re.IGNORECASE,
+    )
+
+    def _maybe_compress_html(self, text: str) -> str | None:
+        """If the text is a large HTML response, return a structural summary.
+
+        Returns None if the text isn't HTML or is small enough to keep as-is.
+        """
+        stripped = text.strip()
+        if not stripped or len(stripped) < 1500:
+            return None
+        # Cheap detection on first ~500 chars
+        if not self._HTML_DETECT_RE.search(stripped[:500]):
+            return None
+
+        title_m = self._HTML_TITLE_RE.search(stripped)
+        title = (
+            self._HTML_TAG_STRIP_RE.sub("", title_m.group(1)).strip()[:120]
+            if title_m
+            else "(no title)"
+        )
+
+        h1_m = self._HTML_H1_RE.search(stripped)
+        h1 = (
+            self._HTML_TAG_STRIP_RE.sub("", h1_m.group(1)).strip()[:120] if h1_m else None
+        )
+
+        counts = {
+            "links": len(re.findall(r"<a\b", stripped, re.IGNORECASE)),
+            "images": len(re.findall(r"<img\b", stripped, re.IGNORECASE)),
+            "scripts": len(re.findall(r"<script\b", stripped, re.IGNORECASE)),
+            "stylesheets": len(
+                re.findall(r"<link\b[^>]*stylesheet", stripped, re.IGNORECASE)
+            ),
+            "forms": len(re.findall(r"<form\b", stripped, re.IGNORECASE)),
+            "inputs": len(re.findall(r"<input\b", stripped, re.IGNORECASE)),
+        }
+
+        parts = [
+            f"[HTML page, {len(stripped)} chars, {len(text.splitlines())} lines]",
+            f"<title>: {title}",
+        ]
+        if h1 and h1 != title:
+            parts.append(f"<h1>: {h1}")
+        parts.append(
+            "Structure: "
+            + ", ".join(f"{n} {k}" for k, n in counts.items() if n > 0)
+        )
+
+        # Surface any obvious error markers — useful for debugging server responses
+        error_m = self._HTML_ERROR_RE.search(stripped)
+        if error_m:
+            parts.append(f"Error markers: {error_m.group(0).strip()[:200]}")
+
+        return "\n".join(parts)
 
     def _process_wget(self, output: str) -> str:
         lines = output.splitlines()
@@ -234,10 +307,10 @@ class NetworkProcessor(Processor):
             if in_body:
                 body_lines.append(line)
 
-        # Compress body if JSON
+        # Compress body (HTML or JSON)
         if body_lines:
             body_text = "\n".join(body_lines)
-            compressed = self._maybe_compress_json(body_text)
+            compressed = self._maybe_compress_body(body_text)
             result.append(compressed)
 
         return "\n".join(result) if result else output

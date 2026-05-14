@@ -239,6 +239,11 @@ class GitProcessor(Processor):
         # Compress the non-lockfile lines, then append lockfile summaries
         max_hunk = config.get("max_diff_hunk_lines")
         max_context = config.get("max_diff_context_lines")
+        # Trim context more aggressively on small diffs — for short diffs, the
+        # context lines are usually the dominant cost and Claude rarely needs
+        # 3 surrounding lines per change.
+        if len(non_lock_lines) < 200:
+            max_context = min(max_context, 1)
         if any(line.startswith("diff --git") for line in non_lock_lines):
             result = compress_diff(non_lock_lines, max_hunk, max_context)
             result.extend(lockfile_summaries)
