@@ -1,6 +1,6 @@
 [project]
 name = "token-saver"
-version = "2.4.2"
+version = "2.5.0"
 requires-python = ">=3.10"
 
 [project.optional-dependencies]
