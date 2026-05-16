@@ -15,7 +15,7 @@ import sys
 # Ensure the extension root is importable (scripts/ -> plugin root)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.chain_utils import CHAIN_SPLIT_RE, SILENT_CMDS_RE, split_chain
+from src.chain_utils import CHAIN_SPLIT_RE, split_chain
 
 # --- Debug logging (writes to data_dir/hook.log when TOKEN_SAVER_DEBUG=true) ---
 _log = logging.getLogger("token-saver.hook_pretool")
@@ -94,6 +94,9 @@ EXCLUDED_PATTERNS = [
     r"<\(",  # process substitution
     r"^\s*sudo\b",  # never wrap sudo
     r"^\s*env\s+\S+=",  # env VAR=val prefix — too complex to wrap
+    # Interactive-flag REPLs even with script args (e.g. `python -i script.py`).
+    r"^\s*(python\d?(?:\.\d+)*|ipython|node|ruby|perl|ghci|deno|php|lua|R|bash|sh|zsh)"
+    r"\s+(?:-\S*i\S*|--interactive)(\s|$)",
 ]
 
 COMPILED_EXCLUDED = [re.compile(p) for p in EXCLUDED_PATTERNS]
@@ -110,6 +113,39 @@ def _normalize_cmd(cmd: str) -> str:
     return _PATH_PREFIX_RE.sub("", cmd)
 
 
+def _has_unquoted_construct(cmd: str, constructs: tuple[str, ...]) -> bool:
+    """Return True if any of ``constructs`` appears outside of single/double quotes.
+
+    Used to reject commands containing $(), backticks, or heredocs at the top
+    level — these break naive chain splitting and per-segment execution.
+    Constructs nested inside quoted strings (e.g. inside `git commit -m "..."`)
+    are tolerated because they don't affect splitting.
+    """
+    i, n = 0, len(cmd)
+    while i < n:
+        ch = cmd[i]
+        if ch in ("'", '"'):
+            quote = ch
+            i += 1
+            while i < n and cmd[i] != quote:
+                if cmd[i] == "\\" and i + 1 < n:
+                    i += 2
+                    continue
+                i += 1
+            if i < n:
+                i += 1
+            continue
+        for c in constructs:
+            if cmd.startswith(c, i):
+                return True
+        i += 1
+    return False
+
+
+# Constructs that break naive chain splitting / per-segment execution.
+_DANGEROUS_CONSTRUCTS = ("$(", "`", "<<")
+
+
 # Per-segment safety checks applied inside _is_chain_compressible().
 # These catch dangerous constructs within individual chain segments.
 _SEGMENT_EXCLUDED_PATTERNS = [
@@ -123,22 +159,39 @@ _SEGMENT_EXCLUDED_PATTERNS = [
     r"^\s*env\s+\S+=",
     r"(?:^|\s)token[-_]saver\s",
     r"wrap\.py",
+    # Bare interactive REPL launchers: would hang waiting for stdin.
+    # Only matches when there are no arguments (REPL mode).
+    r"^\s*(python\d?(?:\.\d+)*|ipython|node|bash|sh|zsh|ruby|irb|pry|gdb|lldb"
+    r"|mongo|mongosh|redis-cli|psql|mysql|sqlite3|php|perl|lua|R)\s*$",
+    # Interactive-flag REPLs: -i drops into REPL even with other args.
+    r"^\s*(python\d?(?:\.\d+)*|ipython|node|ruby|perl|ghci|deno|php|lua|R|bash|sh|zsh)"
+    r"\s+(?:-\S*i\S*|--interactive)(\s|$)",
 ]
 
 _COMPILED_SEGMENT_EXCLUDED = [re.compile(p) for p in _SEGMENT_EXCLUDED_PATTERNS]
 
 
 def _is_segment_safe(segment: str) -> bool:
-    """Return True if a single chain segment has no dangerous constructs."""
-    return all(not pattern.search(segment) for pattern in _COMPILED_SEGMENT_EXCLUDED)
+    """Return True if a single chain segment has no dangerous constructs.
+
+    Checks both the raw segment and its path-stripped form, so commands like
+    ``/usr/bin/vim``, ``./python``, or ``.venv/bin/sudo`` are still caught.
+    """
+    norm = _normalize_cmd(segment)
+    for pattern in _COMPILED_SEGMENT_EXCLUDED:
+        if pattern.search(segment) or pattern.search(norm):
+            return False
+    return True
 
 
 def _is_chain_compressible(command: str) -> bool:
     """Check whether a chained command (&&/;) is compressible.
 
-    Every segment must be safe AND either compressible or silent.
-    At least one segment must be compressible (all-silent chains are rejected).
-    Safe trailing pipes are only stripped from the *last* segment.
+    Every segment must pass the segment safety check (no sudo, redirects,
+    bare REPLs, etc.).  At least one segment must be compressible; the
+    others may be silent or unknown (their output passes through unchanged
+    in wrap.py's per-segment compression).  Safe trailing pipes are only
+    stripped from the *last* segment.
     """
     segments = split_chain(command)
     if not segments:
@@ -151,12 +204,9 @@ def _is_chain_compressible(command: str) -> bool:
         if not _is_segment_safe(check_seg):
             return False
         norm_seg = _normalize_cmd(check_seg)
-        is_silent = bool(SILENT_CMDS_RE.match(check_seg)) or bool(SILENT_CMDS_RE.match(norm_seg))
         is_comp = any(p.search(check_seg) for p in COMPILED_PATTERNS) or any(
             p.search(norm_seg) for p in COMPILED_PATTERNS
         )
-        if not is_silent and not is_comp:
-            return False  # unknown command in chain -> reject
         if is_comp:
             has_compressible = True
 
@@ -181,6 +231,12 @@ def is_compressible(command: str) -> bool:
     if re.search(r"(?<!['\"])\|\|(?!['\"])", cmd):
         return False
 
+    # Reject commands with unquoted $(), backticks, or heredocs — these break
+    # naive chain splitting and per-segment execution.  Quoted occurrences
+    # (e.g. inside `git commit -m "$(...)"`) are tolerated.
+    if _has_unquoted_construct(cmd, _DANGEROUS_CONSTRUCTS):
+        return False
+
     # Detect chains (&&, ;) BEFORE stripping safe trailing pipes,
     # so that mid-chain pipes are not accidentally stripped.
     if CHAIN_SPLIT_RE.search(cmd):
@@ -188,11 +244,12 @@ def is_compressible(command: str) -> bool:
 
     # Single command — strip safe trailing pipes for exclusion check only
     check_cmd = _SAFE_TRAILING_PIPE_RE.sub("", cmd)
-    for pattern in COMPILED_EXCLUDED:
-        if pattern.search(check_cmd):
-            return False
-    # Try original first, then path-normalized version
+    # Check exclusions against both raw and path-stripped forms, so
+    # path-prefixed launchers (/usr/bin/vim, ./python) are still caught.
     norm_cmd = _normalize_cmd(check_cmd)
+    for pattern in COMPILED_EXCLUDED:
+        if pattern.search(check_cmd) or pattern.search(norm_cmd):
+            return False
     return any(pattern.search(check_cmd) for pattern in COMPILED_PATTERNS) or any(
         pattern.search(norm_cmd) for pattern in COMPILED_PATTERNS
     )
