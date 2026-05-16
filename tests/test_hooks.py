@@ -421,9 +421,71 @@ class TestChainedCommands:
         assert not is_compressible("cd /tmp && mkdir -p foo")
         assert not is_compressible("export FOO=bar && cd /tmp")
 
-    def test_unknown_command_in_chain_rejected(self):
-        assert not is_compressible("echo hello && git status")
-        assert not is_compressible("git status && python3 script.py")
+    def test_unknown_segment_alone_rejected(self):
+        """A chain with NO compressible segment is still rejected."""
+        assert not is_compressible("echo hello && echo world")
+        assert not is_compressible("./run.sh && ./build.sh")
+
+    def test_unknown_segment_with_compressible_accepted(self):
+        """A chain with at least one compressible segment is accepted even
+        when other segments are unknown. The unknown ones pass through
+        unchanged in wrap.py's per-segment compression."""
+        assert is_compressible("echo hello && git status")
+        assert is_compressible("git status && python3 script.py")
+        assert is_compressible("./build.sh && pytest tests/")
+        assert is_compressible("cd /project && python myscript.py && git status")
+
+    def test_bare_repl_in_chain_rejected(self):
+        """Bare REPL launchers would hang waiting for stdin; reject them."""
+        assert not is_compressible("git status && python")
+        assert not is_compressible("git status && python3")
+        assert not is_compressible("git status && node")
+        assert not is_compressible("git status && bash")
+        assert not is_compressible("cd /tmp && psql")
+        # Multi-dot version numbers
+        assert not is_compressible("git status && python3.12.1")
+        # But with arguments they are fine
+        assert is_compressible("git status && python script.py")
+        assert is_compressible("git status && node app.js")
+
+    def test_interactive_flag_rejected(self):
+        """`-i` / `--interactive` drops into REPL even with a script arg."""
+        # Single command
+        assert not is_compressible("python -i")
+        assert not is_compressible("python -i script.py")
+        assert not is_compressible("python3 -i script.py")
+        assert not is_compressible("node --interactive")
+        assert not is_compressible("bash -i")
+        assert not is_compressible("python -ic 'x=1'")
+        # In chains
+        assert not is_compressible("git status && python -i script.py")
+        assert not is_compressible("cd /tmp && bash -i")
+
+    def test_path_prefixed_repl_rejected(self):
+        """Path-prefixed REPLs and editors should still be caught."""
+        assert not is_compressible("/usr/bin/vim file.py")
+        assert not is_compressible("./venv/bin/python")
+        assert not is_compressible("git status && /usr/bin/vim file.py")
+        assert not is_compressible("git status && ./venv/bin/python")
+
+    def test_command_substitution_rejected(self):
+        """Unquoted $(...) breaks naive chain splitting; reject."""
+        assert not is_compressible("echo $(date)")
+        assert not is_compressible("git status && echo $(git rev-parse HEAD)")
+        # But quoted $() inside a string is fine — no splitting risk
+        assert is_compressible('git log --format="%H $(echo ignored)"')
+
+    def test_backtick_substitution_rejected(self):
+        """Unquoted backticks break naive chain splitting; reject."""
+        assert not is_compressible("echo `date`")
+        assert not is_compressible("git status && echo `git rev-parse HEAD`")
+        # Quoted backticks inside a string are fine
+        assert is_compressible('git log --format="%H `date`"')
+
+    def test_heredoc_rejected(self):
+        """Heredocs break naive chain splitting; reject."""
+        assert not is_compressible("cat <<EOF\nhello\nEOF")
+        assert not is_compressible("git status && cat <<END\ndata\nEND")
 
     def test_pipe_in_non_last_segment_rejected(self):
         assert not is_compressible("git status | grep foo && git diff")
@@ -724,3 +786,124 @@ class TestWrapperRunners:
         assert is_compressible("cd /project && npx jest --coverage")
         assert is_compressible("cd /project && poetry run pytest tests/")
         assert is_compressible("cd /project && uv run ruff check .")
+
+
+class TestChainPerSegmentCompression:
+    """Tests for wrap.py's per-segment chain compression."""
+
+    def _import_wrap(self):
+        import importlib
+
+        return importlib.import_module("scripts.wrap")
+
+    def test_inject_markers_single_segment(self):
+        wrap = self._import_wrap()
+        out = wrap.inject_markers([("git status", "")], "M_")
+        assert out == "git status"
+
+    def test_inject_markers_two_segments_and(self):
+        wrap = self._import_wrap()
+        out = wrap.inject_markers([("a", "&&"), ("b", "")], "M_")
+        assert out == "a && { echo 'M_1'; b; }"
+
+    def test_inject_markers_three_segments_mixed(self):
+        wrap = self._import_wrap()
+        out = wrap.inject_markers([("a", "&&"), ("b", ";"), ("c", "")], "M_")
+        assert out == "a && { echo 'M_1'; b; } ; { echo 'M_2'; c; }"
+
+    def test_split_output_no_markers(self):
+        wrap = self._import_wrap()
+        chunks = wrap.split_output_by_markers("just one chunk", "M_")
+        assert chunks == [(0, "just one chunk")]
+
+    def test_split_output_with_markers(self):
+        wrap = self._import_wrap()
+        text = "out1\nM_1\nout2\nM_2\nout3"
+        chunks = wrap.split_output_by_markers(text, "M_")
+        assert chunks == [(0, "out1"), (1, "out2"), (2, "out3")]
+
+    def test_split_output_missing_marker_indexed_correctly(self):
+        """If && short-circuits, the marker for the skipped segment is missing.
+        Remaining chunks must still map to the right segment via embedded index.
+        """
+        wrap = self._import_wrap()
+        # segment 1 (b) skipped due to a failing; ; still runs segment 2 (c)
+        text = "a_out\nM_2\nc_out"
+        chunks = wrap.split_output_by_markers(text, "M_")
+        assert chunks == [(0, "a_out"), (2, "c_out")]
+
+    def test_split_output_empty_chunks(self):
+        wrap = self._import_wrap()
+        text = "M_1\nbody1"
+        chunks = wrap.split_output_by_markers(text, "M_")
+        assert chunks == [(0, ""), (1, "body1")]
+
+    def test_e2e_wrap_chain_compresses_per_segment(self):
+        """Run wrap.py via subprocess on a real chain; verify both segments survive."""
+        import subprocess
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        wrap_path = os.path.join(repo_root, "scripts", "wrap.py")
+        cmd = "echo segA && echo segB"
+        result = subprocess.run(  # noqa: S603, PLW1510
+            [sys.executable, wrap_path, cmd],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        # Both segments' output should appear; markers should NOT leak
+        assert "segA" in result.stdout
+        assert "segB" in result.stdout
+        assert "__TS_MARK_" not in result.stdout
+
+    def test_strip_markers_removes_lines(self):
+        wrap = self._import_wrap()
+        text = "out1\nM_1\nout2\nM_2\nout3"
+        assert wrap.strip_markers(text, "M_") == "out1\nout2\nout3"
+
+    def test_strip_markers_no_markers_is_identity(self):
+        wrap = self._import_wrap()
+        assert wrap.strip_markers("plain output\nno markers", "M_") == (
+            "plain output\nno markers"
+        )
+
+    def test_strip_markers_only_strips_matching_prefix(self):
+        wrap = self._import_wrap()
+        # Different prefix should not be touched
+        text = "out\nOTHER_1\nbody"
+        assert wrap.strip_markers(text, "M_") == text
+
+    def test_e2e_wrap_chain_dry_run_no_marker_leak(self):
+        """--dry-run on a chain should not show __TS_MARK_* lines."""
+        import subprocess
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        wrap_path = os.path.join(repo_root, "scripts", "wrap.py")
+        result = subprocess.run(  # noqa: S603, PLW1510
+            [sys.executable, wrap_path, "--dry-run", "echo segA && echo segB"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "segA" in result.stdout
+        assert "segB" in result.stdout
+        assert "__TS_MARK_" not in result.stdout
+        assert "__TS_MARK_" not in result.stderr
+
+    def test_e2e_wrap_single_command_unchanged(self):
+        """Single command path should not inject markers."""
+        import subprocess
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        wrap_path = os.path.join(repo_root, "scripts", "wrap.py")
+        result = subprocess.run(  # noqa: S603, PLW1510
+            [sys.executable, wrap_path, "echo hello"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 0
+        assert "hello" in result.stdout
+        assert "__TS_MARK_" not in result.stdout
