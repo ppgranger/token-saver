@@ -1,6 +1,6 @@
 [project]
 name = "token-saver"
-version = "2.4.2"
+version = "2.5.0"
 requires-python = ">=3.10"
 
 [project.optional-dependencies]
@@ -67,6 +67,9 @@ ignore = [
     "S108",     # /tmp usage in test assertions is fine
     "PLC0415",  # imports in test functions are intentional
     "PERF401",  # readability over perf in tests
+]
+"installers/**/*.py" = [
+    "S103",     # chmod +x on the CLI binary is intentional
 ]
 "audit_compression.py" = [
     "E501",     # long lines in test data builders

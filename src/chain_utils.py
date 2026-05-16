@@ -77,6 +77,58 @@ def split_chain(command: str) -> list[str]:
     return segments
 
 
+def split_chain_with_ops(command: str) -> list[tuple[str, str]]:
+    """Like :func:`split_chain` but preserves the operator following each segment.
+
+    Returns a list of ``(segment, operator)`` tuples where operator is
+    ``"&&"``, ``";"``, or ``""`` for the final segment.
+    """
+    result: list[tuple[str, str]] = []
+    current: list[str] = []
+    i = 0
+    n = len(command)
+
+    while i < n:
+        ch = command[i]
+
+        if ch in ("'", '"'):
+            quote = ch
+            current.append(ch)
+            i += 1
+            while i < n and command[i] != quote:
+                current.append(command[i])
+                i += 1
+            if i < n:
+                current.append(command[i])
+                i += 1
+            continue
+
+        if ch == "&" and i + 1 < n and command[i + 1] == "&":
+            seg = "".join(current).strip()
+            if seg:
+                result.append((seg, "&&"))
+            current = []
+            i += 2
+            continue
+
+        if ch == ";":
+            seg = "".join(current).strip()
+            if seg:
+                result.append((seg, ";"))
+            current = []
+            i += 1
+            continue
+
+        current.append(ch)
+        i += 1
+
+    seg = "".join(current).strip()
+    if seg:
+        result.append((seg, ""))
+
+    return result
+
+
 def extract_primary_command(command: str) -> str:
     """Return the last non-silent segment of a (possibly chained) command.
 

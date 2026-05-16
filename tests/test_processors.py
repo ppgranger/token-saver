@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.chain_utils import extract_primary_command
+from src.chain_utils import extract_primary_command, split_chain_with_ops
 from src.processors.ansible import AnsibleProcessor
 from src.processors.build_output import BuildOutputProcessor
 from src.processors.cargo import CargoProcessor
@@ -3293,6 +3293,44 @@ class TestChainedCommandProcessorRouting:
         primary = extract_primary_command("cd /deploy && kubectl get pods")
         assert primary == "kubectl get pods"
         assert p.can_handle(primary)
+
+
+class TestSplitChainWithOps:
+    """Verify the operator-preserving chain splitter used for per-segment compression."""
+
+    def test_single_command(self):
+        assert split_chain_with_ops("git status") == [("git status", "")]
+
+    def test_two_segment_and(self):
+        assert split_chain_with_ops("a && b") == [("a", "&&"), ("b", "")]
+
+    def test_two_segment_semicolon(self):
+        assert split_chain_with_ops("a ; b") == [("a", ";"), ("b", "")]
+
+    def test_three_segment_mixed(self):
+        assert split_chain_with_ops("a && b ; c") == [
+            ("a", "&&"),
+            ("b", ";"),
+            ("c", ""),
+        ]
+
+    def test_quoted_ampersand_not_split(self):
+        cmd = 'git log --format="%H && %s"'
+        assert split_chain_with_ops(cmd) == [(cmd, "")]
+
+    def test_quoted_semicolon_not_split(self):
+        assert split_chain_with_ops('grep "a;b" .') == [('grep "a;b" .', "")]
+
+    def test_empty(self):
+        assert split_chain_with_ops("") == []
+
+    def test_real_world_git_chain(self):
+        cmd = 'git add -A && git commit -m "fix" && git push origin main'
+        assert split_chain_with_ops(cmd) == [
+            ("git add -A", "&&"),
+            ('git commit -m "fix"', "&&"),
+            ("git push origin main", ""),
+        ]
 
 
 class TestAnsibleProcessor:
