@@ -68,6 +68,9 @@ ignore = [
     "PLC0415",  # imports in test functions are intentional
     "PERF401",  # readability over perf in tests
 ]
+"installers/**/*.py" = [
+    "S103",     # chmod +x on the CLI binary is intentional
+]
 "audit_compression.py" = [
     "E501",     # long lines in test data builders
     "PERF401",  # readability over perf in data builders
