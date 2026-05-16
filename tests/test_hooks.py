@@ -864,9 +864,7 @@ class TestChainPerSegmentCompression:
 
     def test_strip_markers_no_markers_is_identity(self):
         wrap = self._import_wrap()
-        assert wrap.strip_markers("plain output\nno markers", "M_") == (
-            "plain output\nno markers"
-        )
+        assert wrap.strip_markers("plain output\nno markers", "M_") == ("plain output\nno markers")
 
     def test_strip_markers_only_strips_matching_prefix(self):
         wrap = self._import_wrap()

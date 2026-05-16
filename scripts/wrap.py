@@ -71,15 +71,11 @@ def inject_markers(parts: list[tuple[str, str]], marker_prefix: str) -> str:
 
 def strip_markers(output: str, marker_prefix: str) -> str:
     """Remove marker lines from output (used for dry-run display)."""
-    pattern = re.compile(
-        r"^" + re.escape(marker_prefix) + r"\d+\s*\n?", re.MULTILINE
-    )
+    pattern = re.compile(r"^" + re.escape(marker_prefix) + r"\d+\s*\n?", re.MULTILINE)
     return pattern.sub("", output)
 
 
-def split_output_by_markers(
-    output: str, marker_prefix: str
-) -> list[tuple[int, str]]:
+def split_output_by_markers(output: str, marker_prefix: str) -> list[tuple[int, str]]:
     """Split combined output into (segment_index, segment_output) chunks.
 
     The first chunk (before any marker) is always segment 0.  Subsequent
@@ -87,9 +83,7 @@ def split_output_by_markers(
     Markers may be missing if an `&&` short-circuited mid-chain; the
     embedded indices keep the mapping correct.
     """
-    pattern = re.compile(
-        r"^" + re.escape(marker_prefix) + r"(\d+)\s*$", re.MULTILINE
-    )
+    pattern = re.compile(r"^" + re.escape(marker_prefix) + r"(\d+)\s*$", re.MULTILINE)
     matches = list(pattern.finditer(output))
     if not matches:
         return [(0, output)]
