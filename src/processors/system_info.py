@@ -16,7 +16,7 @@ class SystemInfoProcessor(Processor):
         return "system_info"
 
     def can_handle(self, command: str) -> bool:
-        return bool(re.search(r"\b(du|wc|df)\b", command))
+        return bool(re.match(r"\s*(?:\S*/)?(du|wc|df)\b", command))
 
     def process(self, command: str, output: str) -> str:
         if not output or not output.strip():

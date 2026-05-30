@@ -168,3 +168,39 @@ class TestProjectConfig:
         assert source is not None
         assert source["min_input_length"] == "default"
         assert "project:" in source["max_log_entries"]
+
+    def test_type_mismatch_falls_back_to_default(self, tmp_path, monkeypatch):
+        """A wrong-typed file value must not reach downstream arithmetic."""
+        project_config = {"max_chain_depth": "deep", "wrap_timeout": [1, 2]}
+        config_file = tmp_path / ".token-saver.json"
+        config_file.write_text(json.dumps(project_config))
+        monkeypatch.chdir(tmp_path)
+        config.reload()
+
+        # Uncoercible values are rejected; defaults survive (ints, not strings).
+        assert config.get("max_chain_depth") == 3
+        assert config.get("wrap_timeout") == 300
+        assert isinstance(config.get("max_chain_depth"), int)
+
+    def test_numeric_string_coerced(self, tmp_path, monkeypatch):
+        """Numeric strings in file config are coerced to the default's type."""
+        project_config = {"wrap_timeout": "120", "min_compression_ratio": "0.25"}
+        config_file = tmp_path / ".token-saver.json"
+        config_file.write_text(json.dumps(project_config))
+        monkeypatch.chdir(tmp_path)
+        config.reload()
+
+        assert config.get("wrap_timeout") == 120
+        assert isinstance(config.get("wrap_timeout"), int)
+        assert config.get("min_compression_ratio") == 0.25
+
+    def test_unknown_file_key_ignored(self, tmp_path, monkeypatch):
+        """Typo'd / unknown keys in file config are dropped."""
+        project_config = {"max_diff_hunkk_lines": 999}
+        config_file = tmp_path / ".token-saver.json"
+        config_file.write_text(json.dumps(project_config))
+        monkeypatch.chdir(tmp_path)
+        config.reload()
+
+        assert config.get("max_diff_hunkk_lines") is None
+        assert config.get("max_diff_hunk_lines") == 50

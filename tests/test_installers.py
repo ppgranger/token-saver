@@ -162,6 +162,36 @@ class TestMigrateFromLegacy:
         assert found is True
         assert not os.path.exists(legacy_dir)
 
+    def test_removes_legacy_dir_that_is_a_symlink(self):
+        """A legacy path that is a symlink must be unlinked, not rmtree'd.
+
+        shutil.rmtree raises NotADirectoryError on a symlink-to-file, so the
+        migration would crash without the islink branch.
+        """
+        target = os.path.join(self.tmp_home, "real_target")
+        os.makedirs(target)
+        legacy_dir = os.path.join(self.tmp_home, ".token-saving")
+        os.symlink(target, legacy_dir)
+
+        with mock.patch("installers.common.home", return_value=self.tmp_home):
+            found = migrate_from_legacy()
+
+        assert found is True
+        assert not os.path.islink(legacy_dir)
+        # The symlink target itself must be left intact.
+        assert os.path.isdir(target)
+
+    def test_removes_broken_legacy_symlink(self):
+        """A dangling legacy symlink (target missing) is still removed."""
+        legacy_dir = os.path.join(self.tmp_home, ".token-saving")
+        os.symlink(os.path.join(self.tmp_home, "does_not_exist"), legacy_dir)
+
+        with mock.patch("installers.common.home", return_value=self.tmp_home):
+            found = migrate_from_legacy()
+
+        assert found is True
+        assert not os.path.islink(legacy_dir)
+
     def test_cleans_legacy_hooks_from_settings(self):
         settings_dir = os.path.join(self.tmp_home, ".claude")
         os.makedirs(settings_dir)

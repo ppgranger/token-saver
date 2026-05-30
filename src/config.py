@@ -52,7 +52,9 @@ _DEFAULTS = {
     "cargo_warning_group_threshold": 3,
     "jq_passthrough_threshold": 50,
     "disabled_processors": [],
+    "redaction_allowlist": [],
     "max_chain_depth": 3,
+    "max_output_bytes": 10_000_000,
     "debug": False,
 }
 
@@ -86,6 +88,79 @@ def _find_project_config() -> str | None:
     return None
 
 
+def _coerce_value(default_val: Any, raw: Any) -> Any:
+    """Coerce a file-config value to the type of its default.
+
+    Returns the coerced value, or ``None`` if it cannot be sensibly coerced
+    (caller should then keep the existing/default value).  Unlike env vars,
+    JSON values already carry types, but a hand-edited config can still hold a
+    string where an int is expected (e.g. ``{"wrap_timeout": "300"}``) or an
+    outright wrong type (e.g. ``{"max_chain_depth": "deep"}``) — the latter
+    must not reach arithmetic/comparison code downstream.
+    """
+    # bool must be checked before int (bool is a subclass of int).
+    if isinstance(default_val, bool):
+        if isinstance(raw, bool):
+            return raw
+        if isinstance(raw, str):
+            return raw.strip().lower() in ("1", "true", "yes")
+        if isinstance(raw, (int, float)):
+            return bool(raw)
+        return None
+    if isinstance(default_val, int):
+        if isinstance(raw, bool):
+            return None
+        if isinstance(raw, int):
+            return raw
+        if isinstance(raw, float) and raw.is_integer():
+            return int(raw)
+        if isinstance(raw, str):
+            try:
+                return int(raw.strip())
+            except ValueError:
+                return None
+        return None
+    if isinstance(default_val, float):
+        if isinstance(raw, bool):
+            return None
+        if isinstance(raw, (int, float)):
+            return float(raw)
+        if isinstance(raw, str):
+            try:
+                return float(raw.strip())
+            except ValueError:
+                return None
+        return None
+    if isinstance(default_val, list):
+        if isinstance(raw, list):
+            return [str(x) for x in raw]
+        if isinstance(raw, str):
+            return [s.strip() for s in raw.split(",") if s.strip()]
+        return None
+    # String default
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, (int, float, bool)):
+        return str(raw)
+    return None
+
+
+def _apply_file_overrides(config: dict[str, Any], file_config: dict[str, Any], source: str) -> None:
+    """Merge a loaded config file, validating types and dropping unknown keys."""
+    if not isinstance(file_config, dict):
+        return
+    for key, raw in file_config.items():
+        if key not in _DEFAULTS:
+            # Unknown/typo'd keys are ignored rather than polluting config.
+            continue
+        coerced = _coerce_value(_DEFAULTS[key], raw)
+        if coerced is None:
+            # Type mismatch that couldn't be coerced — keep prior value.
+            continue
+        config[key] = coerced
+        config.setdefault("_config_source", {})[key] = source
+
+
 def _load_config() -> dict[str, Any]:
     """Load config: defaults -> global file -> project file -> env vars."""
     config: dict[str, Any] = dict(_DEFAULTS)
@@ -99,9 +174,7 @@ def _load_config() -> dict[str, Any]:
         try:
             with open(config_path) as f:
                 user_config = json.load(f)
-            config.update(user_config)
-            for k in user_config:
-                config.setdefault("_config_source", {})[k] = f"global:{config_path}"
+            _apply_file_overrides(config, user_config, f"global:{config_path}")
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -111,9 +184,7 @@ def _load_config() -> dict[str, Any]:
         try:
             with open(project_config_path) as f:
                 project_config = json.load(f)
-            config.update(project_config)
-            for k in project_config:
-                config.setdefault("_config_source", {})[k] = f"project:{project_config_path}"
+            _apply_file_overrides(config, project_config, f"project:{project_config_path}")
         except (json.JSONDecodeError, OSError):
             # Invalid project config is silently ignored
             pass

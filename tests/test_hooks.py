@@ -6,7 +6,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scripts.hook_pretool import is_compressible
+from scripts.hook_pretool import explain_decision, is_compressible
 
 
 class TestHookPretool:
@@ -150,11 +150,53 @@ class TestHookPretool:
         assert is_compressible("git -C /path/token-saver status")
         assert is_compressible("cat /tmp/token-saver/README.md")
 
+    def test_streaming_follow_commands_excluded(self):
+        """Commands that stream/follow forever must never be wrapped."""
+        assert not is_compressible("tail -f /var/log/syslog")
+        assert not is_compressible("tail -F app.log")
+        assert not is_compressible("journalctl -f")
+        assert not is_compressible("journalctl -u nginx -f")
+        assert not is_compressible("kubectl logs my-pod -f")
+        assert not is_compressible("kubectl logs my-pod --follow")
+        assert not is_compressible("docker logs container -f")
+        assert not is_compressible("docker logs --follow container")
+        assert not is_compressible("docker stats")
+        assert not is_compressible("docker compose up")
+        assert not is_compressible("watch kubectl get pods")
+        assert not is_compressible("vitest")
+        assert not is_compressible("vitest --watch")
+        assert not is_compressible("jest --watchAll")
+
+    def test_bounded_variants_still_compressible(self):
+        """Non-streaming variants of the same commands stay compressible."""
+        assert is_compressible("tail -n 50 app.log")
+        assert is_compressible("docker stats --no-stream")
+        assert is_compressible("docker compose up -d")
+        assert is_compressible("kubectl logs my-pod")
+        assert is_compressible("docker logs container")
+        assert is_compressible("vitest run")
+
     def test_sudo_excluded(self):
         assert not is_compressible("sudo apt install foo")
 
     def test_redirections_excluded(self):
         assert not is_compressible("git log > log.txt")
+        # No-space and other redirection forms the old `>\s` regex missed.
+        assert not is_compressible("git log>log.txt")
+        assert not is_compressible("git log >>log.txt")
+        assert not is_compressible("git diff 2>err.txt")
+
+    def test_quoted_redirection_char_not_excluded(self):
+        """A `>` inside a quoted argument is not a redirection."""
+        assert is_compressible('git log --grep "fixes >50 percent"')
+
+    def test_cat_file_named_wrap_py_compressible(self):
+        """Reading a file literally named wrap.py is not self-wrapping."""
+        assert is_compressible("cat wrap.py")
+        assert is_compressible("cat src/wrap.py")
+        # But invoking it via an interpreter is still excluded.
+        assert not is_compressible("python3 wrap.py git status")
+        assert not is_compressible("python3 /opt/token-saver/scripts/wrap.py ls")
 
     def test_empty_command(self):
         assert not is_compressible("")
@@ -230,7 +272,7 @@ class TestHookPretool:
         assert is_compressible("dotnet test")
         assert is_compressible("swift test")
         assert is_compressible("mix test")
-        assert is_compressible("vitest")
+        assert is_compressible("vitest run")  # bare `vitest` is watch mode (excluded)
         assert is_compressible("bun test")
 
     def test_new_git_subcommands_compressible(self):
@@ -251,7 +293,7 @@ class TestHookPretool:
 
     def test_new_docker_subcommands_compressible(self):
         assert is_compressible("docker inspect container")
-        assert is_compressible("docker stats")
+        assert is_compressible("docker stats --no-stream")  # bare `docker stats` is live (excluded)
         assert is_compressible("docker compose up -d")
         assert is_compressible("docker compose down")
         assert is_compressible("docker compose build")
@@ -872,6 +914,64 @@ class TestChainPerSegmentCompression:
         text = "out\nOTHER_1\nbody"
         assert wrap.strip_markers(text, "M_") == text
 
+    def test_cap_output_under_limit_unchanged(self):
+        wrap = self._import_wrap()
+        from src import config
+
+        os.environ["TOKEN_SAVER_MAX_OUTPUT_BYTES"] = "1000"  # noqa: S105
+        config.reload()
+        try:
+            text = "small output"
+            assert wrap._cap_output(text) == text
+        finally:
+            del os.environ["TOKEN_SAVER_MAX_OUTPUT_BYTES"]
+            config.reload()
+
+    def test_cap_output_over_limit_truncated(self):
+        wrap = self._import_wrap()
+        from src import config
+
+        os.environ["TOKEN_SAVER_MAX_OUTPUT_BYTES"] = "100"  # noqa: S105
+        config.reload()
+        try:
+            text = "x" * 500
+            capped = wrap._cap_output(text)
+            assert capped.startswith("x" * 100)
+            assert "truncated" in capped.lower()
+            assert len(text) < len(capped) or "truncated" in capped
+        finally:
+            del os.environ["TOKEN_SAVER_MAX_OUTPUT_BYTES"]
+            config.reload()
+
+    def test_cap_output_disabled_with_zero(self):
+        wrap = self._import_wrap()
+        from src import config
+
+        os.environ["TOKEN_SAVER_MAX_OUTPUT_BYTES"] = "0"  # noqa: S105
+        config.reload()
+        try:
+            text = "y" * 5000
+            assert wrap._cap_output(text) == text
+        finally:
+            del os.environ["TOKEN_SAVER_MAX_OUTPUT_BYTES"]
+            config.reload()
+
+    def test_e2e_wrap_caps_large_output(self):
+        import subprocess
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        wrap_path = os.path.join(repo_root, "scripts", "wrap.py")
+        env = os.environ.copy()
+        env["TOKEN_SAVER_MAX_OUTPUT_BYTES"] = "500"  # noqa: S105
+        result = subprocess.run(  # noqa: S603, PLW1510
+            [sys.executable, wrap_path, "seq 1 100000"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+        assert "truncated" in result.stdout.lower()
+
     def test_e2e_wrap_chain_dry_run_no_marker_leak(self):
         """--dry-run on a chain should not show __TS_MARK_* lines."""
         import subprocess
@@ -905,3 +1005,160 @@ class TestChainPerSegmentCompression:
         assert result.returncode == 0
         assert "hello" in result.stdout
         assert "__TS_MARK_" not in result.stdout
+
+    def _run_wrap_chain(self, cmd, timeout=10):
+        import subprocess
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        wrap_path = os.path.join(repo_root, "scripts", "wrap.py")
+        return subprocess.run(  # noqa: S603, PLW1510
+            [sys.executable, wrap_path, cmd],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+
+    def test_e2e_chain_shares_shell_variables(self):
+        """Marker-injection runs the whole chain in ONE shell, so a variable
+        set in segment 0 is visible in segment 1.  A per-segment subprocess
+        pipeline would lose this — this test pins the design decision (#19).
+        """
+        r = self._run_wrap_chain("MYVAR=propagated && echo $MYVAR")
+        assert r.returncode == 0, r.stderr
+        assert "propagated" in r.stdout
+
+    def test_e2e_chain_shares_working_directory(self):
+        """`cd` in segment 0 must affect segment 1 (single shared shell)."""
+        r = self._run_wrap_chain("cd /usr && pwd")
+        assert r.returncode == 0, r.stderr
+        assert "/usr" in r.stdout
+
+    def test_e2e_chain_and_short_circuits_on_failure(self):
+        """`false && echo X` must not run the second segment."""
+        r = self._run_wrap_chain("false && echo SHOULD_NOT_APPEAR")
+        assert r.returncode != 0
+        assert "SHOULD_NOT_APPEAR" not in r.stdout
+
+    def test_e2e_chain_semicolon_continues_after_failure(self):
+        """`false ; echo X` must still run the second segment."""
+        r = self._run_wrap_chain("false ; echo APPEARS_ANYWAY")
+        assert "APPEARS_ANYWAY" in r.stdout
+
+    def test_e2e_single_command_propagates_exit_code(self):
+        """wrap.py must exit with the wrapped command's return code."""
+        r = self._run_wrap_chain("sh -c 'echo out; exit 3'")
+        assert r.returncode == 3
+        assert "out" in r.stdout
+
+    def test_e2e_single_command_merges_stderr(self):
+        """Single-command path merges stderr into the compressed output."""
+        r = self._run_wrap_chain("sh -c 'echo to_stderr 1>&2'")
+        assert "to_stderr" in r.stdout
+
+    def test_e2e_wrap_timeout_returns_partial(self):
+        """A command exceeding wrap_timeout is killed, returns code 124, and
+        any buffered partial output plus a timeout note survive (fail-open)."""
+        import subprocess
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        wrap_path = os.path.join(repo_root, "scripts", "wrap.py")
+        env = os.environ.copy()
+        env["TOKEN_SAVER_WRAP_TIMEOUT"] = "1"  # noqa: S105
+        result = subprocess.run(  # noqa: S603, PLW1510
+            [sys.executable, wrap_path, "sh -c 'echo early; sleep 10'"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env=env,
+        )
+        assert result.returncode == 124
+        assert "timed out" in (result.stdout + result.stderr).lower()
+
+
+class TestExplainDecision:
+    def test_empty_command(self):
+        d = explain_decision("")
+        assert d["compressible"] is False
+        assert d["reason"] == "empty command"
+
+    def test_compressible_command(self):
+        d = explain_decision("git status")
+        assert d["compressible"] is True
+        assert d["excluded_by"] is None
+        assert d["is_chain"] is False
+        assert d["matched_patterns"]
+
+    def test_non_compressible_no_pattern(self):
+        d = explain_decision("foobar-unknown-cmd arg")
+        assert d["compressible"] is False
+        assert d["excluded_by"] is None
+        assert d["matched_patterns"] == []
+
+    def test_excluded_sudo(self):
+        d = explain_decision("sudo git status")
+        assert d["compressible"] is False
+        assert d["excluded_by"] is not None
+
+    def test_excluded_vim(self):
+        d = explain_decision("vim file.txt")
+        assert d["compressible"] is False
+        assert d["excluded_by"] is not None
+
+    def test_excluded_redirection(self):
+        d = explain_decision("git log > out.txt")
+        assert d["compressible"] is False
+        assert d["excluded_by"] == "output redirection"
+
+    def test_or_chain_rejected(self):
+        d = explain_decision("git status || echo fail")
+        assert d["compressible"] is False
+        assert d["excluded_by"] == r"||"
+
+    def test_dangerous_construct_rejected(self):
+        d = explain_decision("echo $(git status)")
+        assert d["compressible"] is False
+        assert d["excluded_by"] == "dangerous shell construct"
+
+    def test_safe_trailing_pipe_still_compressible(self):
+        d = explain_decision("git log | head -30")
+        assert d["compressible"] is True
+        assert d["matched_patterns"]
+
+    def test_chain_compressible(self):
+        d = explain_decision("git status && git diff")
+        assert d["is_chain"] is True
+        assert d["compressible"] is True
+        assert d["matched_patterns"]
+
+    def test_chain_with_unsafe_segment(self):
+        d = explain_decision("git status && sudo rm -rf /tmp/x")
+        assert d["is_chain"] is True
+        assert d["compressible"] is False
+
+
+class TestCmdExplain:
+    def _run_explain(self, *args):
+        import subprocess
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return subprocess.run(  # noqa: S603, PLW1510
+            [sys.executable, "-m", "src.cli", "explain", *args],
+            capture_output=True,
+            text=True,
+            cwd=repo_root,
+            timeout=20,
+        )
+
+    def test_explain_json(self):
+        result = self._run_explain("git status", "--format", "json")
+        assert result.returncode == 0, result.stderr
+        data = json.loads(result.stdout)
+        assert data["command"] == "git status"
+        assert data["compressible"] is True
+        assert data["processor"] == "git"
+
+    def test_explain_text(self):
+        result = self._run_explain("sudo git status")
+        assert result.returncode == 0, result.stderr
+        assert "Compressible: no" in result.stdout
+        assert "Excluded by" in result.stdout

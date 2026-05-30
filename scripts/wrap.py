@@ -11,7 +11,9 @@ its own processor.  Marker echoes are injected between segments so the output
 stream can be split back into per-segment chunks.
 
 Flags:
-    --dry-run  Show compression stats without replacing output.
+    --dry-run       Show compression stats without replacing output.
+    --show-removed  With --dry-run, also print a line/byte breakdown of what
+                    compression removed (to stderr).
 """
 
 import logging
@@ -25,10 +27,10 @@ import uuid
 # Ensure the extension root is importable (scripts/ -> plugin root)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src import config
+from src import config, core
 from src.chain_utils import extract_primary_command, split_chain_with_ops
+from src.diffstat import format_summary, summarize
 from src.engine import CompressionEngine
-from src.tracker import SavingsTracker
 
 # --- Debug logging (writes to data_dir/hook.log when TOKEN_SAVER_DEBUG=true) ---
 _log = logging.getLogger("token-saver.wrap")
@@ -44,6 +46,10 @@ if _debug:
     _log.addHandler(_handler)
 else:
     _log.addHandler(logging.NullHandler())
+
+# Audit logging + savings/mismatch recording live in src.core, shared with the
+# Gemini hook.  Platform is always claude_code here.
+_PLATFORM = "claude_code"
 
 
 MARKER_PREFIX_TEMPLATE = "__TS_MARK_{}_"
@@ -122,6 +128,9 @@ def _run_command(
     child_proc: subprocess.Popen | None = None
 
     def signal_handler(signum, _frame):
+        # The child runs in its own session (start_new_session below), so the
+        # terminal delivers Ctrl-C only to us, not to the child.  Forwarding
+        # here is therefore the child's *only* signal — no double-delivery.
         if child_proc and child_proc.poll() is None:
             child_proc.send_signal(signum)
 
@@ -137,15 +146,25 @@ def _run_command(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
             text=True,
+            start_new_session=True,
         )
         stdout, stderr = child_proc.communicate(timeout=timeout)
         return stdout or "", stderr or "", child_proc.returncode
     except subprocess.TimeoutExpired:
+        # Fail open: kill the child but keep whatever it buffered so far, so a
+        # slow/streaming command still returns (compressed) partial output
+        # instead of losing everything.
+        partial_out, partial_err = "", ""
         if child_proc:
             child_proc.kill()
-            child_proc.wait()
-        print(f"[token-saver] Command timed out after {timeout}s: {command_str}", file=sys.stderr)
-        sys.exit(124)
+            try:
+                partial_out, partial_err = child_proc.communicate(timeout=5)
+            except (subprocess.TimeoutExpired, ValueError, OSError):
+                partial_out, partial_err = "", ""
+        note = f"[token-saver] Command timed out after {timeout}s (partial output shown)"
+        print(note, file=sys.stderr)
+        partial_out = (partial_out or "") + f"\n{note}\n"
+        return partial_out, partial_err or "", 124
     except KeyboardInterrupt:
         if child_proc and child_proc.poll() is None:
             child_proc.kill()
@@ -159,8 +178,27 @@ def _run_command(
         signal.signal(signal.SIGTERM, original_sigterm)
 
 
+def _cap_output(output: str) -> str:
+    """Hard-cap output length to ``max_output_bytes`` chars, noting truncation.
+
+    Pathological commands can emit hundreds of MB; without a cap the whole
+    payload flows into the compression engine and is held in memory.  We keep
+    the first N chars (where the useful head usually lives) and append a note.
+    A value <= 0 disables the cap.
+    """
+    cap = config.get("max_output_bytes")
+    if not cap or cap <= 0 or len(output) <= cap:
+        return output
+    note = f"\n[token-saver] Output truncated at {cap:,} chars (was {len(output):,})\n"
+    return output[:cap] + note
+
+
 def _print_dry_run(
-    processor_name: str, original_len: int, compressed_len: int, output: str
+    processor_name: str,
+    original_len: int,
+    compressed_len: int,
+    output: str,
+    diff_summary: dict | None = None,
 ) -> None:
     saved = original_len - compressed_len
     ratio = (saved / original_len * 100) if original_len > 0 else 0
@@ -174,34 +212,15 @@ def _print_dry_run(
         f"saved={saved_tokens} tokens ({ratio:.1f}%)",
         file=sys.stderr,
     )
+    if diff_summary is not None:
+        print(format_summary(diff_summary), file=sys.stderr)
     print(output, end="")
-
-
-def _record_saving(command: str, processor: str, original_len: int, compressed_len: int) -> None:
-    try:
-        tracker = SavingsTracker()
-        _log.debug(
-            "Recording: session=%s processor=%s original=%d compressed=%d",
-            tracker.session_id,
-            processor,
-            original_len,
-            compressed_len,
-        )
-        tracker.record_saving(
-            command=command,
-            processor=processor,
-            original_size=original_len,
-            compressed_size=compressed_len,
-            platform="claude_code",
-        )
-        tracker.close()
-    except Exception:
-        _log.exception("Tracking failed")
 
 
 def main():
     dry_run = "--dry-run" in sys.argv
-    args = [a for a in sys.argv[1:] if a != "--dry-run"]
+    show_removed = "--show-removed" in sys.argv
+    args = [a for a in sys.argv[1:] if a not in ("--dry-run", "--show-removed")]
 
     if not args:
         print("Usage: python3 wrap.py '<command>'", file=sys.stderr)
@@ -224,7 +243,7 @@ def main():
         _log.debug("Chain rewrite: %r", rewritten)
 
         stdout, _stderr, returncode = _run_command(rewritten, timeout, merge_stderr=True)
-        combined = stdout
+        combined = _cap_output(stdout)
 
         if not combined.strip():
             sys.exit(returncode)
@@ -233,6 +252,7 @@ def main():
 
         compressed_parts: list[str] = []
         used_processors: list[str] = []
+        mismatches: list[tuple[str, str, int]] = []
         total_original = 0
         total_compressed = 0
 
@@ -246,7 +266,15 @@ def main():
             seg_cmd = chain_parts[seg_idx][0]
             if not chunk_out:
                 continue
-            c_out, proc_name, _was = engine.compress(seg_cmd, chunk_out)
+            try:
+                c_out, proc_name, _was = engine.compress(seg_cmd, chunk_out)
+                if engine.last_event.get("is_mismatch"):
+                    mismatches.append(
+                        (seg_cmd, engine.last_event["attempted_processor"], len(chunk_out))
+                    )
+            except Exception:
+                _log.exception("Compression failed for segment %r — passing through", seg_cmd)
+                c_out, proc_name = chunk_out, "passthrough"
             compressed_parts.append(c_out)
             used_processors.append(proc_name)
             total_original += len(chunk_out)
@@ -259,8 +287,14 @@ def main():
 
         if dry_run:
             display_output = strip_markers(combined, marker_prefix)
-            _print_dry_run(proc_label, total_original, total_compressed, display_output)
+            diff_summary = summarize(display_output, compressed) if show_removed else None
+            _print_dry_run(
+                proc_label, total_original, total_compressed, display_output, diff_summary
+            )
             sys.exit(returncode)
+
+        core.audit_log(command_str, proc_label, total_original, total_compressed)
+        core.record_mismatches(mismatches, _PLATFORM)
 
         if total_compressed < total_original:
             _log.debug(
@@ -269,7 +303,9 @@ def main():
                 total_original,
                 total_compressed,
             )
-            _record_saving(command_str, proc_label, total_original, total_compressed)
+            core.record_saving(
+                command_str, proc_label, total_original, total_compressed, _PLATFORM
+            )
         else:
             _log.debug("Chain not compressed: len=%d", total_original)
 
@@ -281,29 +317,42 @@ def main():
     output = stdout
     if stderr:
         output = (output + "\n" + stderr) if output else stderr
+    output = _cap_output(output)
 
     if not output.strip():
         sys.exit(returncode)
 
     primary_cmd = extract_primary_command(command_str)
-    compressed, processor_name, was_compressed = engine.compress(primary_cmd, output)
+    result = core.compress(primary_cmd, output, engine=engine)
 
     if dry_run:
-        _print_dry_run(processor_name, len(output), len(compressed), output)
+        diff_summary = summarize(output, result.compressed) if show_removed else None
+        _print_dry_run(
+            result.processor, len(output), len(result.compressed), output, diff_summary
+        )
         sys.exit(returncode)
 
-    if was_compressed:
+    # Savings are attributed to the full command string (not just the primary)
+    # so stats group by what the user actually typed.
+    core.audit_log(primary_cmd, result.processor, result.original_len, result.compressed_len)
+    if result.is_mismatch:
+        core.record_mismatches(
+            [(primary_cmd, result.attempted_processor, result.original_len)], _PLATFORM
+        )
+    if result.was_compressed:
         _log.debug(
             "Compressed: processor=%s original=%d compressed=%d",
-            processor_name,
-            len(output),
-            len(compressed),
+            result.processor,
+            result.original_len,
+            result.compressed_len,
         )
-        _record_saving(command_str, processor_name, len(output), len(compressed))
+        core.record_saving(
+            command_str, result.processor, result.original_len, result.compressed_len, _PLATFORM
+        )
     else:
-        _log.debug("Not compressed: processor=%s len=%d", processor_name, len(output))
+        _log.debug("Not compressed: processor=%s len=%d", result.processor, result.original_len)
 
-    print(compressed, end="")
+    print(result.compressed, end="")
     sys.exit(returncode)
 
 

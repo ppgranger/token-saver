@@ -6,10 +6,13 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.chain_utils import extract_primary_command, split_chain_with_ops
+from src.processors.act import ActProcessor
 from src.processors.ansible import AnsibleProcessor
 from src.processors.build_output import BuildOutputProcessor
+from src.processors.bun import BunProcessor
 from src.processors.cargo import CargoProcessor
 from src.processors.cargo_clippy import CargoClippyProcessor
+from src.processors.cdktf import CdktfProcessor
 from src.processors.cloud_cli import CloudCliProcessor
 from src.processors.db_query import DbQueryProcessor
 from src.processors.docker import DockerProcessor
@@ -22,11 +25,15 @@ from src.processors.git import GitProcessor
 from src.processors.go import GoProcessor
 from src.processors.helm import HelmProcessor
 from src.processors.jq_yq import JqYqProcessor
+from src.processors.just import JustProcessor
 from src.processors.kubectl import KubectlProcessor
 from src.processors.lint_output import LintOutputProcessor
 from src.processors.maven_gradle import MavenGradleProcessor
+from src.processors.mise import MiseProcessor
 from src.processors.network import NetworkProcessor
+from src.processors.nix import NixProcessor
 from src.processors.package_list import PackageListProcessor
+from src.processors.pulumi import PulumiProcessor
 from src.processors.python_install import PythonInstallProcessor
 from src.processors.search import SearchProcessor
 from src.processors.ssh import SshProcessor
@@ -996,6 +1003,15 @@ class TestFileListingProcessor:
         assert self.p.can_handle("tree src/")
         assert not self.p.can_handle("git status")
 
+    def test_can_handle_anchored_to_command_position(self):
+        # Tool name appearing as an argument must NOT route here.
+        assert not self.p.can_handle("echo see tree")
+        assert not self.p.can_handle("git diff tree.c")
+        assert not self.p.can_handle("python find_stuff.py")
+        # Path-prefixed real commands still match.
+        assert self.p.can_handle("/usr/bin/find . -type f")
+        assert self.p.can_handle("./node_modules/.bin/ls")
+
     def test_empty_output(self):
         assert self.p.process("ls", "") == ""
 
@@ -1111,6 +1127,11 @@ class TestFileContentProcessor:
         assert self.p.can_handle("head -100 file.py")
         assert self.p.can_handle("bat file.py")
         assert not self.p.can_handle("git status")
+
+    def test_can_handle_anchored_to_command_position(self):
+        assert not self.p.can_handle("echo cat")
+        assert not self.p.can_handle("ls headers/")
+        assert self.p.can_handle("/bin/cat file.py")
 
     def test_empty_output(self):
         assert self.p.process("cat file.py", "") == ""
@@ -1327,6 +1348,28 @@ class TestGenericProcessor:
         assert "truncated" in result
         assert len(result.splitlines()) < 600
 
+    def test_keep_tail_zero_does_not_emit_whole_list(self):
+        """generic_keep_tail=0 must yield an empty tail, not lines[-0:] (the
+        whole list).  Guards the slice bug noted in generic.py:_truncate_middle.
+        """
+        from src import config
+
+        os.environ["TOKEN_SAVER_GENERIC_KEEP_TAIL"] = "0"  # noqa: S105
+        os.environ["TOKEN_SAVER_GENERIC_KEEP_HEAD"] = "5"  # noqa: S105
+        config.reload()
+        try:
+            lines = [f"unique-line-{i}" for i in range(600)]
+            result = self.p.process("cmd", "\n".join(lines))
+            assert "truncated" in result
+            # Only the 5 head lines + the truncation marker should survive.
+            assert "unique-line-599" not in result
+            assert "unique-line-4" in result
+            assert len(result.splitlines()) < 20
+        finally:
+            del os.environ["TOKEN_SAVER_GENERIC_KEEP_TAIL"]
+            del os.environ["TOKEN_SAVER_GENERIC_KEEP_HEAD"]
+            config.reload()
+
     def test_strips_trailing_whitespace(self):
         output = "line1   \nline2\t\t\nline3"
         result = self.p.process("cmd", output)
@@ -1438,6 +1481,33 @@ class TestMinifiedFileDetection:
         result = self.p.process("cat app.js", output)
         # Source code (.js) should pass-through unchanged
         assert result == output
+
+    def test_long_line_sql_not_minified(self):
+        """A .sql file with very long lines must pass through (not misdetected)."""
+        output = "\n".join(["SELECT " + ", ".join(f"col{i}" for i in range(200)) + ";"] * 3)
+        result = self.p.process("cat schema.sql", output)
+        assert result == output
+        assert "minified file" not in result
+
+    def test_long_line_python_not_minified(self):
+        """A generated .py file with one huge line must pass through intact."""
+        output = "DATA = [" + ", ".join(str(i) for i in range(5000)) + "]"
+        result = self.p.process("cat generated.py", output)
+        assert result == output
+        assert "minified file" not in result
+
+    def test_head_n_flag_value_not_treated_as_file(self):
+        """`head -n 50 app.py` must detect app.py, not the count `50`."""
+        output = "\n".join(f"line {i}" for i in range(500))
+        result = self.p.process("head -n 50 app.py", output)
+        # .py source code passes through unchanged
+        assert result == output
+
+    def test_cat_n_boolean_flag_keeps_file(self):
+        """`cat -n foo.json` — `-n` is boolean here, foo.json is the file."""
+        p = FileContentProcessor()
+        assert p._extract_filename("cat -n foo.json") == "foo.json"
+        assert p._extract_extension("cat -n foo.json") == ".json"
 
 
 class TestNetworkProcessor:
@@ -1899,6 +1969,11 @@ class TestSearchProcessor:
         assert self.p.can_handle("ag pattern src/")
         assert not self.p.can_handle("git status")
 
+    def test_can_handle_anchored_to_command_position(self):
+        assert not self.p.can_handle("echo grep this")
+        assert not self.p.can_handle("git log --grep=fix")
+        assert self.p.can_handle("/usr/bin/grep -r foo .")
+
     def test_short_output_unchanged(self):
         output = "\n".join([f"src/file{i}.py:10:match here" for i in range(5)])
         result = self.p.process("grep -r pattern .", output)
@@ -2238,10 +2313,73 @@ class TestEnvProcessor:
         result = self.p.process("env", output)
         assert "total entries" in result  # PATH was truncated
 
+    def test_redacts_broadened_secret_names(self):
+        """Newly covered secret-name variants must be redacted."""
+        secrets = {
+            "DB_PASS": "hunter2",
+            "MYSQL_PWD": "rootpw",
+            "GITLAB_PAT": "glpat-xxxx",
+            "SENTRY_DSN": "https://abc@sentry.io/1",
+            "SLACK_WEBHOOK_URL": "https://hooks.slack.com/x",
+            "BEARER_TOKEN": "ey.jwt.value",
+        }
+        lines = [f"{k}={v}" for k, v in secrets.items()] + [f"FILLER_{i}=val" for i in range(20)]
+        result = self.p.process("env", "\n".join(lines))
+        for k, v in secrets.items():
+            assert f"{k}=***" in result
+            assert v not in result
+
+    def test_does_not_redact_lookalike_names(self):
+        """Ordinary names containing secret substrings must NOT be redacted."""
+        safe = {
+            "AUTHOR": "jane",
+            "MONKEY": "george",
+            "KEYBOARD": "qwerty",
+            "PATH_HINT": "/tmp",
+            "PASSAGE": "novel",
+        }
+        lines = [f"{k}={v}" for k, v in safe.items()] + [f"FILLER_{i}=val" for i in range(20)]
+        result = self.p.process("env", "\n".join(lines))
+        for k, v in safe.items():
+            assert f"{k}={v}" in result
+            assert f"{k}=***" not in result
+
     def test_short_output_unchanged(self):
         output = "\n".join([f"VAR{i}=val{i}" for i in range(5)])
         result = self.p.process("env", output)
         assert result == output
+
+    def test_allowlist_bypasses_redaction(self, monkeypatch):
+        from src import config
+
+        monkeypatch.setenv("TOKEN_SAVER_REDACTION_ALLOWLIST", "GIT_AUTHOR_NAME,PUBLIC_KEY")
+        config.reload()
+        try:
+            lines = [
+                "GIT_AUTHOR_NAME=jane_secret",
+                "PUBLIC_KEY=ssh-rsa AAAApublic",
+                "API_KEY=sk-shouldhide",
+            ] + [f"FILLER_{i}=val" for i in range(20)]
+            result = self.p.process("env", "\n".join(lines))
+            assert "GIT_AUTHOR_NAME=jane_secret" in result
+            assert "PUBLIC_KEY=ssh-rsa AAAApublic" in result
+            # Non-allowlisted secret still redacted.
+            assert "API_KEY=***" in result
+            assert "sk-shouldhide" not in result
+        finally:
+            config.reload()
+
+    def test_allowlist_is_case_insensitive(self, monkeypatch):
+        from src import config
+
+        monkeypatch.setenv("TOKEN_SAVER_REDACTION_ALLOWLIST", "public_key")
+        config.reload()
+        try:
+            lines = ["PUBLIC_KEY=ssh-rsa AAAA"] + [f"FILLER_{i}=val" for i in range(20)]
+            result = self.p.process("env", "\n".join(lines))
+            assert "PUBLIC_KEY=ssh-rsa AAAA" in result
+        finally:
+            config.reload()
 
 
 class TestSystemInfoProcessor:
@@ -2253,6 +2391,11 @@ class TestSystemInfoProcessor:
         assert self.p.can_handle("wc -l *.py")
         assert self.p.can_handle("df -h")
         assert not self.p.can_handle("ls -la")
+
+    def test_can_handle_anchored_to_command_position(self):
+        assert not self.p.can_handle("npm run wc")
+        assert not self.p.can_handle("echo df")
+        assert self.p.can_handle("/usr/bin/du -sh .")
 
     def test_du_sorts_and_truncates(self):
         lines = [f"{i}K\tdir{i}" for i in range(30)]
@@ -4299,3 +4442,203 @@ class TestStructuredLogProcessor:
 
         result = self.p.process("stern my-pod", output)
         assert "database connection failed" in result
+
+
+class TestBunProcessor:
+    def setup_method(self):
+        self.p = BunProcessor()
+
+    def test_can_handle(self):
+        assert self.p.can_handle("bun install")
+        assert self.p.can_handle("bun add react")
+        assert self.p.can_handle("bun i")
+        assert not self.p.can_handle("bun run build")
+        assert not self.p.can_handle("python build.py")
+
+    def test_empty_output(self):
+        assert self.p.process("bun install", "") == ""
+
+    def test_short_unchanged(self):
+        out = "\n".join(f"line {i}" for i in range(5))
+        assert self.p.process("bun install", out) == out
+
+    def test_collapses_noise_keeps_summary(self):
+        lines = ["Resolving dependencies"] * 20
+        lines += ["+ react@18.0.0", "+ lodash@4.0.0"]
+        lines.append("15 packages installed")
+        out = "\n".join(lines)
+        result = self.p.process("bun install", out)
+        assert "15 packages installed" in result
+        assert "resolve/download steps" in result
+        assert len(result) < len(out)
+
+    def test_keeps_errors(self):
+        lines = ["Resolving dependencies"] * 15
+        lines.append("error: package not found")
+        out = "\n".join(lines)
+        result = self.p.process("bun add nope", out)
+        assert "error: package not found" in result
+
+
+class TestJustProcessor:
+    def setup_method(self):
+        self.p = JustProcessor()
+
+    def test_can_handle_listing_only(self):
+        assert self.p.can_handle("just --list")
+        assert self.p.can_handle("just -l")
+        assert self.p.can_handle("just --summary")
+        assert not self.p.can_handle("just build")
+        assert not self.p.can_handle("just")
+
+    def test_short_unchanged(self):
+        out = "\n".join(f"    recipe{i}" for i in range(5))
+        assert self.p.process("just --list", out) == out
+
+    def test_collapses_recipe_list(self):
+        lines = ["Available recipes:"]
+        lines += [f"    recipe{i}    # desc {i}" for i in range(60)]
+        out = "\n".join(lines)
+        result = self.p.process("just --list", out)
+        assert "60 recipes:" in result
+        assert "Available recipes:" in result
+        assert "20 more" in result
+        assert len(result) < len(out)
+
+
+class TestPulumiProcessor:
+    def setup_method(self):
+        self.p = PulumiProcessor()
+
+    def test_can_handle(self):
+        assert self.p.can_handle("pulumi up")
+        assert self.p.can_handle("pulumi preview")
+        assert self.p.can_handle("pulumi destroy")
+        assert not self.p.can_handle("pulumi stack ls")
+
+    def test_short_unchanged(self):
+        out = "\n".join(f"line {i}" for i in range(5))
+        assert self.p.process("pulumi up", out) == out
+
+    def test_keeps_resource_ops_and_summary(self):
+        lines = ["Updating (dev):"]
+        lines += [f"unchanged resource {i}" for i in range(30)]
+        lines += ["    + aws:s3:Bucket my-bucket create", "Resources:", "    + 1 created"]
+        out = "\n".join(lines)
+        result = self.p.process("pulumi up", out)
+        assert "+ aws:s3:Bucket my-bucket create" in result
+        assert "Resources:" in result
+        assert "+ 1 created" in result
+        assert "hidden" in result
+        assert len(result) < len(out)
+
+    def test_keeps_errors(self):
+        lines = [f"line {i}" for i in range(25)]
+        lines.append("error: deployment failed")
+        out = "\n".join(lines)
+        result = self.p.process("pulumi up", out)
+        assert "error: deployment failed" in result
+
+
+class TestCdktfProcessor:
+    def setup_method(self):
+        self.p = CdktfProcessor()
+
+    def test_can_handle(self):
+        assert self.p.can_handle("cdktf deploy")
+        assert self.p.can_handle("cdktf diff")
+        assert not self.p.can_handle("cdktf get")
+
+    def test_short_unchanged(self):
+        out = "\n".join(f"line {i}" for i in range(10))
+        assert self.p.process("cdktf deploy", out) == out
+
+    def test_strips_synth_chrome(self):
+        lines = ["Synthesizing", "Compiling"]
+        lines += [f"  # module.foo will be created {i}" for i in range(40)]
+        out = "\n".join(lines)
+        result = self.p.process("cdktf deploy", out)
+        assert "Synthesizing" not in result
+        assert len(result) <= len(out)
+
+
+class TestNixProcessor:
+    def setup_method(self):
+        self.p = NixProcessor()
+
+    def test_can_handle(self):
+        assert self.p.can_handle("nix build")
+        assert self.p.can_handle("nix develop")
+        assert self.p.can_handle("nix-build")
+        assert self.p.can_handle("nix-shell")
+        assert not self.p.can_handle("nix flakes")
+
+    def test_short_unchanged(self):
+        out = "\n".join(f"line {i}" for i in range(5))
+        assert self.p.process("nix build", out) == out
+
+    def test_counts_build_steps(self):
+        lines = [f"building '/nix/store/abc{i}-pkg'" for i in range(20)]
+        lines += [f"copying path '/nix/store/def{i}-pkg'" for i in range(10)]
+        lines.append("error: build failed")
+        out = "\n".join(lines)
+        result = self.p.process("nix build", out)
+        assert "20 derivations built" in result
+        assert "10 paths copied" in result
+        assert "error: build failed" in result
+        assert len(result) < len(out)
+
+
+class TestMiseProcessor:
+    def setup_method(self):
+        self.p = MiseProcessor()
+
+    def test_can_handle(self):
+        assert self.p.can_handle("mise install")
+        assert self.p.can_handle("mise use node@20")
+        assert self.p.can_handle("mise upgrade")
+        assert not self.p.can_handle("mise ls")
+
+    def test_short_unchanged(self):
+        out = "\n".join(f"line {i}" for i in range(5))
+        assert self.p.process("mise install", out) == out
+
+    def test_counts_progress_keeps_installed(self):
+        lines = ["mise downloading node"] * 15
+        lines.append("installed node@20.0.0")
+        out = "\n".join(lines)
+        result = self.p.process("mise install", out)
+        assert "installed node@20.0.0" in result
+        assert "download/build steps" in result
+        assert len(result) < len(out)
+
+
+class TestActProcessor:
+    def setup_method(self):
+        self.p = ActProcessor()
+
+    def test_can_handle(self):
+        assert self.p.can_handle("act")
+        assert self.p.can_handle("act -j build")
+        assert not self.p.can_handle("react build")
+
+    def test_short_unchanged(self):
+        out = "\n".join(f"line {i}" for i in range(5))
+        assert self.p.process("act", out) == out
+
+    def test_hides_docker_chrome_keeps_status(self):
+        lines = ["🐳 docker pull node"] * 20
+        lines += ["⭐ Run Main step", "✅ Success - Main step", "🏁 Job succeeded"]
+        out = "\n".join(lines)
+        result = self.p.process("act", out)
+        assert "Run Main step" in result
+        assert "Job succeeded" in result
+        assert "docker/setup lines hidden" in result
+        assert len(result) < len(out)
+
+    def test_keeps_errors(self):
+        lines = ["🐳 docker pull node"] * 16
+        lines.append("error: step failed")
+        out = "\n".join(lines)
+        result = self.p.process("act", out)
+        assert "error: step failed" in result

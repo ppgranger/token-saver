@@ -92,7 +92,10 @@ def discover_processors() -> list[Processor]:
 
     subclasses = _all_subclasses(Processor)
     instances = [cls() for cls in subclasses]
-    instances.sort(key=lambda p: p.priority)
+    # Sort by (priority, name): _all_subclasses returns a set, so equal
+    # priorities would otherwise order nondeterministically across runs,
+    # making first-match routing unstable.
+    instances.sort(key=lambda p: (p.priority, p.name))
 
     # Validate: GenericProcessor must be last
     if instances and instances[-1].priority != 999:
