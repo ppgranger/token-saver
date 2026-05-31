@@ -2,6 +2,7 @@
 
 import re
 
+from .. import config
 from .base import Processor
 
 # System variables that are rarely useful for debugging
@@ -56,12 +57,25 @@ _SYSTEM_PREFIXES = (
     "COMMAND_MODE",
 )
 
-# Patterns for sensitive variable names
+# Patterns for sensitive variable names.
+#
+# Two tiers:
+#   * Unambiguous substrings — long/specific enough to match anywhere without
+#     colliding with ordinary words.
+#   * Ambiguous tokens (KEY, AUTH, PASS, PWD, PAT, DSN, …) — matched only at
+#     letter boundaries so MONKEY / AUTHOR / KEYBOARD / PATH are NOT redacted.
+#     Note: \b is unusable here because "_" is a regex word char, so "API_KEY"
+#     would not satisfy \bKEY\b.  We use letter-only lookarounds instead, which
+#     treat "_", digits and string edges as separators.
+_UNAMBIGUOUS_SECRET = (
+    r"SECRET|PASSWORD|PASSWD|PASSPHRASE|CREDENTIAL|PRIVATE|"  # noqa: S105
+    r"ENCRYPT|CERTIFICATE|APIKEY|API_KEY|ACCESS_KEY|AWS_SECRET|"
+    r"DATABASE_URL|DATABASE_PASSWORD|MONGODB_URI|REDIS_URL|CONNECTION_STRING|"
+    r"STRIPE_|TWILIO_|SENDGRID_|GITHUB_TOKEN|NPM_TOKEN|WEBHOOK|BEARER"
+)
+_AMBIGUOUS_SECRET = r"(?<![A-Za-z])(?:KEY|KEYS|TOKEN|AUTH|PAT|DSN|PASS|PWD|PEM|CERT)(?![A-Za-z])"  # noqa: S105
 _SENSITIVE_PATTERNS = re.compile(
-    r"(KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|PRIVATE|AUTH|API_KEY|"
-    r"ACCESS_KEY|AWS_SECRET|DATABASE_URL|MONGODB_URI|REDIS_URL|"
-    r"STRIPE_|TWILIO_|SENDGRID_|GITHUB_TOKEN|NPM_TOKEN|"
-    r"ENCRYPTION|PASSPHRASE|CERTIFICATE|PEM)",
+    rf"({_UNAMBIGUOUS_SECRET}|{_AMBIGUOUS_SECRET})",
     re.IGNORECASE,
 )
 
@@ -91,6 +105,11 @@ class EnvProcessor(Processor):
         app_vars = []
         sensitive_redacted = 0
 
+        # Names the user has marked safe to show verbatim (case-insensitive),
+        # e.g. GIT_AUTHOR_NAME or PUBLIC_KEY that would otherwise be redacted.
+        raw_allow = config.get("redaction_allowlist") or []
+        allowlist = {str(n).upper() for n in raw_allow}
+
         for line in lines:
             stripped = line.strip()
             if not stripped or "=" not in stripped:
@@ -104,8 +123,8 @@ class EnvProcessor(Processor):
                 system_count += 1
                 continue
 
-            # Redact sensitive values
-            if _SENSITIVE_PATTERNS.search(key):
+            # Redact sensitive values, unless explicitly allowlisted
+            if key.upper() not in allowlist and _SENSITIVE_PATTERNS.search(key):
                 app_vars.append(f"  {key}=***")
                 sensitive_redacted += 1
                 continue

@@ -18,7 +18,7 @@ class SearchProcessor(Processor):
         return "search"
 
     def can_handle(self, command: str) -> bool:
-        return bool(re.search(r"\b(grep|rg|ag|fd|fdfind)\b", command))
+        return bool(re.match(r"\s*(?:\S*/)?(grep|rg|ag|fd|fdfind)\b", command))
 
     def process(self, command: str, output: str) -> str:
         if not output or not output.strip():

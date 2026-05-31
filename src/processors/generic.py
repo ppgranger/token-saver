@@ -9,8 +9,12 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07")
 
 # Regex to normalize numbers/percentages for fuzzy matching
 _NUMERIC_RE = re.compile(r"\d+(\.\d+)?")
-# Progress bar visual characters
-_PROGRESS_BAR_RE = re.compile(r"[━█▓░▒■□●○#=\->]{5,}")
+# Unicode block/box characters are unambiguous progress bars.
+_PROGRESS_BLOCK_RE = re.compile(r"[━█▓░▒■□●○]{3,}")
+# ASCII runs (####, ====, ---->) are only progress bars in progress context;
+# on their own they are usually separators / rules that must be preserved.
+_ASCII_BAR_RE = re.compile(r"[#=\->]{5,}")
+_PROGRESS_CONTEXT_RE = re.compile(r"[%\[\]]|\b\d+/\d+\b|ETA|eta|\d+(\.\d+)?\s*[KMGT]?i?B/s")
 
 
 class GenericProcessor(Processor):
@@ -62,11 +66,20 @@ class GenericProcessor(Processor):
         result = []
         for line in lines:
             stripped = line.strip()
-            # Pure progress bar lines (>60% bar characters)
-            if stripped and _PROGRESS_BAR_RE.search(stripped):
-                bar_match = _PROGRESS_BAR_RE.search(stripped)
-                if bar_match and len(bar_match.group(0)) > len(stripped) * 0.5:
-                    continue
+            # Unicode block bars: always progress noise.
+            block = _PROGRESS_BLOCK_RE.search(stripped) if stripped else None
+            if block and len(block.group(0)) > len(stripped) * 0.5:
+                continue
+            # ASCII bars (====, ####, ---->): only strip when accompanied by a
+            # progress signal (%, [..], n/m, rate, ETA).  A bare "--------" or
+            # "========" line is a separator/rule and must survive.
+            ascii_bar = _ASCII_BAR_RE.search(stripped) if stripped else None
+            if (
+                ascii_bar
+                and len(ascii_bar.group(0)) > len(stripped) * 0.5
+                and _PROGRESS_CONTEXT_RE.search(stripped)
+            ):
+                continue
             # Spinner lines
             if stripped in (
                 "⠋",
@@ -166,10 +179,10 @@ class GenericProcessor(Processor):
         stripped = line.strip()
         if not stripped:
             return False
-        # Count digits + common numeric-adjacent chars (colons for time, dashes for ETA)
-        numeric_chars = sum(1 for c in stripped if c.isdigit())
-        if numeric_chars / len(stripped) >= 0.30:
-            return True
+        # Only collapse on EXPLICIT progress/transfer signals.  Bare digit-ratio
+        # heuristics are deliberately NOT used: they also match legitimate
+        # numeric data tables (e.g. yearly metrics, id columns), whose rows are
+        # meaningful and must be preserved rather than collapsed as redraw noise.
         # Percentage patterns
         if re.search(r"\d+(\.\d+)?%", stripped):
             return True
@@ -180,11 +193,8 @@ class GenericProcessor(Processor):
         if re.search(r"(ETA|eta)\s+\d+", stripped):
             return True
         # Curl/wget progress format: lines with --:--:-- time patterns
-        if re.search(r"--:--:--|(\d+:){2}\d+", stripped) and numeric_chars >= 5:
-            return True
-        # Lines that are mostly whitespace + numbers (tabular numeric output)
-        non_ws = stripped.replace(" ", "")
-        return bool(non_ws and sum(1 for c in non_ws if c.isdigit()) / len(non_ws) >= 0.40)
+        numeric_chars = sum(1 for c in stripped if c.isdigit())
+        return bool(re.search(r"--:--:--|(\d+:){2}\d+", stripped) and numeric_chars >= 5)
 
     def _flush(self, result: list[str], line: str, count: int) -> None:
         if count > 1:
@@ -206,9 +216,15 @@ class GenericProcessor(Processor):
         keep_head = config.get("generic_keep_head")
         keep_tail = config.get("generic_keep_tail")
         total = len(lines)
-        removed = total - keep_head - keep_tail
+        # Guard keep_tail == 0: lines[-0:] is the WHOLE list, which would emit
+        # every line back (worse than the original).  Use explicit empty slices.
+        head = lines[:keep_head] if keep_head > 0 else []
+        tail = lines[-keep_tail:] if keep_tail > 0 else []
+        removed = total - len(head) - len(tail)
+        if removed <= 0:
+            return lines
         return [
-            *lines[:keep_head],
+            *head,
             f"... ({removed} lines truncated, {total} total) ...",
-            *lines[-keep_tail:],
+            *tail,
         ]

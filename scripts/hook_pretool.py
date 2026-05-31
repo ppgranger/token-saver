@@ -81,6 +81,24 @@ _SAFE_TRAILING_PIPE_RE = re.compile(
     r")\s*$"
 )
 
+# Streaming / follow / watch commands that never terminate on their own.
+# Wrapping them would buffer forever (the wrap.py subprocess only flushes
+# after the child exits), so they must pass through untouched.  Shared by
+# both the whole-command and per-segment exclusion lists.
+_STREAMING_EXCLUDED_PATTERNS = [
+    r"^\s*watch\b",  # `watch` repeats a command forever
+    r"\s--follow(=|\s|$)",  # --follow on tail/journalctl/kubectl/docker logs
+    r"^\s*tail\b[^|]*\s-[a-zA-Z]*[fF]\b",  # tail -f / tail -F / tail -nf
+    r"^\s*journalctl\b[^|]*\s-[a-zA-Z]*f\b",  # journalctl -f
+    r"\b(kubectl|oc)\b[^|]*\blogs\b[^|]*\s-[a-zA-Z]*f\b",  # kubectl/oc logs -f
+    r"\bdocker\b[^|]*\blogs\b[^|]*\s-[a-zA-Z]*f\b",  # docker logs -f
+    r"^\s*docker\s+stats\b(?![^|]*--no-stream)",  # docker stats (live by default)
+    r"^\s*docker(\s+compose|-compose)\s+up\b(?![^|]*\s-d\b)",  # compose up (attached)
+    r"\s--watch(=|\s|$)",  # generic --watch flag (vitest, jest, tsc, etc.)
+    r"\s--watchAll\b",  # jest --watchAll
+    r"^\s*(npx\s+)?vitest\b(?![^|]*\brun\b)",  # vitest defaults to watch mode
+]
+
 # Commands that should NEVER be wrapped (checked on whole command for
 # single-command inputs, or delegated to per-segment checks for chains).
 EXCLUDED_PATTERNS = [
@@ -89,14 +107,18 @@ EXCLUDED_PATTERNS = [
     r"^\s*ssh\s+(?:-\S+\s+)*\S+\s*$",  # interactive ssh only (no remote command)
     r"^\s*rsync\b.*\S+:\S+",  # only exclude remote rsync (host:path)
     r"(?:^|\s)token[-_]saver\s",  # avoid wrapping token-saver CLI itself
-    r"wrap\.py",
-    r">\s",  # redirections
+    # Recursion guard: our rewrite is `python3 <…>wrap.py '<cmd>'`.  Match
+    # wrap.py only in script-execution position so `cat wrap.py` stays wrappable.
+    r"(?:^|\s)(?:\S*/)?(?:python\d?(?:\.\d+)*|node|ruby|sh|bash|zsh|perl)\s+"
+    r"(?:-\S+\s+)*\S*wrap\.py\b",
+    r"^\s*\.?\S*/?wrap\.py\b",
     r"<\(",  # process substitution
     r"^\s*sudo\b",  # never wrap sudo
     r"^\s*env\s+\S+=",  # env VAR=val prefix — too complex to wrap
     # Interactive-flag REPLs even with script args (e.g. `python -i script.py`).
     r"^\s*(python\d?(?:\.\d+)*|ipython|node|ruby|perl|ghci|deno|php|lua|R|bash|sh|zsh)"
     r"\s+(?:-\S*i\S*|--interactive)(\s|$)",
+    *_STREAMING_EXCLUDED_PATTERNS,
 ]
 
 COMPILED_EXCLUDED = [re.compile(p) for p in EXCLUDED_PATTERNS]
@@ -146,11 +168,40 @@ def _has_unquoted_construct(cmd: str, constructs: tuple[str, ...]) -> bool:
 _DANGEROUS_CONSTRUCTS = ("$(", "`", "<<")
 
 
+def _has_output_redirection(cmd: str) -> bool:
+    """Return True if an unquoted output redirection (>, >>, 2>, &>) is present.
+
+    Quote-aware: a ``>`` inside single/double quotes (e.g. ``git commit -m
+    "fixes >50%"``) is ignored.  Arrow/comparison operators ``->`` and ``=>``
+    are not treated as redirections.  Catches the no-space form (``log>out``)
+    that the old ``>\\s`` regex missed.
+    """
+    i, n = 0, len(cmd)
+    while i < n:
+        ch = cmd[i]
+        if ch in ("'", '"'):
+            quote = ch
+            i += 1
+            while i < n and cmd[i] != quote:
+                if cmd[i] == "\\" and i + 1 < n:
+                    i += 2
+                    continue
+                i += 1
+            if i < n:
+                i += 1
+            continue
+        if ch == ">":
+            prev = cmd[i - 1] if i > 0 else ""
+            if prev not in ("-", "="):
+                return True
+        i += 1
+    return False
+
+
 # Per-segment safety checks applied inside _is_chain_compressible().
 # These catch dangerous constructs within individual chain segments.
 _SEGMENT_EXCLUDED_PATTERNS = [
     r"(?<!['\"])\|(?!['\"])",  # pipes inside a segment
-    r">\s",  # redirections
     r"<\(",  # process substitution
     r"^\s*sudo\b",
     r"^\s*(vi|vim|nano|emacs|code)\b",
@@ -158,7 +209,9 @@ _SEGMENT_EXCLUDED_PATTERNS = [
     r"^\s*rsync\b.*\S+:\S+",  # only exclude remote rsync (host:path)
     r"^\s*env\s+\S+=",
     r"(?:^|\s)token[-_]saver\s",
-    r"wrap\.py",
+    r"(?:^|\s)(?:\S*/)?(?:python\d?(?:\.\d+)*|node|ruby|sh|bash|zsh|perl)\s+"
+    r"(?:-\S+\s+)*\S*wrap\.py\b",
+    r"^\s*\.?\S*/?wrap\.py\b",
     # Bare interactive REPL launchers: would hang waiting for stdin.
     # Only matches when there are no arguments (REPL mode).
     r"^\s*(python\d?(?:\.\d+)*|ipython|node|bash|sh|zsh|ruby|irb|pry|gdb|lldb"
@@ -166,6 +219,7 @@ _SEGMENT_EXCLUDED_PATTERNS = [
     # Interactive-flag REPLs: -i drops into REPL even with other args.
     r"^\s*(python\d?(?:\.\d+)*|ipython|node|ruby|perl|ghci|deno|php|lua|R|bash|sh|zsh)"
     r"\s+(?:-\S*i\S*|--interactive)(\s|$)",
+    *_STREAMING_EXCLUDED_PATTERNS,
 ]
 
 _COMPILED_SEGMENT_EXCLUDED = [re.compile(p) for p in _SEGMENT_EXCLUDED_PATTERNS]
@@ -177,6 +231,8 @@ def _is_segment_safe(segment: str) -> bool:
     Checks both the raw segment and its path-stripped form, so commands like
     ``/usr/bin/vim``, ``./python``, or ``.venv/bin/sudo`` are still caught.
     """
+    if _has_output_redirection(segment):
+        return False
     norm = _normalize_cmd(segment)
     for pattern in _COMPILED_SEGMENT_EXCLUDED:
         if pattern.search(segment) or pattern.search(norm):
@@ -242,6 +298,10 @@ def is_compressible(command: str) -> bool:
     if CHAIN_SPLIT_RE.search(cmd):
         return _is_chain_compressible(cmd)
 
+    # Output redirections (quote-aware) are never wrapped.
+    if _has_output_redirection(cmd):
+        return False
+
     # Single command — strip safe trailing pipes for exclusion check only
     check_cmd = _SAFE_TRAILING_PIPE_RE.sub("", cmd)
     # Check exclusions against both raw and path-stripped forms, so
@@ -253,6 +313,97 @@ def is_compressible(command: str) -> bool:
     return any(pattern.search(check_cmd) for pattern in COMPILED_PATTERNS) or any(
         pattern.search(norm_cmd) for pattern in COMPILED_PATTERNS
     )
+
+
+def _matched_exclusion(check_cmd: str, norm_cmd: str) -> str | None:
+    """Return the source regex of the first exclusion that matches, if any."""
+    for src, pattern in zip(EXCLUDED_PATTERNS, COMPILED_EXCLUDED, strict=False):
+        if pattern.search(check_cmd) or pattern.search(norm_cmd):
+            return src
+    return None
+
+
+def _matched_compressible(check_cmd: str, norm_cmd: str) -> list[str]:
+    """Return source regexes of all compressible patterns that match."""
+    matched = []
+    for src, pattern in zip(COMPRESSIBLE_PATTERNS, COMPILED_PATTERNS, strict=False):
+        if pattern.search(check_cmd) or pattern.search(norm_cmd):
+            matched.append(src)
+    return matched
+
+
+def explain_decision(command: str) -> dict:
+    """Explain whether ``command`` would be wrapped, and why.
+
+    Mirrors ``is_compressible`` step-for-step but returns a structured record
+    instead of a bool, so ``token-saver explain`` can show the routing/exclusion
+    decision. Keys: command, compressible, reason, excluded_by,
+    matched_patterns, is_chain.
+    """
+    result = {
+        "command": command,
+        "compressible": False,
+        "reason": "",
+        "excluded_by": None,
+        "matched_patterns": [],
+        "is_chain": False,
+    }
+    cmd = command.strip()
+    if not cmd:
+        result["reason"] = "empty command"
+        return result
+
+    if re.search(r"(?<!['\"])\|\|(?!['\"])", cmd):
+        result["reason"] = "contains '||' (error-recovery chains are not wrapped)"
+        result["excluded_by"] = r"||"
+        return result
+
+    if _has_unquoted_construct(cmd, _DANGEROUS_CONSTRUCTS):
+        result["reason"] = "contains unquoted $(), backtick, or heredoc"
+        result["excluded_by"] = "dangerous shell construct"
+        return result
+
+    if CHAIN_SPLIT_RE.search(cmd):
+        result["is_chain"] = True
+        compressible = _is_chain_compressible(cmd)
+        result["compressible"] = compressible
+        seen: list[str] = []
+        for seg in split_chain(cmd):
+            check_seg = _SAFE_TRAILING_PIPE_RE.sub("", seg)
+            norm_seg = _normalize_cmd(check_seg)
+            for p in _matched_compressible(check_seg, norm_seg):
+                if p not in seen:
+                    seen.append(p)
+        result["matched_patterns"] = seen
+        result["reason"] = (
+            "chain with at least one compressible, all-safe segment"
+            if compressible
+            else "chain has an unsafe segment or no compressible segment"
+        )
+        return result
+
+    if _has_output_redirection(cmd):
+        result["reason"] = "contains output redirection (>, >>, 2>, &>)"
+        result["excluded_by"] = "output redirection"
+        return result
+
+    check_cmd = _SAFE_TRAILING_PIPE_RE.sub("", cmd)
+    norm_cmd = _normalize_cmd(check_cmd)
+    excl = _matched_exclusion(check_cmd, norm_cmd)
+    if excl is not None:
+        result["reason"] = "matched an exclusion pattern"
+        result["excluded_by"] = excl
+        return result
+
+    matched = _matched_compressible(check_cmd, norm_cmd)
+    result["matched_patterns"] = matched
+    result["compressible"] = bool(matched)
+    result["reason"] = (
+        "matched a compressible processor pattern"
+        if matched
+        else "no processor pattern matched (not wrapped)"
+    )
+    return result
 
 
 def main():

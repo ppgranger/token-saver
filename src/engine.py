@@ -31,12 +31,34 @@ class CompressionEngine:
         self.processors = [p for p in all_processors if p.name not in disabled]
         self._generic = self.processors[-1]  # Last = GenericProcessor (priority 999)
         self._by_name = {p.name: p for p in self.processors}
+        # Metadata about the most recent compress() call, for observability
+        # (O3 processor-mismatch detection). Reset on every call.
+        self.last_event: dict = {}
+
+    def _set_event(
+        self,
+        attempted: str,
+        result: str,
+        was_compressed: bool,
+        is_mismatch: bool,
+        original_len: int,
+        compressed_len: int,
+    ) -> None:
+        self.last_event = {
+            "attempted_processor": attempted,
+            "result_processor": result,
+            "was_compressed": was_compressed,
+            "is_mismatch": is_mismatch,
+            "original_len": original_len,
+            "compressed_len": compressed_len,
+        }
 
     def compress(self, command: str, output: str) -> tuple[str, str, bool]:
         """Compress output for a given command.
 
         Returns (compressed_output, processor_name, was_compressed).
         """
+        self.last_event = {}
         if not config.get("enabled"):
             return output, "none", False
 
@@ -52,8 +74,11 @@ class CompressionEngine:
 
                 # If the processor returned output exactly unchanged, it
                 # explicitly chose not to compress (e.g. source code files).
-                # Respect the processor's decision — no generic fallback.
+                # A deliberate no-op, not a weak-processor mismatch.
                 if compressed is output or compressed == output:
+                    self._set_event(
+                        processor.name, processor.name, False, False, len(output), len(output)
+                    )
                     return output, processor.name, False
 
                 # Chain to secondary processors if declared
@@ -86,10 +111,15 @@ class CompressionEngine:
                 gain = (original_len - compressed_len) / original_len if original_len > 0 else 0
 
                 if compressed_len < original_len and gain >= min_ratio:
+                    self._set_event(
+                        processor.name, processor.name, True, False, original_len, compressed_len
+                    )
                     return compressed, processor.name, True
 
-                # Specialized processor didn't compress enough — try the
-                # generic processor as fallback (dedup, truncation, etc.)
+                # Specialized processor didn't compress enough on its own — a
+                # mismatch (O3): record it and try the generic processor as a
+                # fallback (dedup, truncation, etc.).
+                mismatch = processor is not self._generic
                 if processor is not self._generic:
                     generic_compressed = self._generic.process(command, output)
                     generic_compressed = self._generic.clean(generic_compressed)
@@ -98,8 +128,14 @@ class CompressionEngine:
                         (original_len - generic_len) / original_len if original_len > 0 else 0
                     )
                     if generic_len < original_len and generic_gain >= min_ratio:
+                        self._set_event(
+                            processor.name, "generic", True, mismatch, original_len, generic_len
+                        )
                         return generic_compressed, "generic", True
 
+                self._set_event(
+                    processor.name, processor.name, False, mismatch, original_len, compressed_len
+                )
                 return output, processor.name, False
 
         return output, "none", False

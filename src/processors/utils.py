@@ -75,26 +75,49 @@ def compress_diff(lines, max_hunk, max_context):
     stat_line = ""
     leading_buffer: list[str] = []
     trailing_remaining = 0
+    # Track whether we are inside a hunk body.  File-header lines (---/+++/index)
+    # only appear *before* the first @@ of a file; once in a hunk, lines starting
+    # with +/- are content and must never be treated as headers (a removed line
+    # whose text is "-- foo" arrives as "--- foo").
+    in_hunk = False
 
     for line in lines:
         if line.startswith("diff --git"):
             leading_buffer = []
             trailing_remaining = 0
+            in_hunk = False
             if hunk_truncated:
                 result.append(f"  ... (truncated after {max_hunk} lines)")
             result.append(line)
             hunk_line_count = 0
             hunk_truncated = False
-        elif line.startswith(("index ", "---", "+++")):
-            continue
         elif line.startswith("@@"):
             leading_buffer = []
             trailing_remaining = 0
+            in_hunk = True
             if hunk_truncated:
                 result.append(f"  ... (truncated after {max_hunk} lines)")
             result.append(line)
             hunk_line_count = 0
             hunk_truncated = False
+        elif not in_hunk and line.startswith(("index ", "--- ", "+++ ")):
+            continue
+        elif not in_hunk and line.startswith(
+            (
+                "Binary files",
+                "rename ",
+                "copy ",
+                "similarity ",
+                "dissimilarity ",
+                "new file mode",
+                "deleted file mode",
+                "old mode",
+                "new mode",
+            )
+        ):
+            # Preserve metadata for diffs that have no hunk body (binary,
+            # pure renames, mode-only changes) — otherwise they'd vanish.
+            result.append(line)
         elif line.startswith(("+", "-")):
             hunk_line_count += 1
             if hunk_line_count <= max_hunk:

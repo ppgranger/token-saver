@@ -14,7 +14,7 @@ body:
       description: Which AI CLI tool are you using?
       options:
         - Claude Code
-        - Gemini CLI
+        - Antigravity CLI
         - Both
     validations:
       required: true

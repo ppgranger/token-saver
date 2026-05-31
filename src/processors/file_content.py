@@ -74,6 +74,18 @@ _SENSITIVE_CONFIG_EXTENSIONS = {
     ".conf",
 }
 
+# Web-asset source extensions where minification-by-content is plausible and
+# patching the minified form is not expected (so the minified heuristic still
+# applies, unlike other source code).
+_MINIFIABLE_SOURCE_EXTENSIONS = {
+    ".js",
+    ".ts",
+    ".jsx",
+    ".tsx",
+    ".css",
+    ".html",
+}
+
 # Lock files: AGGRESSIVELY compressed (dependency names + versions only)
 _LOCK_FILENAMES = {
     "package-lock.json",
@@ -137,7 +149,7 @@ class FileContentProcessor(Processor):
         return "file_content"
 
     def can_handle(self, command: str) -> bool:
-        return bool(re.search(r"\b(cat|head|tail|less|more|bat)\b", command))
+        return bool(re.match(r"\s*(?:\S*/)?(cat|head|tail|less|more|bat)\b", command))
 
     def process(self, command: str, output: str) -> str:
         if not output or not output.strip():
@@ -212,16 +224,35 @@ class FileContentProcessor(Processor):
 
     # ── Filename / extension extraction ──────────────────────────────
 
+    # Flags that may consume the following token as a numeric value
+    # (e.g. `head -n 50`).  `-n` is also a boolean for `cat` (number lines), so
+    # we only treat the next token as consumed when it is numeric.
+    _VALUE_FLAGS = {"-n", "-c", "--lines", "--bytes"}
+
+    def _file_args(self, command: str) -> list[str]:
+        """Yield candidate file arguments, skipping flags and their numeric values."""
+        parts = command.split()
+        args: list[str] = []
+        i, n = 1, len(parts)
+        while i < n:
+            part = parts[i]
+            if part.startswith("-"):
+                nxt = parts[i + 1] if i + 1 < n else ""
+                if part in self._VALUE_FLAGS and nxt.lstrip("+-").isdigit():
+                    i += 2
+                    continue
+                i += 1
+                continue
+            args.append(part)
+            i += 1
+        return args
+
     def _extract_extension(self, command: str) -> str:
         """Extract file extension from the command, e.g. 'cat foo.py' -> '.py'.
 
         Also handles dotfiles like '.env' -> '.env'.
         """
-        # Find the file argument (skip the command itself and flags)
-        parts = command.split()
-        for part in parts[1:]:
-            if part.startswith("-"):
-                continue
+        for part in self._file_args(command):
             # Get the basename
             basename = part.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
             # Dotfile like .env
@@ -235,10 +266,7 @@ class FileContentProcessor(Processor):
 
     def _extract_filename(self, command: str) -> str:
         """Extract bare filename from the command, e.g. 'cat /path/to/package-lock.json'."""
-        parts = command.split()
-        for part in parts[1:]:
-            if part.startswith("-"):
-                continue
+        for part in self._file_args(command):
             return part.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
         return ""
 
@@ -251,6 +279,17 @@ class FileContentProcessor(Processor):
             return True
         if re.search(r"\.bundle\.(js|css)$", filename, re.I):
             return True
+
+        # Never apply content heuristics to non-web source code or sensitive
+        # config: generated/packed source (e.g. one-line SQL, long-line .py)
+        # and config with exact values must pass through intact for patching.
+        # Web assets (.js/.ts/.css/...) are exempt — minified bundles are real
+        # and nobody patches them.
+        is_protected_source = (
+            ext in _SOURCE_CODE_EXTENSIONS or ext in _SENSITIVE_CONFIG_EXTENSIONS
+        ) and ext not in _MINIFIABLE_SOURCE_EXTENSIONS
+        if is_protected_source:
+            return False
 
         # Content heuristic: very few lines relative to total length
         lines = output.splitlines()
@@ -607,12 +646,17 @@ class FileContentProcessor(Processor):
         keep_head = config.get("file_keep_head")
         keep_tail = config.get("file_keep_tail")
         total = len(lines)
-        truncated = total - keep_head - keep_tail
+        # lines[-0:] is the whole list — guard keep_tail == 0 explicitly.
+        head = lines[:keep_head] if keep_head > 0 else []
+        tail = lines[-keep_tail:] if keep_tail > 0 else []
+        truncated = total - len(head) - len(tail)
+        if truncated <= 0:
+            return "\n".join(lines)
 
         result = [
-            *lines[:keep_head],
+            *head,
             f"\n... ({truncated} lines truncated, {total} total lines) ...\n",
-            *lines[-keep_tail:],
+            *tail,
         ]
         return "\n".join(result)
 

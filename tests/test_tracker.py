@@ -67,7 +67,7 @@ class TestSavingsTracker:
 
         # Second session
         tracker2 = SavingsTracker(session_id="session-2")
-        tracker2.record_saving("cmd2", "test", 500, 100, "gemini_cli")
+        tracker2.record_saving("cmd2", "test", 500, 100, "antigravity_cli")
 
         lifetime = tracker2.get_lifetime_stats()
         assert lifetime["sessions"] == 2
@@ -119,6 +119,19 @@ class TestSavingsTracker:
         top = self.tracker.get_top_processors()
         assert len(top) == 2
         assert top[0]["processor"] == "git"  # More saved
+
+    def test_record_and_retrieve_mismatches(self):
+        self.tracker.record_mismatch("docker ps", "docker", 1000, "claude_code")
+        self.tracker.record_mismatch("docker ps", "docker", 1200, "claude_code")
+        self.tracker.record_mismatch("kubectl get pods", "kubectl", 800, "claude_code")
+        rows = self.tracker.get_processor_mismatches()
+        assert len(rows) == 2
+        assert rows[0]["processor"] == "docker"
+        assert rows[0]["count"] == 2
+        assert rows[0]["total_original"] == 2200
+
+    def test_mismatches_empty_by_default(self):
+        assert self.tracker.get_processor_mismatches() == []
 
     def test_top_commands_grouping_and_order(self):
         """get_top_commands groups by command and orders by total_saved DESC."""
@@ -180,6 +193,23 @@ class TestSavingsTracker:
             tracker.close()
         finally:
             del os.environ["TOKEN_SAVER_SESSION"]
+
+    def test_fallback_session_id_is_stable_across_instances(self):
+        """Without an explicit id or env var, all trackers in one process share an id.
+
+        Each Bash command spawns a fresh wrap.py; a per-process random id would
+        record every command as its own session.  The ppid-based fallback keeps
+        commands from the same shell grouped together.
+        """
+        os.environ.pop("TOKEN_SAVER_SESSION", None)
+        t1 = SavingsTracker()
+        t2 = SavingsTracker()
+        try:
+            assert t1.session_id == t2.session_id
+            assert t1.session_id.startswith("ppid-")
+        finally:
+            t1.close()
+            t2.close()
 
     def test_shared_session_aggregates(self):
         """Multiple trackers with the same session_id should aggregate."""
@@ -279,7 +309,7 @@ class TestStatsCLI:
         """Insert test data into the DB."""
         tracker = SavingsTracker(session_id="test-stats")
         tracker.record_saving("git status", "git", 5000, 500, "claude_code")
-        tracker.record_saving("pytest", "test", 3000, 800, "gemini_cli")
+        tracker.record_saving("pytest", "test", 3000, 800, "antigravity_cli")
         tracker.record_saving("git diff", "git", 10000, 2000, "claude_code")
         tracker.close()
 

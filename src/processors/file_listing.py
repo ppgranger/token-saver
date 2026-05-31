@@ -18,7 +18,7 @@ class FileListingProcessor(Processor):
         return "file_listing"
 
     def can_handle(self, command: str) -> bool:
-        return bool(re.search(r"\b(ls|find|tree|dir|exa|eza|rsync)\b", command))
+        return bool(re.match(r"\s*(?:\S*/)?(ls|find|tree|dir|exa|eza|rsync)\b", command))
 
     def process(self, command: str, output: str) -> str:
         if not output or not output.strip():

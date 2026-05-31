@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${extensionPath}/gemini/hook_aftertool.py\"",
+            "command": "python3 \"${extensionPath}/antigravity/hook_aftertool.py\"",
             "timeout": 5000
           }
         ]

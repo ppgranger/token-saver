@@ -3,7 +3,7 @@
 
 Delegates to src/hook_session.py. This wrapper exists because:
 - Claude Code plugin hooks reference scripts/ via ${CLAUDE_PLUGIN_ROOT}
-- Gemini CLI references src/hook_session.py via ${extensionPath}
+- Antigravity CLI references src/hook_session.py via ${extensionPath}
 - Both paths must work independently
 """
 

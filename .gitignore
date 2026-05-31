@@ -18,6 +18,9 @@ build/
 # pytest
 .pytest_cache/
 
+# ruff
+.ruff_cache/
+
 # Claude Code
 .claude/
 
