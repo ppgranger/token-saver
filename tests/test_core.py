@@ -1,4 +1,4 @@
-"""Tests for the shared compression core (src/core.py) and the Gemini hook."""
+"""Tests for the shared compression core (src/core.py) and the Antigravity hook."""
 
 import json
 import os
@@ -72,7 +72,7 @@ class TestRecording:
             original_len=100,
             compressed_len=20,
         )
-        core.record_result(result, "git status", "gemini_cli")
+        core.record_result(result, "git status", "antigravity_cli")
         tracker = SavingsTracker(session_id="any")
         lifetime = tracker.get_lifetime_stats()
         assert lifetime["commands"] == 1
@@ -89,7 +89,7 @@ class TestRecording:
             original_len=100,
             compressed_len=95,
         )
-        core.record_result(result, "docker ps", "gemini_cli")
+        core.record_result(result, "docker ps", "antigravity_cli")
         tracker = SavingsTracker(session_id="any")
         rows = tracker.get_processor_mismatches()
         assert len(rows) == 1
@@ -97,10 +97,10 @@ class TestRecording:
         tracker.close()
 
 
-class TestGeminiHook:
+class TestAntigravityHook:
     def _run_hook(self, payload):
         return subprocess.run(  # noqa: S603, PLW1510
-            [sys.executable, "gemini/hook_aftertool.py"],
+            [sys.executable, "antigravity/hook_aftertool.py"],
             input=json.dumps(payload),
             capture_output=True,
             text=True,

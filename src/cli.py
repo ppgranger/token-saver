@@ -90,7 +90,7 @@ def cmd_update(_args):
     """Check for updates, then always refresh the local install.
 
     Remote fetch is best-effort: if it fails or matches the local version,
-    we still re-run the installer so the Claude/Gemini plugin caches stay
+    we still re-run the installer so the Claude/Antigravity plugin caches stay
     in sync with the source files on disk.
     """
     repo_dir = _repo_dir()
@@ -150,21 +150,25 @@ def _detect_installed_targets():
         claude_cache = os.path.join(
             appdata, "claude", "plugins", "cache", "token-saver-marketplace", "token-saver"
         )
-        gemini_dir = os.path.join(appdata, "gemini", "extensions", "token-saver")
+        antigravity_dir = os.path.join(
+            appdata, "gemini", "antigravity-cli", "plugins", "token-saver"
+        )
     else:
         claude_old = os.path.join(h, ".claude", "plugins", "token-saver")
         claude_cache = os.path.join(
             h, ".claude", "plugins", "cache", "token-saver-marketplace", "token-saver"
         )
-        gemini_dir = os.path.join(h, ".gemini", "extensions", "token-saver")
+        antigravity_dir = os.path.join(
+            h, ".gemini", "antigravity-cli", "plugins", "token-saver"
+        )
 
     claude_installed = os.path.isdir(claude_old) or os.path.isdir(claude_cache)
-    gemini_installed = os.path.isdir(gemini_dir)
+    antigravity_installed = os.path.isdir(antigravity_dir)
 
-    if claude_installed and gemini_installed:
+    if claude_installed and antigravity_installed:
         return "both"
-    if gemini_installed:
-        return "gemini"
+    if antigravity_installed:
+        return "antigravity"
     # Default to claude (most common, and safe even if dir was just cleaned)
     return "claude"
 
@@ -249,7 +253,7 @@ def _update_via_tarball(repo_dir, version):
             "hooks",
             "skills",
             "commands",
-            "gemini",
+            "antigravity",
             "bin",
             "install.py",
             "pyproject.toml",

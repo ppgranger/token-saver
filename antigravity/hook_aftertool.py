@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AfterTool hook for Gemini CLI.
+"""AfterTool hook for Antigravity CLI.
 
 Reads JSON from stdin, compresses tool output, replaces it via deny+reason.
 """
@@ -8,7 +8,7 @@ import json
 import os
 import sys
 
-# Ensure the extension root is importable (gemini/ -> extension/)
+# Ensure the plugin root is importable (antigravity/ -> plugin root)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src import core
@@ -21,7 +21,7 @@ def main():
     except (json.JSONDecodeError, ValueError):
         sys.exit(0)
 
-    platform = Platform.GEMINI_CLI
+    platform = Platform.ANTIGRAVITY_CLI
 
     command = get_command(input_data, platform) or ""
     output = get_tool_output(input_data, platform)
@@ -42,7 +42,7 @@ def main():
         json.dump({}, sys.stdout)
         sys.exit(0)
 
-    core.record_result(result, command, "gemini_cli")
+    core.record_result(result, command, "antigravity_cli")
 
     json.dump({"decision": "deny", "reason": result.compressed}, sys.stdout)
     sys.exit(0)

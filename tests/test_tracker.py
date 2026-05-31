@@ -67,7 +67,7 @@ class TestSavingsTracker:
 
         # Second session
         tracker2 = SavingsTracker(session_id="session-2")
-        tracker2.record_saving("cmd2", "test", 500, 100, "gemini_cli")
+        tracker2.record_saving("cmd2", "test", 500, 100, "antigravity_cli")
 
         lifetime = tracker2.get_lifetime_stats()
         assert lifetime["sessions"] == 2
@@ -309,7 +309,7 @@ class TestStatsCLI:
         """Insert test data into the DB."""
         tracker = SavingsTracker(session_id="test-stats")
         tracker.record_saving("git status", "git", 5000, 500, "claude_code")
-        tracker.record_saving("pytest", "test", 3000, 800, "gemini_cli")
+        tracker.record_saving("pytest", "test", 3000, 800, "antigravity_cli")
         tracker.record_saving("git diff", "git", 10000, 2000, "claude_code")
         tracker.close()
 

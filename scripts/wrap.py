@@ -48,7 +48,7 @@ else:
     _log.addHandler(logging.NullHandler())
 
 # Audit logging + savings/mismatch recording live in src.core, shared with the
-# Gemini hook.  Platform is always claude_code here.
+# Antigravity hook.  Platform is always claude_code here.
 _PLATFORM = "claude_code"
 
 

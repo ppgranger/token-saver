@@ -9,7 +9,7 @@ Token-Saver focuses specifically on **command output compression** — it doesn'
 | **Approach** | Deterministic compression per command type | Delegates simple tasks to local LLM | Caching + compression via MCP | Sandboxed execution + FTS5 indexing |
 | **Requires LLM calls** | No | Yes (local LLM) | Yes | No |
 | **Added latency** | ~0ms (regex/parsing only) | Variable (LLM inference) | Variable | ~0ms for sandbox, variable for indexing |
-| **Platform support** | Claude Code, Gemini CLI | Claude Code only | Claude Code only | Claude Code only |
+| **Platform support** | Claude Code, Antigravity CLI | Claude Code only | Claude Code only | Claude Code only |
 | **Compression method** | 18 specialized processors (git, pytest, terraform, docker, k8s...) | Task delegation (not output compression) | Response caching | Output sandboxing + summarization |
 | **Preserves all errors/traces** | Yes (precision-tested) | N/A | Depends on cache hit | Depends on summary |
 | **Works offline** | Yes | Needs local LLM running | No | Yes |
@@ -25,7 +25,7 @@ Token-Saver intercepts command output and applies **deterministic, per-command c
 - Fully deterministic — same input always produces same output
 - Works offline, no external dependencies
 - 478+ tests including precision tests that verify critical data survives compression
-- Supports both Claude Code and Gemini CLI
+- Supports both Claude Code and Antigravity CLI
 
 ### cc_token_saver_mcp
 

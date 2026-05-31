@@ -1,7 +1,7 @@
-"""Shared compression core used by both the Claude and Gemini hooks.
+"""Shared compression core used by both the Claude and Antigravity hooks.
 
 The two platforms integrate differently — Claude rewrites the Bash command to
-run through ``wrap.py`` (PreToolUse), while Gemini compresses already-captured
+run through ``wrap.py`` (PreToolUse), while Antigravity compresses already-captured
 tool output (AfterTool) — but the *decision* of what to compress and the
 *bookkeeping* afterwards (audit log, savings, mismatch events) are identical.
 This module centralizes both so the two entry points stay in lock-step.
@@ -55,7 +55,7 @@ class CompressResult(NamedTuple):
 def should_compress(command: str) -> bool:
     """Whether ``command`` is eligible for compression (shared gate).
 
-    Delegates to the PreToolUse decision logic so Claude and Gemini make the
+    Delegates to the PreToolUse decision logic so Claude and Antigravity make the
     same call.  Imported lazily to avoid a src->scripts import at module load.
     """
     from scripts.hook_pretool import is_compressible  # noqa: PLC0415

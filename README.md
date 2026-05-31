@@ -10,7 +10,7 @@
 
 21 specialized processors understand git, pytest, docker, terraform, kubectl, helm, ansible, and more. Each one knows what to keep and what to discard: errors, diffs, and actionable data stay; progress bars, passing tests, and boilerplate go.
 
-Compatible with **Claude Code** and **Gemini CLI**. Zero latency. No LLM calls. Fully deterministic. One install, instant savings.
+Compatible with **Claude Code** and **Antigravity CLI**. Zero latency. No LLM calls. Fully deterministic. One install, instant savings.
 
 ### Before & After
 
@@ -83,16 +83,16 @@ Claude Code's PreToolUse hook cannot modify output after execution.
 The only way to reduce tokens is to rewrite the command to go through a wrapper
 that executes, compresses, and returns the result.
 
-**Gemini CLI** (AfterTool hook):
+**Antigravity CLI** (AfterTool hook):
 
 ```
-1. Gemini executes the command
+1. Antigravity executes the command
 2. AfterTool hook receives the raw output
 3. Compresses the output
 4. Replaces it via {"decision": "deny", "reason": "<compressed output>"}
 ```
 
-Gemini CLI allows direct output replacement through the deny/reason mechanism.
+Antigravity CLI allows direct output replacement through the deny/reason mechanism.
 
 ### Precision Guarantees
 
@@ -111,7 +111,7 @@ Compression is aggressive on noise, conservative on signal:
 ### Prerequisites
 
 - Python 3.10+
-- Claude Code and/or Gemini CLI
+- Claude Code and/or Antigravity CLI
 
 ### Method 1: Claude Code Plugin (recommended)
 
@@ -133,7 +133,7 @@ claude --plugin-dir ./token-saver
 git clone https://github.com/ppgranger/token-saver.git
 cd token-saver
 python3 install.py --target claude    # Claude Code only
-python3 install.py --target gemini    # Gemini CLI only
+python3 install.py --target antigravity    # Antigravity CLI only
 python3 install.py --target both      # Both platforms
 ```
 
@@ -204,7 +204,7 @@ python3 install.py --uninstall --target claude
 1. Copies (or symlinks) files to:
    - Core: `~/.token-saver/` (CLI, updater, shared source)
    - Claude Code: `~/.claude/plugins/cache/token-saver-marketplace/token-saver/`
-   - Gemini CLI: `~/.gemini/extensions/token-saver/`
+   - Antigravity CLI: `~/.gemini/antigravity-cli/plugins/token-saver/`
 2. Registers as a native Claude Code plugin in `installed_plugins.json` and `enabledPlugins`
 3. Installs `token-saver` CLI to `~/.local/bin/`
 4. Stamps the current version into plugin manifests
@@ -464,10 +464,10 @@ token-saver/
 │   ├── hook_pretool.py              # PreToolUse hook (Claude Code)
 │   ├── wrap.py                      # CLI wrapper (Claude Code)
 │   └── hook_session.py              # SessionStart hook wrapper
-├── gemini/                          # Gemini CLI specific files
-│   ├── gemini-extension.json        # Gemini extension metadata
-│   ├── hooks.json                   # Gemini hook definitions
-│   └── hook_aftertool.py            # AfterTool hook (Gemini CLI)
+├── antigravity/                     # Antigravity CLI specific files
+│   ├── antigravity-plugin.json      # Antigravity plugin metadata
+│   ├── hooks.json                   # Antigravity hook definitions
+│   └── hook_aftertool.py            # AfterTool hook (Antigravity CLI)
 ├── bin/                             # CLI executables
 │   ├── token-saver                  # Unix CLI wrapper
 │   └── token-saver.cmd              # Windows CLI wrapper
@@ -533,7 +533,7 @@ token-saver/
 ├── installers/                      # Modular installer package
 │   ├── common.py                    # Shared constants + utilities
 │   ├── claude.py                    # Claude Code installer (native plugin registration)
-│   └── gemini.py                    # Gemini CLI installer
+│   └── antigravity.py               # Antigravity CLI installer
 ├── install.py                       # Installer entry point
 ├── CLAUDE.md                        # Plugin instructions
 ├── tests/
@@ -597,4 +597,4 @@ token-saver version
 - `sudo`, `ssh`, `vim` commands are never intercepted; remote `rsync` (with host:path) is excluded but local `rsync` is compressible
 - Long diff compression truncates per-hunk, not per-file: a diff with many small hunks is not reduced
 - The generic processor only deduplicates **consecutive identical lines**, not similar lines
-- Gemini CLI: the deny/reason mechanism may have side effects if other extensions use the same hook
+- Antigravity CLI: the deny/reason mechanism may have side effects if other plugins use the same hook

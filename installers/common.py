@@ -110,7 +110,7 @@ def install_files(target_dir, file_list, use_symlink=False):
             print(f"  COPY {rel_path}")
 
     # Fix hooks.json for Windows: replace python3 with python
-    for hooks_rel in ("gemini/hooks.json", "hooks/hooks.json"):
+    for hooks_rel in ("antigravity/hooks.json", "hooks/hooks.json"):
         hooks_path = os.path.join(target_dir, hooks_rel)
         if IS_WINDOWS and os.path.exists(hooks_path) and not os.path.islink(hooks_path):
             with open(hooks_path) as f:
@@ -244,7 +244,7 @@ def _read_version():
 def stamp_version(target_dir, manifest_paths):
     """Stamp the current version into JSON manifest files.
 
-    Handles both top-level version fields (plugin.json, gemini-extension.json)
+    Handles both top-level version fields (plugin.json, antigravity-plugin.json)
     and nested marketplace catalog entries (marketplace.json has version inside
     plugins[].version).
 
@@ -288,7 +288,7 @@ CORE_FILES = [
     "installers/__init__.py",
     "installers/common.py",
     "installers/claude.py",
-    "installers/gemini.py",
+    "installers/antigravity.py",
     "install.py",
     "bin/token-saver",
     "bin/token-saver.cmd",
@@ -303,10 +303,10 @@ CORE_FILES = [
     "skills/token-saver-config/SKILL.md",
     "commands/token-saver-stats.md",
     "CLAUDE.md",
-    # Gemini CLI extension
-    "gemini/gemini-extension.json",
-    "gemini/hooks.json",
-    "gemini/hook_aftertool.py",
+    # Antigravity CLI plugin
+    "antigravity/antigravity-plugin.json",
+    "antigravity/hooks.json",
+    "antigravity/hook_aftertool.py",
 ]
 
 
