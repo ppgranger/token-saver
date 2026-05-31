@@ -8,9 +8,20 @@
 
 **Cut your AI coding costs by 60-99% on CLI output — without losing a single error message.**
 
-21 specialized processors understand git, pytest, docker, terraform, kubectl, helm, ansible, and more. Each one knows what to keep and what to discard: errors, diffs, and actionable data stay; progress bars, passing tests, and boilerplate go.
+Token-Saver is a drop-in **context-window optimizer for AI coding assistants**. It compresses the verbose terminal output your agent reads — `git diff`, `pytest`, `npm install`, `terraform plan`, `kubectl`, `docker` — so you spend fewer tokens, stay under your LLM context limit, and get faster, cheaper, more focused responses.
 
-Compatible with **Claude Code** and **Antigravity CLI**. Zero latency. No LLM calls. Fully deterministic. One install, instant savings.
+**36 specialized processors** understand the tools you already use — git, pytest, jest, cargo, go, docker, kubernetes, terraform, pulumi, helm, ansible, aws, gcloud, and more. Each one knows exactly what to keep and what to discard: errors, diffs, stack traces, and actionable data stay; progress bars, passing tests, download spinners, and boilerplate go.
+
+Compatible with **Claude Code** and **Antigravity CLI**. Zero added latency. No extra LLM calls. Fully deterministic. One install, instant savings.
+
+**Why developers use Token-Saver:**
+
+- 💸 **Lower API bills** — pay for signal, not noise. Typical savings of 60-99% per command.
+- 🪟 **Bigger effective context** — fit more real work into the same context window.
+- ⚡ **Faster responses** — less text for the model to read means quicker turnarounds.
+- 🎯 **Zero information loss** — precision-tested so every error, diff, and warning survives.
+- 🔌 **Install once, forget it** — works automatically in the background, no prompts to change.
+- 🛡️ **Private & offline** — pure regex/parsing, no data ever leaves your machine.
 
 ### Before & After
 
@@ -43,15 +54,16 @@ Token-Saver takes a different approach from LLM-based or caching solutions — s
 ```
 CLI command  -->  Specialized processor  -->  Compressed output
                         |
-                  21 processors
-                  (git, test, package_list,
-                   build, lint, network,
-                   docker, kubectl, terraform,
-                   env, search, system_info,
-                   gh, db_query, cloud_cli,
-                   ansible, helm, syslog,
-                   file_listing, file_content,
-                   generic)
+                  36 processors
+                  (git, test, cargo, go, build,
+                   lint, package_list, python_install,
+                   maven_gradle, bun, network, docker,
+                   kubectl, terraform, pulumi, cdktf,
+                   nix, mise, env, search, system_info,
+                   gh, db_query, cloud_cli, ansible,
+                   helm, syslog, ssh, jq_yq, just, act,
+                   structured_log, file_listing,
+                   file_content, generic)
 ```
 
 The engine (`CompressionEngine`) maintains a priority-ordered chain of processors.
@@ -104,7 +116,7 @@ Compression is aggressive on noise, conservative on signal:
 - Source code files (`cat *.py`, `cat *.ts`, ...) pass through **unchanged** — the model needs exact content
 - Secrets in `.env` files are automatically **redacted** before reaching the model
 - Only "noise" is removed: progress bars, passing tests, installation logs, ANSI codes, platform lines
-- 567 unit tests including 44 precision-specific tests that verify every critical piece of data survives compression
+- 853 tests including 49 precision-specific tests that verify every critical piece of data survives compression
 
 ## Installation
 
@@ -235,30 +247,41 @@ processor is in [`docs/processors/`](docs/processors/).
 | # | Processor | Priority | Commands | Docs |
 |---|---|---|---|---|
 | 1 | **Package List** | 15 | pip list/freeze, npm ls, conda list, gem list, brew list | [package_list.md](docs/processors/package_list.md) |
-| 2 | **Git** | 20 | status, diff, log, show, push/pull/fetch, branch, stash, reflog, blame, cherry-pick, rebase, merge | [git.md](docs/processors/git.md) |
-| 3 | **Test** | 21 | pytest, jest, vitest, mocha, cargo test, go test, rspec, phpunit, bun test, npm/yarn/pnpm test, dotnet test, swift test, mix test | [test_output.md](docs/processors/test_output.md) |
-| 4 | **Python Install** | 24 | pip install, poetry install/update/add, uv pip install, uv sync | [python_install.md](docs/processors/python_install.md) |
-| 5 | **Build** | 25 | npm/yarn/pnpm build/install, cargo build, make, cmake, tsc, webpack, vite, next build, turbo, nx, bazel, sbt, mix compile, docker build | [build_output.md](docs/processors/build_output.md) |
-| 6 | **Cargo Clippy** | 26 | cargo clippy (multi-line block grouping with span/help preservation) | [cargo_clippy.md](docs/processors/cargo_clippy.md) |
-| 7 | **Lint** | 27 | eslint, ruff, flake8, pylint, clippy, mypy, prettier, biome, shellcheck, hadolint, rubocop, golangci-lint | [lint_output.md](docs/processors/lint_output.md) |
-| 8 | **Maven/Gradle** | 28 | mvn, ./mvnw, gradle, ./gradlew (download stripping, task noise removal) | [maven_gradle.md](docs/processors/maven_gradle.md) |
-| 9 | **Network** | 30 | curl, wget, http/https (httpie) | [network.md](docs/processors/network.md) |
-| 10 | **Docker** | 31 | ps, images, logs, pull/push, inspect, stats, compose up/down/build/ps/logs | [docker.md](docs/processors/docker.md) |
-| 11 | **Kubernetes** | 32 | kubectl/oc get, describe, logs, top, apply, delete, create | [kubectl.md](docs/processors/kubectl.md) |
-| 12 | **Terraform** | 33 | terraform/tofu plan, apply, destroy, init, output, state list/show | [terraform.md](docs/processors/terraform.md) |
-| 13 | **Environment** | 34 | env, printenv (with secret redaction) | [env.md](docs/processors/env.md) |
-| 14 | **Search** | 35 | grep -r, rg, ag, fd, fdfind | [search.md](docs/processors/search.md) |
-| 15 | **System Info** | 36 | du, wc, df | [system_info.md](docs/processors/system_info.md) |
-| 16 | **GitHub CLI** | 37 | gh pr/issue/run list/view/diff/checks/status | [gh.md](docs/processors/gh.md) |
-| 17 | **Database Query** | 38 | psql, mysql, sqlite3, pgcli, mycli, litecli | [db_query.md](docs/processors/db_query.md) |
-| 18 | **Cloud CLI** | 39 | aws, gcloud, az (JSON/table/text output compression) | [cloud_cli.md](docs/processors/cloud_cli.md) |
-| 19 | **Ansible** | 40 | ansible-playbook, ansible (ok/skipped counting, error preservation) | [ansible.md](docs/processors/ansible.md) |
-| 20 | **Helm** | 41 | helm install/upgrade/list/template/status/history | [helm.md](docs/processors/helm.md) |
-| 21 | **Syslog** | 42 | journalctl, dmesg (head/tail with error extraction) | [syslog.md](docs/processors/syslog.md) |
-| 22 | **Structured Log** | 45 | stern, kubetail (JSON Lines grouping by level) | [structured_log.md](docs/processors/structured_log.md) |
-| 23 | **File Listing** | 50 | ls, find, tree, exa, eza, rsync | [file_listing.md](docs/processors/file_listing.md) |
-| 24 | **File Content** | 51 | cat, head, tail, bat, less, more (content-aware: code, config, log, CSV) | [file_content.md](docs/processors/file_content.md) |
-| 25 | **Generic** | 999 | Any command (fallback: ANSI strip, dedup, truncation) | [generic.md](docs/processors/generic.md) |
+| 2 | **just** | 18 | just --list, just --summary (recipe listing compaction) | — |
+| 3 | **act** | 19 | act (run GitHub Actions locally via nektos/act) | — |
+| 4 | **Git** | 20 | status, diff, log, show, push/pull/fetch, branch, stash, reflog, blame, cherry-pick, rebase, merge | [git.md](docs/processors/git.md) |
+| 5 | **Test** | 21 | pytest, jest, vitest, mocha, cargo test, go test, rspec, phpunit, bun test, npm/yarn/pnpm test, dotnet test, swift test, mix test | [test_output.md](docs/processors/test_output.md) |
+| 6 | **Cargo** | 22 | cargo build, check, doc, update, bench | [cargo.md](docs/processors/cargo.md) |
+| 7 | **Go** | 23 | go build, vet, mod, generate, install | [go.md](docs/processors/go.md) |
+| 8 | **Python Install** | 24 | pip install, poetry install/update/add, uv pip install, uv sync | [python_install.md](docs/processors/python_install.md) |
+| 9 | **Build** | 25 | npm/yarn/pnpm build/install, cargo build, make, cmake, tsc, webpack, vite, next build, turbo, nx, bazel, sbt, mix compile, docker build | [build_output.md](docs/processors/build_output.md) |
+| 10 | **Cargo Clippy** | 26 | cargo clippy (multi-line block grouping with span/help preservation) | [cargo_clippy.md](docs/processors/cargo_clippy.md) |
+| 11 | **Lint** | 27 | eslint, ruff, flake8, pylint, clippy, mypy, prettier, biome, shellcheck, hadolint, rubocop, golangci-lint | [lint_output.md](docs/processors/lint_output.md) |
+| 12 | **Maven/Gradle** | 28 | mvn, ./mvnw, gradle, ./gradlew (download stripping, task noise removal) | [maven_gradle.md](docs/processors/maven_gradle.md) |
+| 13 | **Bun** | 29 | bun install, add, remove, update | — |
+| 14 | **Network** | 30 | curl, wget, http/https (httpie) | [network.md](docs/processors/network.md) |
+| 15 | **Docker** | 31 | ps, images, logs, pull/push, inspect, stats, compose up/down/build/ps/logs | [docker.md](docs/processors/docker.md) |
+| 16 | **Kubernetes** | 32 | kubectl/oc get, describe, logs, top, apply, delete, create | [kubectl.md](docs/processors/kubectl.md) |
+| 17 | **Terraform** | 33 | terraform/tofu plan, apply, destroy, init, output, state list/show | [terraform.md](docs/processors/terraform.md) |
+| 18 | **Environment** | 34 | env, printenv (with secret redaction) | [env.md](docs/processors/env.md) |
+| 19 | **Search** | 35 | grep -r, rg, ag, fd, fdfind | [search.md](docs/processors/search.md) |
+| 20 | **System Info** | 36 | du, wc, df | [system_info.md](docs/processors/system_info.md) |
+| 21 | **GitHub CLI** | 37 | gh pr/issue/run list/view/diff/checks/status | [gh.md](docs/processors/gh.md) |
+| 22 | **Database Query** | 38 | psql, mysql, sqlite3, pgcli, mycli, litecli | [db_query.md](docs/processors/db_query.md) |
+| 23 | **Cloud CLI** | 39 | aws, gcloud, az (JSON/table/text output compression) | [cloud_cli.md](docs/processors/cloud_cli.md) |
+| 24 | **Ansible** | 40 | ansible-playbook, ansible (ok/skipped counting, error preservation) | [ansible.md](docs/processors/ansible.md) |
+| 25 | **Helm** | 41 | helm install/upgrade/list/template/status/history | [helm.md](docs/processors/helm.md) |
+| 26 | **Syslog** | 42 | journalctl, dmesg (head/tail with error extraction) | [syslog.md](docs/processors/syslog.md) |
+| 27 | **SSH/SCP** | 43 | non-interactive ssh, scp (remote command output compression) | [ssh.md](docs/processors/ssh.md) |
+| 28 | **JQ/YQ** | 44 | jq, yq (large JSON/YAML output compaction) | [jq_yq.md](docs/processors/jq_yq.md) |
+| 29 | **Structured Log** | 45 | stern, kubetail (JSON Lines grouping by level) | [structured_log.md](docs/processors/structured_log.md) |
+| 30 | **Pulumi** | 46 | pulumi up, preview, destroy, refresh | — |
+| 31 | **CDKTF** | 47 | cdktf deploy, diff, destroy, synth | — |
+| 32 | **Nix** | 48 | nix build/develop/eval/run, nix-build, nix-shell | — |
+| 33 | **mise** | 49 | mise install, use, upgrade (runtime version manager) | — |
+| 34 | **File Listing** | 50 | ls, find, tree, exa, eza, rsync | [file_listing.md](docs/processors/file_listing.md) |
+| 35 | **File Content** | 51 | cat, head, tail, bat, less, more (content-aware: code, config, log, CSV) | [file_content.md](docs/processors/file_content.md) |
+| 36 | **Generic** | 999 | Any command (fallback: ANSI strip, dedup, truncation) | [generic.md](docs/processors/generic.md) |
 
 ## Configuration
 
@@ -351,7 +374,7 @@ Project settings are merged with global settings. Token-Saver walks up parent di
 
 ## Custom Processors
 
-You can extend Token-Saver with your own processors for commands not covered by the built-in 25.
+You can extend Token-Saver with your own processors for commands not covered by the built-in 36.
 
 1. Create a Python file with a class inheriting from `src.processors.base.Processor`
 2. Implement `can_handle()`, `process()`, `name`, and set `priority`
@@ -482,7 +505,7 @@ token-saver/
 │   ├── stats.py                     # Stats display
 │   ├── tracker.py                   # SQLite tracking
 │   ├── version_check.py             # GitHub update check
-│   └── processors/                  # 21 auto-discovered processors
+│   └── processors/                  # 36 auto-discovered processors
 │       ├── __init__.py
 │       ├── base.py                  # Abstract Processor class
 │       ├── utils.py                 # Shared utilities (diff compression)
@@ -537,15 +560,17 @@ token-saver/
 ├── install.py                       # Installer entry point
 ├── CLAUDE.md                        # Plugin instructions
 ├── tests/
-│   ├── test_engine.py               # Engine + registry tests (28)
-│   ├── test_processors.py           # Per-processor tests (263)
-│   ├── test_hooks.py                # Hook pattern + integration tests (77)
-│   ├── test_precision.py            # Precision preservation tests (44)
-│   ├── test_tracker.py              # SQLite + concurrency tests (20)
-│   ├── test_config.py               # Configuration tests (6)
-│   ├── test_version_check.py        # Version check + fail-open tests (12)
-│   ├── test_cli.py                  # CLI subcommand tests (7)
-│   └── test_installers.py           # Installer utility tests (21)
+│   ├── test_engine.py               # Engine + registry tests (46)
+│   ├── test_processors.py           # Per-processor tests (432)
+│   ├── test_hooks.py                # Hook pattern + integration tests (174)
+│   ├── test_precision.py            # Precision preservation tests (49)
+│   ├── test_core.py                 # Shared compression core tests (11)
+│   ├── test_tracker.py              # SQLite + concurrency tests (26)
+│   ├── test_config.py               # Configuration tests (19)
+│   ├── test_version_check.py        # Version check + fail-open tests (18)
+│   ├── test_cli.py                  # CLI subcommand tests (23)
+│   ├── test_user_processors.py      # Custom processor loading tests (7)
+│   └── test_installers.py           # Installer utility tests (48)
 ├── audit_compression.py             # Deep audit tool for compression analysis
 ├── pyproject.toml                   # Python project config + Ruff rules
 ├── CONTRIBUTING.md                  # Developer guide
@@ -559,17 +584,19 @@ token-saver/
 python3 -m pytest tests/ -v
 ```
 
-567 tests covering:
+853 tests covering:
 
-- **test_engine.py** (28 tests): compression thresholds, processor priority, ANSI cleanup, generic fallback, hook pattern coverage for 85+ commands
-- **test_processors.py** (306 tests): each processor with nominal and edge cases, chained command routing, all subcommands (blame, inspect, stats, compose, apply/delete, init/output/state, fd, exa, httpie, dotnet/swift/mix test, shellcheck/hadolint/biome, traceback truncation, ansible, helm, syslog, parameterized tests, coverage, docker compose logs, tsc typecheck, .env redaction, minified files, search directory grouping, git lockfiles/stat grouping)
-- **test_hooks.py** (79 tests): matching patterns for all supported commands, exclusions (pipes, sudo, editors, redirections, remote rsync), subprocess integration, global options (git, docker, kubectl), chained commands, safe trailing pipes
-- **test_precision.py** (44 tests): verification that every critical piece of data survives compression (filenames, hashes, error messages, stack traces, line numbers, rule IDs, diff changes, warning types, secret redaction, unhealthy pods, terraform changes, unmet dependencies)
-- **test_tracker.py** (23 tests): CRUD, concurrency (4 threads), corruption recovery, session tracking, stats CLI
-- **test_config.py** (11 tests): defaults, env overrides, invalid values
-- **test_version_check.py** (12 tests): version parsing, comparison, fail-open on errors
-- **test_cli.py** (11 tests): version/stats/help subcommands, bin script execution
-- **test_installers.py** (46 tests): version stamping, legacy migration, CLI install/uninstall
+- **test_engine.py** (46 tests): compression thresholds, processor priority, ANSI cleanup, generic fallback, hook pattern coverage for 85+ commands
+- **test_processors.py** (432 tests): each processor with nominal and edge cases, chained command routing, all subcommands (blame, inspect, stats, compose, apply/delete, init/output/state, fd, exa, httpie, dotnet/swift/mix test, shellcheck/hadolint/biome, traceback truncation, ansible, helm, syslog, parameterized tests, coverage, docker compose logs, tsc typecheck, .env redaction, minified files, search directory grouping, git lockfiles/stat grouping)
+- **test_hooks.py** (174 tests): matching patterns for all supported commands, exclusions (pipes, sudo, editors, redirections, remote rsync), subprocess integration, global options (git, docker, kubectl), chained commands (shared shell state, `&&` short-circuit, `;` continue), safe trailing pipes
+- **test_precision.py** (49 tests): verification that every critical piece of data survives compression (filenames, hashes, error messages, stack traces, line numbers, rule IDs, diff changes, warning types, secret redaction, unhealthy pods, terraform changes, unmet dependencies)
+- **test_core.py** (11 tests): shared compression core (decision, pass-through-on-error, audit logging) and the platform hook end-to-end
+- **test_tracker.py** (26 tests): CRUD, concurrency (4 threads), corruption recovery, session tracking, stats CLI
+- **test_config.py** (19 tests): defaults, env overrides, invalid values
+- **test_version_check.py** (18 tests): version parsing, comparison, fail-open on errors
+- **test_cli.py** (23 tests): version/stats/help/explain subcommands, bin script execution
+- **test_user_processors.py** (7 tests): custom processor discovery and loading from `~/.token-saver/processors/`
+- **test_installers.py** (48 tests): version stamping, legacy migration, CLI install/uninstall
 
 ## Debugging
 
