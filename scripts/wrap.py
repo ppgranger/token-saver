@@ -303,9 +303,7 @@ def main():
                 total_original,
                 total_compressed,
             )
-            core.record_saving(
-                command_str, proc_label, total_original, total_compressed, _PLATFORM
-            )
+            core.record_saving(command_str, proc_label, total_original, total_compressed, _PLATFORM)
         else:
             _log.debug("Chain not compressed: len=%d", total_original)
 
@@ -327,9 +325,7 @@ def main():
 
     if dry_run:
         diff_summary = summarize(output, result.compressed) if show_removed else None
-        _print_dry_run(
-            result.processor, len(output), len(result.compressed), output, diff_summary
-        )
+        _print_dry_run(result.processor, len(output), len(result.compressed), output, diff_summary)
         sys.exit(returncode)
 
     # Savings are attributed to the full command string (not just the primary)

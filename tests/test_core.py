@@ -99,7 +99,7 @@ class TestRecording:
 
 class TestAntigravityHook:
     def _run_hook(self, payload):
-        return subprocess.run(  # noqa: S603, PLW1510
+        return subprocess.run(  # noqa: PLW1510
             [sys.executable, "antigravity/hook_aftertool.py"],
             input=json.dumps(payload),
             capture_output=True,

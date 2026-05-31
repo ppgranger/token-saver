@@ -30,6 +30,7 @@ def _processor_files():
         rels.append(f"src/processors/{name}")
     return rels
 
+
 SHARED_FILES = [
     "src/__init__.py",
     "src/chain_utils.py",
