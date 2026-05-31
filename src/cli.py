@@ -30,9 +30,7 @@ def _is_marketplace_managed(repo_dir: str) -> bool:
     marketplace, so ``token-saver update`` should defer to ``/plugin update``.
     """
     parts = [p.lower() for p in os.path.normpath(os.path.abspath(repo_dir)).split(os.sep)]
-    return any(
-        parts[i] == "plugins" and parts[i + 1] == "cache" for i in range(len(parts) - 1)
-    )
+    return any(parts[i] == "plugins" and parts[i + 1] == "cache" for i in range(len(parts) - 1))
 
 
 def _is_within_directory(directory: str, target: str) -> bool:
@@ -158,9 +156,7 @@ def _detect_installed_targets():
         claude_cache = os.path.join(
             h, ".claude", "plugins", "cache", "token-saver-marketplace", "token-saver"
         )
-        antigravity_dir = os.path.join(
-            h, ".gemini", "antigravity-cli", "plugins", "token-saver"
-        )
+        antigravity_dir = os.path.join(h, ".gemini", "antigravity-cli", "plugins", "token-saver")
 
     claude_installed = os.path.isdir(claude_old) or os.path.isdir(claude_cache)
     antigravity_installed = os.path.isdir(antigravity_dir)
