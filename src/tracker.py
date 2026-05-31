@@ -5,7 +5,6 @@ import os
 import sqlite3
 import threading
 import time
-import uuid
 
 
 class SavingsTracker:
@@ -31,9 +30,20 @@ class SavingsTracker:
 
     _lock = threading.RLock()
 
+    @staticmethod
+    def _fallback_session_id() -> str:
+        """Session id used when neither a caller nor TOKEN_SAVER_SESSION supplies one.
+
+        Each Bash command spawns a fresh wrap.py process, so a per-process
+        random id would record every command as its own one-command session.
+        Keying off the parent process (the shell that launched wrap.py) groups
+        commands from the same shell together instead of fragmenting them.
+        """
+        return f"ppid-{os.getppid()}"
+
     def __init__(self, session_id: str | None = None, prune_days: int = 90):
-        self.session_id = session_id or os.environ.get(
-            "TOKEN_SAVER_SESSION", str(uuid.uuid4())[:12]
+        self.session_id = (
+            session_id or os.environ.get("TOKEN_SAVER_SESSION") or self._fallback_session_id()
         )
         self.prune_days = prune_days
         # Resolve DB paths — use overridden class vars if set, else compute from data_dir()
@@ -48,6 +58,17 @@ class SavingsTracker:
         self._init_db()
         self._maybe_prune()
 
+    def _remove_db_files(self):
+        """Delete the DB and its WAL/SHM sidecars.
+
+        In WAL mode the -wal and -shm files hold committed-but-uncheckpointed
+        data; removing only the main .db can leave stale sidecars that
+        re-corrupt the freshly created database.
+        """
+        for suffix in ("", "-wal", "-shm"):
+            with contextlib.suppress(OSError):
+                os.remove(self._db_path + suffix)
+
     def _open_connection(self):
         """Open SQLite connection, handling corrupted DB files."""
         try:
@@ -60,8 +81,7 @@ class SavingsTracker:
             self.conn.execute("PRAGMA journal_mode=WAL")
         except sqlite3.DatabaseError:
             # File exists but is corrupted
-            with contextlib.suppress(OSError):
-                os.remove(self._db_path)
+            self._remove_db_files()
             self.conn = sqlite3.connect(
                 self._db_path,
                 timeout=10,
@@ -92,14 +112,23 @@ class SavingsTracker:
                         total_compressed INTEGER DEFAULT 0,
                         command_count INTEGER DEFAULT 0
                     );
+                    CREATE TABLE IF NOT EXISTS mismatches (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp REAL NOT NULL,
+                        session_id TEXT NOT NULL,
+                        command TEXT NOT NULL,
+                        processor TEXT NOT NULL,
+                        original_size INTEGER NOT NULL,
+                        platform TEXT NOT NULL
+                    );
                     CREATE INDEX IF NOT EXISTS idx_savings_session ON savings(session_id);
                     CREATE INDEX IF NOT EXISTS idx_savings_timestamp ON savings(timestamp);
+                    CREATE INDEX IF NOT EXISTS idx_mismatches_ts ON mismatches(timestamp);
                 """)
             except sqlite3.DatabaseError:
-                # Corrupted DB — recreate
+                # Corrupted DB — recreate (drop WAL/SHM sidecars too)
                 self.conn.close()
-                with contextlib.suppress(OSError):
-                    os.remove(self._db_path)
+                self._remove_db_files()
                 self.conn = sqlite3.connect(self._db_path, timeout=10, check_same_thread=False)
                 self.conn.row_factory = sqlite3.Row
                 self.conn.executescript("""
@@ -121,6 +150,15 @@ class SavingsTracker:
                         total_compressed INTEGER DEFAULT 0,
                         command_count INTEGER DEFAULT 0
                     );
+                    CREATE TABLE mismatches (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp REAL NOT NULL,
+                        session_id TEXT NOT NULL,
+                        command TEXT NOT NULL,
+                        processor TEXT NOT NULL,
+                        original_size INTEGER NOT NULL,
+                        platform TEXT NOT NULL
+                    );
                 """)
 
     def _maybe_prune(self):
@@ -130,6 +168,7 @@ class SavingsTracker:
                 cutoff = time.time() - (self.prune_days * 86400)
                 self.conn.execute("DELETE FROM savings WHERE timestamp < ?", (cutoff,))
                 self.conn.execute("DELETE FROM sessions WHERE last_seen < ?", (cutoff,))
+                self.conn.execute("DELETE FROM mismatches WHERE timestamp < ?", (cutoff,))
                 self.conn.commit()
         except sqlite3.Error:
             pass
@@ -180,6 +219,55 @@ class SavingsTracker:
             except sqlite3.Error:
                 with contextlib.suppress(sqlite3.Error):
                     self.conn.rollback()
+
+    def record_mismatch(
+        self, command: str, processor: str, original_size: int, platform: str
+    ) -> None:
+        """Record a processor-mismatch event (O3).
+
+        A specialized processor matched the command and ran, but did not
+        compress enough on its own (output fell back to generic or passthrough).
+        Surfacing these lets weak processors be found empirically.
+        """
+        now = time.time()
+        with self._lock:
+            try:
+                self.conn.execute(
+                    "INSERT INTO mismatches (timestamp, session_id, command, processor, "
+                    "original_size, platform) VALUES (?, ?, ?, ?, ?, ?)",
+                    (now, self.session_id, command[:500], processor, original_size, platform),
+                )
+                self.conn.commit()
+            except sqlite3.Error:
+                with contextlib.suppress(sqlite3.Error):
+                    self.conn.rollback()
+
+    def get_processor_mismatches(self, limit: int = 10) -> list[dict]:
+        """Return processors that most often ran without compressing enough."""
+        with self._lock:
+            try:
+                rows = self.conn.execute(
+                    """
+                    SELECT processor,
+                           COUNT(*) as count,
+                           SUM(original_size) as total_original
+                    FROM mismatches
+                    GROUP BY processor
+                    ORDER BY count DESC
+                    LIMIT ?
+                """,
+                    (limit,),
+                ).fetchall()
+            except sqlite3.Error:
+                return []
+        return [
+            {
+                "processor": r["processor"],
+                "count": r["count"],
+                "total_original": r["total_original"],
+            }
+            for r in rows
+        ]
 
     def get_session_stats(self, session_id: str | None = None) -> dict:
         """Get stats for a session."""

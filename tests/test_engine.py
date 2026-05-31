@@ -210,9 +210,9 @@ class TestProcessorRegistry:
     """Tests for auto-discovery and the processor registry."""
 
     def test_discover_processors_finds_all(self):
-        """Auto-discovery should find all 29 processors."""
+        """Auto-discovery should find all 36 processors."""
         processors = discover_processors()
-        assert len(processors) == 29
+        assert len(processors) == 36
 
     def test_discover_processors_sorted_by_priority(self):
         """Processors must be returned in ascending priority order."""
@@ -243,6 +243,8 @@ class TestProcessorRegistry:
         processors = discover_processors()
         name_to_priority = {p.name: p.priority for p in processors}
         assert name_to_priority["package_list"] == 15
+        assert name_to_priority["just"] == 18
+        assert name_to_priority["act"] == 19
         assert name_to_priority["git"] == 20
         assert name_to_priority["test"] == 21
         assert name_to_priority["cargo"] == 22
@@ -252,6 +254,7 @@ class TestProcessorRegistry:
         assert name_to_priority["cargo_clippy"] == 26
         assert name_to_priority["lint"] == 27
         assert name_to_priority["maven_gradle"] == 28
+        assert name_to_priority["bun"] == 29
         assert name_to_priority["network"] == 30
         assert name_to_priority["docker"] == 31
         assert name_to_priority["kubectl"] == 32
@@ -268,6 +271,10 @@ class TestProcessorRegistry:
         assert name_to_priority["ssh"] == 43
         assert name_to_priority["jq_yq"] == 44
         assert name_to_priority["structured_log"] == 45
+        assert name_to_priority["pulumi"] == 46
+        assert name_to_priority["cdktf"] == 47
+        assert name_to_priority["nix"] == 48
+        assert name_to_priority["mise"] == 49
         assert name_to_priority["file_listing"] == 50
         assert name_to_priority["file_content"] == 51
         assert name_to_priority["generic"] == 999
@@ -454,6 +461,91 @@ class TestProcessorRegistry:
         for ep, dp in zip(engine.processors, discovered, strict=False):
             assert ep.name == dp.name
             assert ep.priority == dp.priority
+
+
+class TestRouting:
+    """Regression tests for first-match processor selection."""
+
+    def setup_method(self):
+        self.engine = CompressionEngine()
+
+    def _selected(self, command: str) -> str:
+        """Return the name of the first processor whose can_handle matches."""
+        for p in self.engine.processors:
+            if p.can_handle(command):
+                return p.name
+        return "none"
+
+    def test_cargo_clippy_routes_to_clippy_not_cargo(self):
+        # cargo (priority 22) is checked before cargo_clippy (26), so cargo
+        # must explicitly decline clippy or it would swallow the command.
+        assert self._selected("cargo clippy") == "cargo_clippy"
+        assert self._selected("cargo clippy --all-targets") == "cargo_clippy"
+
+    def test_cargo_build_routes_to_cargo(self):
+        assert self._selected("cargo build") == "cargo"
+        assert self._selected("cargo check") == "cargo"
+
+    def test_cargo_test_does_not_route_to_cargo(self):
+        assert self._selected("cargo test") != "cargo"
+
+
+class TestProcessorMismatchEvent:
+    """O3: engine.last_event flags weak specialized processors."""
+
+    def _weak_engine(self):
+        from src.processors.base import Processor
+
+        class WeakProc(Processor):
+            priority = 1
+            hook_patterns = []
+
+            @property
+            def name(self):
+                return "weak_proc"
+
+            def can_handle(self, command):
+                return command == "weakcmd"
+
+            def process(self, command, output):
+                # Drops a trivial amount — below any realistic min ratio, and
+                # not enough for generic to rescue either.
+                return output[:-1]
+
+        engine = CompressionEngine()
+        engine.processors.insert(0, WeakProc())
+        engine._by_name["weak_proc"] = engine.processors[0]
+        return engine
+
+    def test_weak_processor_flags_mismatch(self, monkeypatch):
+        from src import config
+
+        monkeypatch.setenv("TOKEN_SAVER_MIN_COMPRESSION_RATIO", "0.9")
+        config.reload()
+        try:
+            engine = self._weak_engine()
+            output = "unique line 0\n" + "".join(f"x{i}\n" for i in range(300))
+            _out, _proc, was = engine.compress("weakcmd", output)
+            assert not was
+            assert engine.last_event["is_mismatch"] is True
+            assert engine.last_event["attempted_processor"] == "weak_proc"
+        finally:
+            config.reload()
+
+    def test_successful_compression_not_mismatch(self):
+        engine = CompressionEngine()
+        # git status output that compresses well.
+        output = "\n".join(["On branch main", "Changes not staged for commit:"])
+        output += "\n" + "\n".join(f"\tmodified: file{i}.py" for i in range(60))
+        engine.compress("git status", output)
+        assert engine.last_event.get("is_mismatch") is False
+
+    def test_explicit_noop_not_mismatch(self):
+        engine = CompressionEngine()
+        # A short file read the processor deliberately leaves unchanged.
+        out = "def f():\n    return 1\n"
+        engine.compress("cat foo.py", out)
+        assert engine.last_event.get("is_mismatch") in (False, None)
 
 
 class TestDisabledProcessors:

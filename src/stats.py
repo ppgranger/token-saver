@@ -135,6 +135,20 @@ def _print_by_command(top_commands):
     print()
 
 
+def _print_mismatches(mismatches):
+    if not mismatches:
+        return
+
+    print()
+    print(f"  {BOLD_GREEN}Processor Mismatches{RESET}")
+    print(f"  {BOLD_YELLOW}{'─' * WIDTH}{RESET}")
+    print(f"  {DIM}Specialized processor ran but didn't compress enough.{RESET}")
+    print()
+    for m in mismatches:
+        print(f"  {CYAN}{m['processor']:<20s}{RESET} {m['count']:>5d} events")
+    print()
+
+
 def main():
     as_json = "--json" in sys.argv
 
@@ -155,6 +169,7 @@ def main():
     lifetime = tracker.get_lifetime_stats()
     top_processors = tracker.get_top_processors(limit=5)
     top_commands = tracker.get_top_commands(limit=10)
+    mismatches = tracker.get_processor_mismatches(limit=10)
     tracker.close()
 
     if as_json:
@@ -164,6 +179,7 @@ def main():
                 "lifetime": lifetime,
                 "top_processors": top_processors,
                 "top_commands": top_commands,
+                "mismatches": mismatches,
             },
             sys.stdout,
         )
@@ -183,6 +199,7 @@ def main():
     _print_header()
     _print_summary(lifetime)
     _print_by_command(top_commands)
+    _print_mismatches(mismatches)
 
 
 if __name__ == "__main__":

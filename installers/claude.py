@@ -190,8 +190,16 @@ def _register_plugin(marketplace_dir, cache_dir, version):
     settings_path = _settings_path()
     settings = {}
     if os.path.exists(settings_path):
-        with open(settings_path) as f:
-            settings = json.load(f)
+        # A corrupt/hand-edited settings.json must not abort installation —
+        # fall back to an empty object (matching the unregister path's leniency).
+        try:
+            with open(settings_path) as f:
+                settings = json.load(f)
+            if not isinstance(settings, dict):
+                settings = {}
+        except (json.JSONDecodeError, ValueError, OSError):
+            print("  WARNING: settings.json unreadable — recreating enabledPlugins")
+            settings = {}
 
     enabled = settings.setdefault("enabledPlugins", {})
     enabled[_PLUGIN_KEY] = True

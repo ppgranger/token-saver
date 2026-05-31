@@ -12,13 +12,14 @@ from src import __version__
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def _run_cli(*args):
+def _run_cli(*args, stdin=None):
     """Run src/cli.py as a subprocess and return (returncode, stdout, stderr)."""
     result = subprocess.run(  # noqa: S603
         [sys.executable, "-m", "src.cli", *args],
         capture_output=True,
         text=True,
         cwd=REPO_DIR,
+        input=stdin,
         check=False,
     )
     return result.returncode, result.stdout, result.stderr
@@ -94,6 +95,121 @@ class TestBenchmarkCommand:
         assert "compressed_chars" in data
         assert "processor" in data
         assert "savings_percent" in data
+
+    def test_benchmark_show_removed_text(self):
+        rc, stdout, _ = _run_cli("benchmark", "git log --oneline -50", "--show-removed")
+        assert rc == 0
+        assert "Removed breakdown:" in stdout
+        assert "Lines:" in stdout
+
+    def test_benchmark_show_removed_json(self):
+        rc, stdout, _ = _run_cli(
+            "benchmark", "git log --oneline -50", "--show-removed", "--format", "json"
+        )
+        assert rc == 0
+        data = json.loads(stdout)
+        assert "removed" in data
+        assert "lines_removed" in data["removed"]
+        assert "chars_removed" in data["removed"]
+
+    def test_benchmark_no_show_removed_omits_key(self):
+        rc, stdout, _ = _run_cli("benchmark", "echo hello", "--format", "json")
+        assert rc == 0
+        data = json.loads(stdout)
+        assert "removed" not in data
+
+    def test_benchmark_stdin_compresses_piped_output(self):
+        piped = "\n".join(f"{i:07x} commit message {i}" for i in range(50)) + "\n"
+        rc, stdout, _ = _run_cli(
+            "benchmark", "git log --oneline", "--stdin", "--format", "json", stdin=piped
+        )
+        assert rc == 0
+        data = json.loads(stdout)
+        assert data["processor"] == "git"
+        assert data["original_chars"] == len(piped)
+        assert data["compressed_chars"] < data["original_chars"]
+
+    def test_benchmark_stdin_does_not_execute(self):
+        # Command would fail if executed, but --stdin must not run it.
+        rc, stdout, _ = _run_cli(
+            "benchmark",
+            "git log --oneline",
+            "--stdin",
+            "--format",
+            "json",
+            stdin="hello world\n",
+        )
+        assert rc == 0
+        data = json.loads(stdout)
+        assert data["original_chars"] == len("hello world\n")
+
+
+class TestDiffstat:
+    def test_summarize_removed_lines(self):
+        from src.diffstat import summarize
+
+        original = "a\nb\nc\nd\ne\n"
+        compressed = "a\ne\n"
+        s = summarize(original, compressed)
+        assert s["original_lines"] == 5
+        assert s["compressed_lines"] == 2
+        assert s["lines_removed"] == 3
+        assert s["chars_removed"] == len(original) - len(compressed)
+        assert "b" in s["removed_samples"]
+
+    def test_summarize_added_summary_line(self):
+        from src.diffstat import summarize
+
+        original = "x\ny\nz\n"
+        compressed = "x\n... (2 more)\n"
+        s = summarize(original, compressed)
+        assert s["lines_added"] >= 1
+        assert any("more" in a for a in s["added_samples"])
+
+    def test_summarize_no_change(self):
+        from src.diffstat import summarize
+
+        s = summarize("same\n", "same\n")
+        assert s["lines_removed"] == 0
+        assert s["lines_added"] == 0
+        assert s["chars_removed"] == 0
+
+    def test_format_summary_contains_sections(self):
+        from src.diffstat import format_summary, summarize
+
+        text = format_summary(summarize("a\nb\nc\n", "a\n"))
+        assert "Removed breakdown:" in text
+        assert "Lines:" in text
+        assert "Chars:" in text
+
+
+class TestMarketplaceDetection:
+    def test_cache_path_is_marketplace_managed(self):
+        from src.cli import _is_marketplace_managed
+
+        path = os.path.join(
+            os.path.expanduser("~"),
+            ".claude",
+            "plugins",
+            "cache",
+            "token-saver-marketplace",
+            "token-saver",
+        )
+        assert _is_marketplace_managed(path) is True
+
+    def test_regular_repo_not_marketplace_managed(self):
+        from src.cli import _is_marketplace_managed
+
+        assert _is_marketplace_managed("/Users/someone/Desktop/token-saver") is False
+
+    def test_old_plugin_dir_not_marketplace_managed(self):
+        from src.cli import _is_marketplace_managed
+
+        # Pre-marketplace layout (~/.claude/plugins/token-saver) is self-updatable.
+        path = os.path.join(
+            os.path.expanduser("~"), ".claude", "plugins", "token-saver"
+        )
+        assert _is_marketplace_managed(path) is False
 
 
 class TestBinScript:

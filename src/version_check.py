@@ -1,11 +1,46 @@
 """Check for new Token-Saver releases via GitHub API."""
 
 import json
+import os
+import time
 import urllib.request
 
 from src import __version__
 
 _GITHUB_API_URL = "https://api.github.com/repos/ppgranger/token-saver/releases/latest"
+
+# Cache the remote version lookup so the SessionStart hook doesn't hit GitHub
+# on every new session (which both adds latency and risks rate-limiting).
+_CACHE_TTL_SECONDS = 86400  # 24h
+
+
+def _cache_path():
+    from src import data_dir  # noqa: PLC0415
+
+    return os.path.join(data_dir(), ".version_check_cache")
+
+
+def _read_cache(ttl):
+    """Return the cached latest-version string if still fresh, else None."""
+    try:
+        with open(_cache_path()) as f:
+            data = json.load(f)
+        if time.time() - float(data["checked_at"]) < ttl:
+            return data["latest"]
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return None
+    return None
+
+
+def _write_cache(latest):
+    """Persist the latest-version lookup with a timestamp (best-effort)."""
+    try:
+        path = _cache_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump({"latest": latest, "checked_at": time.time()}, f)
+    except OSError:
+        pass
 
 
 def _parse_version(version_str):
@@ -41,17 +76,29 @@ def _fetch_latest_version(fetch_fn=None, timeout=1):
     return tag.lstrip("v")
 
 
-def check_for_update(fetch_fn=None):
+def check_for_update(fetch_fn=None, cache_ttl=_CACHE_TTL_SECONDS):
     """Check if a newer version of Token-Saver is available.
 
     Returns a notification string if an update is available, or None.
     Fully fail-open: any exception returns None.
 
+    The remote lookup is cached for ``cache_ttl`` seconds so repeated
+    SessionStart hooks reuse a recent result instead of re-querying GitHub.
+    When ``fetch_fn`` is supplied (tests) the cache is bypassed entirely.
+
     Args:
         fetch_fn: Override fetch function (for testing). Should return version string.
+        cache_ttl: Seconds a cached lookup stays valid (0 disables the cache).
     """
     try:
-        latest = _fetch_latest_version(fetch_fn)
+        if fetch_fn is not None:
+            latest = _fetch_latest_version(fetch_fn)
+        else:
+            latest = _read_cache(cache_ttl) if cache_ttl > 0 else None
+            if latest is None:
+                latest = _fetch_latest_version()
+                if cache_ttl > 0:
+                    _write_cache(latest)
         if _parse_version(latest) > _parse_version(__version__):
             return f"Update available: v{__version__} -> v{latest} -- Run: token-saver update"
     except Exception:

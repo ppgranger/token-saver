@@ -1,5 +1,7 @@
 """Shared constants, file lists, and utility functions for Token-Saver installers."""
 
+import contextlib
+import glob
 import json
 import os
 import platform
@@ -10,6 +12,23 @@ import stat
 EXTENSION_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IS_WINDOWS = platform.system() == "Windows"
 HOOK_MARKER = "token-saver"
+
+
+def _processor_files():
+    """All processor modules under src/processors, discovered from disk.
+
+    Globbing instead of hardcoding keeps the install list from drifting out of
+    sync with the package (the registry auto-discovers processors at runtime,
+    so a missing file here means a silently-absent processor).
+    """
+    proc_dir = os.path.join(EXTENSION_DIR, "src", "processors")
+    rels = []
+    for path in sorted(glob.glob(os.path.join(proc_dir, "*.py"))):
+        name = os.path.basename(path)
+        if name.startswith("_") and name != "__init__.py":
+            continue
+        rels.append(f"src/processors/{name}")
+    return rels
 
 SHARED_FILES = [
     "src/__init__.py",
@@ -22,27 +41,7 @@ SHARED_FILES = [
     "src/stats.py",
     "src/version_check.py",
     "src/cli.py",
-    "src/processors/__init__.py",
-    "src/processors/base.py",
-    "src/processors/utils.py",
-    "src/processors/git.py",
-    "src/processors/gh.py",
-    "src/processors/test_output.py",
-    "src/processors/build_output.py",
-    "src/processors/lint_output.py",
-    "src/processors/network.py",
-    "src/processors/docker.py",
-    "src/processors/kubectl.py",
-    "src/processors/terraform.py",
-    "src/processors/cloud_cli.py",
-    "src/processors/db_query.py",
-    "src/processors/env.py",
-    "src/processors/search.py",
-    "src/processors/system_info.py",
-    "src/processors/package_list.py",
-    "src/processors/file_listing.py",
-    "src/processors/file_content.py",
-    "src/processors/generic.py",
+    *_processor_files(),
 ]
 
 
@@ -59,11 +58,21 @@ def python_cmd():
 
 
 def token_saver_data_dir():
-    """Return path to ~/.token-saver (or platform equivalent) for DB and config."""
-    if IS_WINDOWS:
-        appdata = os.environ.get("APPDATA", os.path.join(home(), "AppData", "Roaming"))
-        return os.path.join(appdata, "token-saver")
-    return os.path.join(home(), ".token-saver")
+    """Return path to ~/.token-saver (or platform equivalent) for DB and config.
+
+    Delegates to the canonical ``src.data_dir()`` so the path logic lives in a
+    single place; falls back to a local computation only if ``src`` can't be
+    imported (e.g. the installer is run in isolation from the package).
+    """
+    try:
+        from src import data_dir  # noqa: PLC0415
+
+        return data_dir()
+    except Exception:
+        if IS_WINDOWS:
+            appdata = os.environ.get("APPDATA", os.path.join(home(), "AppData", "Roaming"))
+            return os.path.join(appdata, "token-saver")
+        return os.path.join(home(), ".token-saver")
 
 
 def install_files(target_dir, file_list, use_symlink=False):
@@ -101,7 +110,7 @@ def install_files(target_dir, file_list, use_symlink=False):
             print(f"  COPY {rel_path}")
 
     # Fix hooks.json for Windows: replace python3 with python
-    for hooks_rel in ("gemini/hooks.json", "hooks/hooks.json"):
+    for hooks_rel in ("antigravity/hooks.json", "hooks/hooks.json"):
         hooks_path = os.path.join(target_dir, hooks_rel)
         if IS_WINDOWS and os.path.exists(hooks_path) and not os.path.islink(hooks_path):
             with open(hooks_path) as f:
@@ -168,7 +177,15 @@ def migrate_from_legacy():
     """
     found = False
     for legacy_dir in _legacy_dirs():
-        if os.path.exists(legacy_dir):
+        # islink must be checked before exists: a symlink to a file makes
+        # rmtree raise NotADirectoryError, and a broken symlink makes
+        # exists() return False even though the link itself should be removed.
+        if os.path.islink(legacy_dir):
+            with contextlib.suppress(OSError):
+                os.unlink(legacy_dir)
+            print(f"  REMOVED legacy symlink {legacy_dir}")
+            found = True
+        elif os.path.exists(legacy_dir):
             shutil.rmtree(legacy_dir)
             print(f"  REMOVED legacy {legacy_dir}")
             found = True
@@ -227,7 +244,7 @@ def _read_version():
 def stamp_version(target_dir, manifest_paths):
     """Stamp the current version into JSON manifest files.
 
-    Handles both top-level version fields (plugin.json, gemini-extension.json)
+    Handles both top-level version fields (plugin.json, antigravity-plugin.json)
     and nested marketplace catalog entries (marketplace.json has version inside
     plugins[].version).
 
@@ -271,7 +288,7 @@ CORE_FILES = [
     "installers/__init__.py",
     "installers/common.py",
     "installers/claude.py",
-    "installers/gemini.py",
+    "installers/antigravity.py",
     "install.py",
     "bin/token-saver",
     "bin/token-saver.cmd",
@@ -286,10 +303,10 @@ CORE_FILES = [
     "skills/token-saver-config/SKILL.md",
     "commands/token-saver-stats.md",
     "CLAUDE.md",
-    # Gemini CLI extension
-    "gemini/gemini-extension.json",
-    "gemini/hooks.json",
-    "gemini/hook_aftertool.py",
+    # Antigravity CLI plugin
+    "antigravity/antigravity-plugin.json",
+    "antigravity/hooks.json",
+    "antigravity/hook_aftertool.py",
 ]
 
 
