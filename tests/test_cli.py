@@ -206,9 +206,7 @@ class TestMarketplaceDetection:
         from src.cli import _is_marketplace_managed
 
         # Pre-marketplace layout (~/.claude/plugins/token-saver) is self-updatable.
-        path = os.path.join(
-            os.path.expanduser("~"), ".claude", "plugins", "token-saver"
-        )
+        path = os.path.join(os.path.expanduser("~"), ".claude", "plugins", "token-saver")
         assert _is_marketplace_managed(path) is False
 
 
