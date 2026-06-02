@@ -31,17 +31,22 @@ def _processor_files():
     return rels
 
 
+def _src_files():
+    """All top-level src/*.py modules (plus the py.typed marker), discovered from disk.
+
+    Globbing instead of hardcoding keeps the install list from drifting out of
+    sync with the package.  A hardcoded list previously shipped installs missing
+    src/core.py and src/diffstat.py, which broke scripts/wrap.py at import time.
+    """
+    src_dir = os.path.join(EXTENSION_DIR, "src")
+    rels = [f"src/{os.path.basename(p)}" for p in sorted(glob.glob(os.path.join(src_dir, "*.py")))]
+    if os.path.exists(os.path.join(src_dir, "py.typed")):
+        rels.append("src/py.typed")
+    return rels
+
+
 SHARED_FILES = [
-    "src/__init__.py",
-    "src/chain_utils.py",
-    "src/config.py",
-    "src/platforms.py",
-    "src/engine.py",
-    "src/hook_session.py",
-    "src/tracker.py",
-    "src/stats.py",
-    "src/version_check.py",
-    "src/cli.py",
+    *_src_files(),
     *_processor_files(),
 ]
 
