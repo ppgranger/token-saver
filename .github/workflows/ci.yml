@@ -11,9 +11,14 @@ on:
 permissions:
   contents: read
 
+# A new push to a PR makes the in-flight run obsolete.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
-    name: Lint
+    name: Lint & types
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,8 +27,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install ruff
-        run: pip install ruff
+      # Pinned: an unpinned ruff silently disagrees with the contributor's
+      # local version and fails CI on unrelated PRs (see chore/ruff-ci-fix).
+      - name: Install tooling
+        run: pip install "ruff==0.15.15" "mypy>=1.11,<2"
 
       - name: Ruff check
         run: ruff check .
@@ -31,12 +38,26 @@ jobs:
       - name: Ruff format check
         run: ruff format --check .
 
+      # Type checking is OS- and version-independent, so it belongs here and
+      # runs once — not four times at the tail of every test matrix entry.
+      - name: Type check
+        run: mypy src/ scripts/ --ignore-missing-imports
+
   test:
-    name: Test (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          # The installer and bin/token-saver have real per-OS branches; the
+          # full Python sweep stays on Linux to keep the matrix affordable.
+          - os: macos-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.12"
     steps:
       - uses: actions/checkout@v4
 
@@ -51,11 +72,8 @@ jobs:
         run: python -m pytest tests/ -v --cov=src --cov-report=xml --cov-report=term
 
       - name: Upload coverage
-        if: matrix.python-version == '3.12'
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         uses: codecov/codecov-action@v4
         with:
           file: coverage.xml
           fail_ci_if_error: false
-
-      - name: Type check
-        run: python -m mypy src/ --ignore-missing-imports
