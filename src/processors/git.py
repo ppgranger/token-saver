@@ -22,6 +22,7 @@ _GIT_CMD_RE = re.compile(rf"\bgit\s+{_GIT_OPTS}{_GIT_SUBCMDS}\b")
 
 class GitProcessor(Processor):
     priority = 20
+    handles_failure = True
     hook_patterns = [
         rf"^git\s+{_GIT_OPTS}(status|diff|log|show|push|pull|fetch|clone|branch|stash|reflog|remote|blame|cherry-pick|rebase|merge)\b",
     ]

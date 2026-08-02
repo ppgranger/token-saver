@@ -16,6 +16,7 @@ _ERROR_RE = re.compile(r"\b(error|Error|failed|Failed)\b")
 
 class JustProcessor(Processor):
     priority = 18
+    handles_failure = True
     hook_patterns = [
         r"^just\b.*\s(--list|-l|--summary)\b",
     ]

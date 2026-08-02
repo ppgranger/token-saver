@@ -18,6 +18,7 @@ _CHROME_RE = re.compile(
 
 class CdktfProcessor(Processor):
     priority = 47
+    handles_failure = True
     hook_patterns = [
         r"^cdktf\s+(deploy|diff|destroy|synth|plan)\b",
     ]

@@ -60,18 +60,36 @@ def inject_markers(parts: list[tuple[str, str]], marker_prefix: str) -> str:
     non-first segment.  Each marker+segment is wrapped in a brace group so the
     surrounding shell operator (`&&` / `;`) still applies to the user's segment.
 
+    Every segment — including the first — goes on its own line, and the group
+    is closed by a newline rather than `; }`.  A trailing `#` comment in a
+    segment would otherwise comment out the closing `; }` *and* the operator
+    that follows it, turning the whole rewrite into a shell syntax error and
+    preventing the user's command from running at all.  Putting the closing
+    brace on the next line confines the comment to its own segment.
+
+    Brace groups (not subshells) are used so that `cd`, `export`, variable
+    assignments etc. in one segment still affect the following ones.
+
+    Segments ending in an unquoted line continuation would still break this
+    form (the backslash-newline would swallow the closing brace); those are
+    rejected upstream by ``hook_pretool._is_segment_safe``.
+
     Example: parts=[(a,"&&"),(b,";"),(c,"")], prefix="M_"  ->
-        a && { echo 'M_1'; b; } ; { echo 'M_2'; c; }
+        { a
+        } && { echo 'M_1'
+        b
+        } ; { echo 'M_2'
+        c
+        }
     """
     pieces: list[str] = []
     for i, (seg, op) in enumerate(parts):
         if i == 0:
-            pieces.append(seg)
+            group = f"{{ {seg}\n}}"
         else:
             # Single-quote the marker; markers contain only [A-Za-z0-9_] so safe.
-            pieces.append(f"{{ echo '{marker_prefix}{i}'; {seg}; }}")
-        if op:
-            pieces.append(op)
+            group = f"{{ echo '{marker_prefix}{i}'\n{seg}\n}}"
+        pieces.append(f"{group} {op}" if op else group)
     return " ".join(pieces)
 
 
@@ -267,7 +285,12 @@ def main():
             if not chunk_out:
                 continue
             try:
-                c_out, proc_name, _was = engine.compress(seg_cmd, chunk_out)
+                # A chain's exit code belongs to its *last* executed segment;
+                # attributing it to an earlier one would wrongly downgrade that
+                # segment to generic.  With `&&`, every segment before the last
+                # one that ran did succeed.
+                seg_exit = returncode if seg_idx == chunks[-1][0] else 0
+                c_out, proc_name, _was = engine.compress(seg_cmd, chunk_out, exit_code=seg_exit)
                 if engine.last_event.get("is_mismatch"):
                     mismatches.append(
                         (seg_cmd, engine.last_event["attempted_processor"], len(chunk_out))
@@ -321,7 +344,7 @@ def main():
         sys.exit(returncode)
 
     primary_cmd = extract_primary_command(command_str)
-    result = core.compress(primary_cmd, output, engine=engine)
+    result = core.compress(primary_cmd, output, engine=engine, exit_code=returncode)
 
     if dry_run:
         diff_summary = summarize(output, result.compressed) if show_removed else None

@@ -16,6 +16,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.chain_utils import CHAIN_SPLIT_RE, split_chain
+from src.shell_syntax import has_output_redirection, has_unquoted
 
 # --- Debug logging (writes to data_dir/hook.log when TOKEN_SAVER_DEBUG=true) ---
 _log = logging.getLogger("token-saver.hook_pretool")
@@ -52,9 +53,34 @@ def _load_compressible_patterns() -> list[str]:
 try:
     COMPRESSIBLE_PATTERNS = _load_compressible_patterns()
 except Exception:
-    _log.exception("Failed to load compressible patterns")
-    raise
-COMPILED_PATTERNS = [re.compile(p) for p in COMPRESSIBLE_PATTERNS]
+    # Fail open, like every other error path in this project.  A broken
+    # processor — most likely a user one under ~/.token-saver/processors/ —
+    # must not take down *every* Bash command in the session.  With no
+    # patterns loaded nothing matches, so commands run unwrapped.
+    _log.exception("Failed to load compressible patterns — compression disabled")
+    COMPRESSIBLE_PATTERNS = []
+
+
+def _compile_patterns(patterns: list[str]) -> tuple[list[str], list[re.Pattern]]:
+    """Compile patterns one by one, dropping (and logging) any invalid one.
+
+    Returns the sources and the compiled patterns as two parallel lists, so
+    ``_matched_compressible`` can still zip them to report *which* source
+    regex matched.
+    """
+    sources: list[str] = []
+    compiled: list[re.Pattern] = []
+    for p in patterns:
+        try:
+            compiled.append(re.compile(p))
+        except re.error:  # noqa: PERF203 — per-pattern isolation is the point, ~50 items once
+            _log.exception("Skipping invalid hook pattern %r", p)
+        else:
+            sources.append(p)
+    return sources, compiled
+
+
+COMPRESSIBLE_PATTERNS, COMPILED_PATTERNS = _compile_patterns(COMPRESSIBLE_PATTERNS)
 
 # Trailing pipe suffixes that are safe to wrap.
 # These are stripped before checking exclusions so commands like
@@ -135,67 +161,14 @@ def _normalize_cmd(cmd: str) -> str:
     return _PATH_PREFIX_RE.sub("", cmd)
 
 
-def _has_unquoted_construct(cmd: str, constructs: tuple[str, ...]) -> bool:
-    """Return True if any of ``constructs`` appears outside of single/double quotes.
-
-    Used to reject commands containing $(), backticks, or heredocs at the top
-    level — these break naive chain splitting and per-segment execution.
-    Constructs nested inside quoted strings (e.g. inside `git commit -m "..."`)
-    are tolerated because they don't affect splitting.
-    """
-    i, n = 0, len(cmd)
-    while i < n:
-        ch = cmd[i]
-        if ch in ("'", '"'):
-            quote = ch
-            i += 1
-            while i < n and cmd[i] != quote:
-                if cmd[i] == "\\" and i + 1 < n:
-                    i += 2
-                    continue
-                i += 1
-            if i < n:
-                i += 1
-            continue
-        for c in constructs:
-            if cmd.startswith(c, i):
-                return True
-        i += 1
-    return False
-
-
 # Constructs that break naive chain splitting / per-segment execution.
 _DANGEROUS_CONSTRUCTS = ("$(", "`", "<<")
 
-
-def _has_output_redirection(cmd: str) -> bool:
-    """Return True if an unquoted output redirection (>, >>, 2>, &>) is present.
-
-    Quote-aware: a ``>`` inside single/double quotes (e.g. ``git commit -m
-    "fixes >50%"``) is ignored.  Arrow/comparison operators ``->`` and ``=>``
-    are not treated as redirections.  Catches the no-space form (``log>out``)
-    that the old ``>\\s`` regex missed.
-    """
-    i, n = 0, len(cmd)
-    while i < n:
-        ch = cmd[i]
-        if ch in ("'", '"'):
-            quote = ch
-            i += 1
-            while i < n and cmd[i] != quote:
-                if cmd[i] == "\\" and i + 1 < n:
-                    i += 2
-                    continue
-                i += 1
-            if i < n:
-                i += 1
-            continue
-        if ch == ">":
-            prev = cmd[i - 1] if i > 0 else ""
-            if prev not in ("-", "="):
-                return True
-        i += 1
-    return False
+# Both checks now share the single quote-aware scanner in src.shell_syntax,
+# alongside the chain splitters.  Re-exported under the historical names so
+# the rest of this module (and its tests) read unchanged.
+_has_unquoted_construct = has_unquoted
+_has_output_redirection = has_output_redirection
 
 
 # Per-segment safety checks applied inside _is_chain_compressible().
@@ -225,6 +198,29 @@ _SEGMENT_EXCLUDED_PATTERNS = [
 _COMPILED_SEGMENT_EXCLUDED = [re.compile(p) for p in _SEGMENT_EXCLUDED_PATTERNS]
 
 
+def _ends_with_line_continuation(segment: str) -> bool:
+    """Return True if the segment ends with an unescaped backslash.
+
+    ``wrap.py`` closes each chain segment's brace group with a newline; a
+    trailing backslash would splice that newline away and swallow the closing
+    brace.  An even-length run of backslashes is an escaped backslash, not a
+    continuation.
+    """
+    stripped = segment.rstrip()
+    trailing = len(stripped) - len(stripped.rstrip("\\"))
+    return trailing % 2 == 1
+
+
+def _is_comment_only(segment: str) -> bool:
+    """Return True if the segment is nothing but a shell comment.
+
+    Such a segment would produce an empty brace group (``{ # foo\\n}``), which
+    is a syntax error.  Today it also silently comments out the rest of the
+    rewritten line, so the command never runs — either way, don't wrap it.
+    """
+    return segment.lstrip().startswith("#")
+
+
 def _is_segment_safe(segment: str) -> bool:
     """Return True if a single chain segment has no dangerous constructs.
 
@@ -232,6 +228,9 @@ def _is_segment_safe(segment: str) -> bool:
     ``/usr/bin/vim``, ``./python``, or ``.venv/bin/sudo`` are still caught.
     """
     if _has_output_redirection(segment):
+        return False
+    # Both break wrap.py's brace-group rewrite — see the helpers above.
+    if _ends_with_line_continuation(segment) or _is_comment_only(segment):
         return False
     norm = _normalize_cmd(segment)
     for pattern in _COMPILED_SEGMENT_EXCLUDED:

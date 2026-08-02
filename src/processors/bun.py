@@ -13,6 +13,7 @@ _ERROR_RE = re.compile(r"\b(error|Error|failed|Failed|warn|warning|EACCES|ENOENT
 
 class BunProcessor(Processor):
     priority = 29
+    handles_failure = True
     hook_patterns = [
         r"^bun\s+(install|add|remove|rm|update|i)\b",
     ]

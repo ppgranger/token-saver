@@ -24,6 +24,7 @@ _READY_RE = re.compile(r"\b(\d+)/(\d+)\b")
 
 class KubectlProcessor(Processor):
     priority = 32
+    handles_failure = True
     hook_patterns = [
         rf"^(kubectl|oc)\s+{_KUBECTL_OPTS}(get|describe|logs|top|apply|delete|create)\b",
     ]

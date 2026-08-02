@@ -25,6 +25,11 @@ _DEFAULTS = {
     "generic_truncate_threshold": 200,
     "generic_keep_head": 100,
     "generic_keep_tail": 50,
+    # Max error/failure lines rescued from the truncated middle (0 disables).
+    "generic_keep_critical": 20,
+    # Max error lines the engine re-appends when a processor dropped them
+    # (0 disables the safety net entirely).
+    "recover_critical_lines": 20,
     "ls_compact_threshold": 15,
     "find_compact_threshold": 20,
     "tree_compact_threshold": 30,

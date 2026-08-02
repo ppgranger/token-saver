@@ -841,17 +841,58 @@ class TestChainPerSegmentCompression:
     def test_inject_markers_single_segment(self):
         wrap = self._import_wrap()
         out = wrap.inject_markers([("git status", "")], "M_")
-        assert out == "git status"
+        assert out == "{ git status\n}"
 
     def test_inject_markers_two_segments_and(self):
         wrap = self._import_wrap()
         out = wrap.inject_markers([("a", "&&"), ("b", "")], "M_")
-        assert out == "a && { echo 'M_1'; b; }"
+        assert out == "{ a\n} && { echo 'M_1'\nb\n}"
 
     def test_inject_markers_three_segments_mixed(self):
         wrap = self._import_wrap()
         out = wrap.inject_markers([("a", "&&"), ("b", ";"), ("c", "")], "M_")
-        assert out == "a && { echo 'M_1'; b; } ; { echo 'M_2'; c; }"
+        assert out == "{ a\n} && { echo 'M_1'\nb\n} ; { echo 'M_2'\nc\n}"
+
+    def test_inject_markers_closes_groups_on_their_own_line(self):
+        """Regression: a trailing `#` comment used to eat the closing `; }`.
+
+        The rewritten command then failed to parse and the user's command never
+        ran at all — they got a shell syntax error instead of their output.
+        """
+        wrap = self._import_wrap()
+        out = wrap.inject_markers([("echo a # note", "&&"), ("echo b", "")], "M_")
+        for line in out.splitlines():
+            assert "#" not in line or line.rstrip().endswith("# note")
+
+    def _run_rewritten(self, parts, prefix="M_"):
+        """Execute an inject_markers rewrite through a real shell."""
+        import subprocess
+
+        wrap = self._import_wrap()
+        rewritten = wrap.inject_markers(parts, prefix)
+        # shell=True is the point: we are asserting the rewrite actually parses.
+        proc = subprocess.run(  # noqa: S602
+            rewritten, shell=True, capture_output=True, text=True, check=False
+        )
+        return proc.returncode, proc.stdout, proc.stderr
+
+    def test_rewrite_executes_with_trailing_comment(self):
+        code, out, err = self._run_rewritten([("echo a # note", "&&"), ("echo b", "")])
+        assert code == 0, err
+        assert "a" in out
+        assert "b" in out
+
+    def test_rewrite_keeps_cd_visible_to_later_segments(self):
+        """Brace groups, not subshells: `cd` must still affect the next segment."""
+        code, out, err = self._run_rewritten([("cd /tmp", "&&"), ("pwd", "")])
+        assert code == 0, err
+        assert "/tmp" in out
+
+    def test_rewrite_tolerates_braces_inside_quotes(self):
+        code, out, err = self._run_rewritten([('echo "a } b"', "&&"), ("echo c", "")])
+        assert code == 0, err
+        assert "a } b" in out
+        assert "c" in out
 
     def test_split_output_no_markers(self):
         wrap = self._import_wrap()
@@ -1073,6 +1114,80 @@ class TestChainPerSegmentCompression:
         )
         assert result.returncode == 124
         assert "timed out" in (result.stdout + result.stderr).lower()
+
+
+class TestChainSegmentGrouping:
+    """Segments that would break wrap.py's brace-group rewrite must not be wrapped."""
+
+    def test_trailing_line_continuation_rejected(self):
+        # The backslash-newline would swallow the group's closing brace.
+        assert not is_compressible("echo a \\\n&& git status")
+
+    def test_escaped_backslash_is_not_a_continuation(self):
+        # An even-length backslash run is a literal backslash, not a continuation.
+        assert is_compressible("echo 'a\\\\' && git status")
+
+    def test_comment_only_segment_rejected(self):
+        # Would produce an empty brace group, and today silently eats the chain.
+        assert not is_compressible("# note && git status")
+
+    def test_trailing_comment_on_a_segment_is_still_compressible(self):
+        # This is the case the brace-group fix exists for — it must stay wrapped.
+        assert is_compressible("ls && git status # note")
+
+
+class TestHookManifests:
+    """The `timeout` field in hooks.json is in SECONDS, not milliseconds."""
+
+    def _manifests(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return [
+            os.path.join(root, "hooks", "hooks.json"),
+            os.path.join(root, "antigravity", "hooks.json"),
+        ]
+
+    def test_timeouts_are_plausible_seconds(self):
+        for path in self._manifests():
+            with open(path) as f:
+                manifest = json.load(f)
+            for event, entries in manifest["hooks"].items():
+                for entry in entries:
+                    for hook in entry["hooks"]:
+                        timeout = hook.get("timeout")
+                        assert timeout is not None, f"{path}:{event} has no timeout"
+                        # A millisecond value (e.g. 5000) would mean 83 minutes.
+                        assert 1 <= timeout <= 120, (
+                            f"{path}:{event} timeout={timeout} — "
+                            "the unit is seconds, this looks like milliseconds"
+                        )
+
+
+class TestPatternLoadingFailsOpen:
+    """A broken processor registry must not break every Bash command."""
+
+    def test_registry_failure_disables_compression_instead_of_raising(self):
+        import importlib
+        import unittest.mock as mock
+
+        import scripts.hook_pretool as hook
+
+        try:
+            with mock.patch(
+                "src.processors.collect_hook_patterns", side_effect=RuntimeError("boom")
+            ):
+                broken = importlib.reload(hook)
+                assert broken.COMPRESSIBLE_PATTERNS == []
+                assert broken.is_compressible("git status") is False
+        finally:
+            # Restore the real patterns for every subsequent test in the session.
+            importlib.reload(hook)
+
+    def test_invalid_pattern_is_skipped_not_fatal(self):
+        import scripts.hook_pretool as hook
+
+        sources, compiled = hook._compile_patterns([r"^git\b", r"(unclosed", r"^ls\b"])
+        assert sources == [r"^git\b", r"^ls\b"]
+        assert len(compiled) == 2
 
 
 class TestExplainDecision:

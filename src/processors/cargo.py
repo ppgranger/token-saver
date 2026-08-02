@@ -25,6 +25,7 @@ _UPDATE_LINE_RE = re.compile(
 
 class CargoProcessor(Processor):
     priority = 22
+    handles_failure = True
     hook_patterns = [
         r"^cargo\s+(build|check|doc|update|bench)\b",
     ]
