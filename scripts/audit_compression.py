@@ -1,21 +1,59 @@
 #!/usr/bin/env python3
-"""Deep audit of Token-Saver compression engine.
+"""Deep audit of the Token-Saver compression engine.
 
-Generates realistic command outputs and measures compression ratios,
-then identifies opportunities for further compression.
+Builds realistic command outputs, runs them through the real engine, and
+reports the per-scenario compression ratio in tokens.
+
+This module is import-safe: at import time it only *collects* scenarios.
+Nothing is compressed and nothing is printed until :func:`run` or :func:`main`
+is called, so ``tests/test_compression_ratchet.py`` can consume the same
+corpus without triggering an 80-page report.
+
+    python3 scripts/audit_compression.py            # full report
+    python3 scripts/audit_compression.py --json     # machine-readable ratios
 """
 
+from __future__ import annotations
+
+import argparse
+import json
 import os
 import sys
+from typing import NamedTuple
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src import config
 from src.engine import CompressionEngine
 
-engine = CompressionEngine()
-
 CHARS_PER_TOKEN = config.get("chars_per_token")
+
+
+class Scenario(NamedTuple):
+    """A labelled command + output pair to measure compression against."""
+
+    label: str
+    command: str
+    output: str
+    observations: tuple[str, ...]
+
+
+class Measurement(NamedTuple):
+    """What the engine did with one scenario."""
+
+    label: str
+    command: str
+    processor: str
+    was_compressed: bool
+    original_tokens: int
+    compressed_tokens: int
+    ratio: float
+    compressed: str
+
+
+#: Populated at import time by the ``audit(...)`` calls below.
+SCENARIOS: list[Scenario] = []
+
 
 # ============================================================
 # Helper
@@ -26,34 +64,32 @@ def _to_tokens(n: int) -> int:
     return max(1, round(n / CHARS_PER_TOKEN)) if n > 0 else 0
 
 
-def audit(label: str, command: str, output: str, observations: list[str] | None = None):
-    """Run compression and print audit report."""
-    compressed, processor, was_compressed = engine.compress(command, output)
-    orig_len = len(output)
-    comp_len = len(compressed)
-    ratio = (orig_len - comp_len) / orig_len * 100 if orig_len else 0
-    orig_tokens = _to_tokens(orig_len)
-    comp_tokens = _to_tokens(comp_len)
-    saved_tokens = orig_tokens - comp_tokens
+def audit(label: str, command: str, output: str, observations: list[str] | None = None) -> None:
+    """Register a scenario.  Deliberately does no work — see module docstring."""
+    SCENARIOS.append(Scenario(label, command, output, tuple(observations or ())))
 
-    print(f"\n{'=' * 80}")
-    print(f"SCENARIO: {label}")
-    print(f"Command:  {command}")
-    print(f"Processor: {processor} | Compressed: {was_compressed}")
-    print(f"Original:   {orig_tokens:>7,} tokens  ({len(output.splitlines()):>5} lines)")
-    print(f"Compressed: {comp_tokens:>7,} tokens  ({len(compressed.splitlines()):>5} lines)")
-    print(f"Saved:      {saved_tokens:>7,} tokens  ({ratio:5.1f}%)")
-    print("----- First 15 lines of compressed output -----")
-    for _i, line in enumerate(compressed.splitlines()[:15]):
-        print(f"  {line}")
-    if len(compressed.splitlines()) > 15:
-        print(f"  ... ({len(compressed.splitlines()) - 15} more lines)")
-    if observations:
-        print("----- Observations -----")
-        for obs in observations:
-            print(f"  [!] {obs}")
-    print(f"{'=' * 80}")
-    return ratio, was_compressed
+
+def measure(scenarios: list[Scenario] | None = None) -> list[Measurement]:
+    """Run every scenario through a fresh engine and return the measurements."""
+    engine = CompressionEngine()
+    results = []
+    for s in scenarios if scenarios is not None else SCENARIOS:
+        compressed, processor, was_compressed = engine.compress(s.command, s.output)
+        orig_len, comp_len = len(s.output), len(compressed)
+        ratio = (orig_len - comp_len) / orig_len * 100 if orig_len else 0.0
+        results.append(
+            Measurement(
+                label=s.label,
+                command=s.command,
+                processor=processor,
+                was_compressed=was_compressed,
+                original_tokens=_to_tokens(orig_len),
+                compressed_tokens=_to_tokens(comp_len),
+                ratio=ratio,
+                compressed=compressed,
+            )
+        )
+    return results
 
 
 # ============================================================
@@ -679,14 +715,14 @@ mypy_rules = ["arg-type", "return-value", "assignment", "name-defined", "attr-de
 for i in range(30):
     rule = mypy_rules[i % len(mypy_rules)]
     fpath = f"src/{'core' if i < 15 else 'api'}/module_{i:02d}.py"
-    messages = {
+    mypy_messages = {
         "arg-type": 'Argument 1 to "process" has incompatible type "str"; expected "int"',
         "return-value": 'Incompatible return value type (got "None", expected "str")',
         "assignment": 'Incompatible types in assignment (expression has type "float", variable has type "int")',
         "name-defined": f'Name "undefined_var_{i}" is not defined',
         "attr-defined": f'"MyClass" has no attribute "nonexistent_{i}"',
     }
-    mypy_lines.append(f"{fpath}:{10 + i * 3}: error: {messages[rule]}  [{rule}]")
+    mypy_lines.append(f"{fpath}:{10 + i * 3}: error: {mypy_messages[rule]}  [{rule}]")
 
 mypy_lines.extend(
     [
@@ -974,136 +1010,89 @@ audit(
 
 
 # ============================================================
-# SUMMARY REPORT
+# Reporting
 # ============================================================
-print("\n" + "=" * 80)
-print("DEEP AUDIT SUMMARY - COMPRESSION IMPROVEMENT OPPORTUNITIES")
-print("=" * 80)
 
-print("""
 
-CRITICAL FINDINGS:
-==================
+def _print_report(results: list[Measurement]) -> None:
+    for r in results:
+        scenario = next(s for s in SCENARIOS if s.label == r.label)
+        print(f"\n{'=' * 80}")
+        print(f"SCENARIO: {r.label}")
+        print(f"Command:  {r.command}")
+        print(f"Processor: {r.processor} | Compressed: {r.was_compressed}")
+        print(f"Original:   {r.original_tokens:>7,} tokens")
+        print(f"Compressed: {r.compressed_tokens:>7,} tokens")
+        saved = r.original_tokens - r.compressed_tokens
+        print(f"Saved:      {saved:>7,} tokens  ({r.ratio:5.1f}%)")
+        print("----- First 15 lines of compressed output -----")
+        lines = r.compressed.splitlines()
+        for line in lines[:15]:
+            print(f"  {line}")
+        if len(lines) > 15:
+            print(f"  ... ({len(lines) - 15} more lines)")
+        if scenario.observations:
+            print("----- Observations -----")
+            for obs in scenario.observations:
+                print(f"  [!] {obs}")
+        print("=" * 80)
 
-1. GIT DIFF CONTEXT LINES (HIGH IMPACT)
-   - Context lines (unchanged ' ' prefixed lines) are kept VERBATIM
-   - In the test, 100 context lines across 5 files = ~5000 chars wasted
-   - RECOMMENDATION: Reduce context to 3 lines before/after each change (like -U3)
-   - ESTIMATED ADDITIONAL SAVINGS: 40-60% on typical diffs
-   - The 'index' line (e.g., 'index abc0def..1230456 100644') is NEVER useful
-   - The '---' and '+++' lines are redundant with 'diff --git a/... b/...'
 
-2. GIT DIFF --STAT VISUAL BARS (MEDIUM IMPACT)
-   - The ++++--- bars in diff --stat waste ~30% of the output
-   - Only the filename and change count matter
-   - diff --stat is not handled specially -- goes through _process_diff which
-     may incorrectly interpret stat lines
+def _print_summary(results: list[Measurement]) -> None:
+    """Summarize from the measurements themselves.
 
-3. GIT LOG --ONELINE TRUNCATION (LOW IMPACT)
-   - max_log_entries=20 is applied to --oneline format
-   - --oneline is already ~50 chars/line, so 50 entries = 2500 chars
-   - Could safely keep 30-40 entries for --oneline format
+    This block used to be a hand-written list of recommendations that went
+    stale years ago (it still asked for a docker processor and diff context
+    reduction, both long since shipped).  Anything printed here is now derived
+    from the current run.
+    """
+    print("\n" + "=" * 80)
+    print("SUMMARY")
+    print("=" * 80)
 
-4. PYTEST PASSED LINES (HIGH IMPACT)
-   - 500 'PASSED' lines are collapsed to '[500 tests passed]' -- GOOD
-   - BUT: platform/rootdir/plugins/collected lines are NOT stripped by the
-     current pytest processor (they don't match PASSED/FAILED patterns)
-   - WARNING BLOCKS in pytest are not collapsed (each warning kept verbatim)
+    total_orig = sum(r.original_tokens for r in results)
+    total_comp = sum(r.compressed_tokens for r in results)
+    overall = (total_orig - total_comp) / total_orig * 100 if total_orig else 0.0
+    print(f"\n{len(results)} scenarios | {total_orig:,} -> {total_comp:,} tokens ({overall:.1f}%)")
 
-5. DEPRECATION WARNING COLLAPSE (MEDIUM IMPACT)
-   - pytest warnings section: 30 near-identical DeprecationWarning lines
-   - Currently treated as generic content, not collapsed by pattern
-   - RECOMMENDATION: Detect warning patterns, collapse to count + 1 example
+    print("\nWeakest scenarios (lowest ratio first):")
+    for r in sorted(results, key=lambda r: r.ratio)[:8]:
+        flag = "  " if r.was_compressed else "! "
+        print(f"  {flag}{r.ratio:5.1f}%  {r.processor:<16} {r.label}")
 
-6. BUILD PROGRESS LINES (HIGH IMPACT)
-   - pip: Collecting/Downloading/progress bars should ALL be stripped
-   - cargo: Compiling lines are stripped -- GOOD
-   - npm: http fetch lines need stripping
+    not_compressed = [r for r in results if not r.was_compressed]
+    if not_compressed:
+        print(f"\n{len(not_compressed)} scenario(s) returned uncompressed:")
+        for r in not_compressed:
+            print(f"    {r.processor:<16} {r.label}")
 
-7. LINT GROUPING (WORKING WELL)
-   - Violations are grouped by rule with example_count=2
-   - SUGGESTION: Could also list affected files compactly
+    fell_back = [r for r in results if r.processor == "generic"]
+    if fell_back:
+        print(f"\n{len(fell_back)} scenario(s) fell back to the generic processor:")
+        for r in fell_back:
+            print(f"    {r.label}")
 
-8. FILE LISTINGS (WORKING WELL)
-   - find/ls grouping by directory/extension works
-   - tree truncation works but loses structure info
 
-9. CURL/DOWNLOAD PROGRESS (HIGH IMPACT)
-   - 101 progress lines should collapse to final line only
-   - Generic processor's repeated-line collapse helps but progress lines
-     differ slightly (different percentages) so they are NOT collapsed
+def run() -> list[Measurement]:
+    """Measure every registered scenario (no output)."""
+    return measure()
 
-10. DOCKER BUILD (MEDIUM IMPACT)
-    - No dedicated processor -- falls through to generic
-    - 'Running in', 'Removing intermediate', sha256 lines are noise
-    - RECOMMENDATION: Add docker processor or enhance generic
 
-PROCESSOR-SPECIFIC ISSUES:
-==========================
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--json", action="store_true", help="emit {label: ratio} instead of the report"
+    )
+    args = parser.parse_args(argv)
 
-GitProcessor._process_diff:
-  - Keeps 'index' lines (waste)
-  - Keeps '---/+++' lines (redundant with 'diff --git')
-  - Does NOT reduce context lines (keeps all ' ' lines up to max_hunk_lines=150)
-  - Does NOT handle --stat format specially
+    results = run()
+    if args.json:
+        print(json.dumps({r.label: round(r.ratio, 1) for r in results}, indent=2, sort_keys=True))
+        return 0
+    _print_report(results)
+    _print_summary(results)
+    return 0
 
-GitProcessor._process_status:
-  - Directory grouping threshold of 8 may be too high for most repos
-  - Short format (-s) IS handled correctly via regex
-  - Verbose format drops hint lines -- GOOD
 
-TestOutputProcessor._process_pytest:
-  - Collapses PASSED lines -- GOOD
-  - Does NOT collapse warning blocks
-  - Does NOT strip platform/rootdir/plugins lines
-  - Failure blocks fully preserved -- GOOD
-
-BuildOutputProcessor:
-  - _is_progress_line catches Downloading/Installing/Compiling -- GOOD
-  - Does NOT catch pip progress bars (━━━━━━)
-  - Does NOT catch curl/wget progress
-  - npm http fetch IS caught
-
-LintOutputProcessor:
-  - Rule grouping works well
-  - Example count of 2 is reasonable
-  - mypy format [error-code] is parsed -- GOOD
-
-FileContentProcessor:
-  - head=150, tail=50 split is asymmetric (favoring imports/headers)
-  - This is actually GOOD for most code files
-
-GenericProcessor:
-  - ANSI stripping works
-  - Repeated-line collapse only catches IDENTICAL lines
-  - Does NOT catch near-identical lines (progress with different %)
-  - Middle truncation works for very long output
-
-PRIORITY RECOMMENDATIONS (by estimated token savings):
-======================================================
-
-P0 - DIFF CONTEXT REDUCTION:
-   Strip context lines to max 3 before/after each change
-   Strip 'index' lines entirely
-   Strip '---/+++' lines when 'diff --git' is present
-   -> Saves 40-60% on every diff
-
-P1 - PROGRESS LINE DETECTION:
-   Add pattern for progress bars (━━, ██, ###, percentage changes)
-   Collapse curl/wget output to final line
-   -> Saves 90%+ on download/build output
-
-P2 - WARNING COLLAPSE:
-   In pytest, collapse identical warning types
-   -> Saves 80%+ on warning-heavy test output
-
-P3 - DOCKER PROCESSOR:
-   Add Step-aware processor
-   Strip intermediate container IDs and sha256
-   -> Saves 60%+ on docker build
-
-P4 - DIFF --STAT HANDLER:
-   Strip visual bars, keep filename + counts only
-   -> Saves 30% on diff --stat
-
-""")
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -138,11 +138,20 @@ class TestCompressionEngine:
         assert len(compressed) < len(output)
 
     def test_min_compression_ratio(self):
+        """Incompressible input must be returned untouched, not almost-untouched.
+
+        This used to assert the ratio only `if was_compressed:` — so an engine
+        that stopped compressing entirely passed the test.  The real contract
+        is a dichotomy: either the engine declined (and returned the input
+        byte-for-byte), or it compressed and the result is genuinely smaller.
+        """
         # Unique lines — generic won't compress much
         output = "\n".join(f"unique_line_content_{i}_{'x' * 50}" for i in range(15))
         compressed, _processor, was_compressed = self.engine.compress("unknown_cmd", output)
         if was_compressed:
             assert len(compressed) <= len(output) * 0.9
+        else:
+            assert compressed == output
 
     def test_ansi_cleanup_after_specialized_processor(self):
         """Engine should strip ANSI codes even after a specialized processor runs."""

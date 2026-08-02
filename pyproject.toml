@@ -71,7 +71,7 @@ ignore = [
 "installers/**/*.py" = [
     "S103",     # chmod +x on the CLI binary is intentional
 ]
-"audit_compression.py" = [
+"scripts/audit_compression.py" = [
     "E501",     # long lines in test data builders
     "PERF401",  # readability over perf in data builders
 ]
