@@ -6,6 +6,8 @@ import sqlite3
 import threading
 import time
 
+from . import config
+
 
 class SavingsTracker:
     """Track token savings in a local SQLite database.
@@ -41,11 +43,15 @@ class SavingsTracker:
         """
         return f"ppid-{os.getppid()}"
 
-    def __init__(self, session_id: str | None = None, prune_days: int = 90):
+    def __init__(self, session_id: str | None = None, prune_days: int | None = None):
         self.session_id = (
             session_id or os.environ.get("TOKEN_SAVER_SESSION") or self._fallback_session_id()
         )
-        self.prune_days = prune_days
+        # Defaulting from config rather than a literal: `db_prune_days` is
+        # documented in the README as the stats-retention knob, but nothing
+        # ever read it — every caller took the hardcoded 90 days.  An explicit
+        # argument still wins, which is what the tests use.
+        self.prune_days = config.get("db_prune_days") if prune_days is None else prune_days
         # Resolve DB paths — use overridden class vars if set, else compute from data_dir()
         if self.DB_DIR is None:
             SavingsTracker.DB_DIR = self._default_db_dir()

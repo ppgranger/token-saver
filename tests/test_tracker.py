@@ -2,13 +2,16 @@
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from src import config
 from src.tracker import SavingsTracker
 
 
@@ -362,3 +365,78 @@ class TestStatsCLI:
         # git saved 12500 (5000-500 + 10000-2000), test saved 2200 (3000-800)
         assert data["top_processors"][0]["processor"] == "git"
         assert data["top_processors"][1]["processor"] == "test"
+
+
+class TestPruneRetention:
+    """`db_prune_days` is documented in the README but was never read.
+
+    Every caller got the hardcoded 90 days, so configuring retention did
+    nothing at all.
+    """
+
+    def setup_method(self):
+        self.tmp_dir = tempfile.mkdtemp()
+        SavingsTracker.DB_DIR = self.tmp_dir
+        SavingsTracker.DB_PATH = os.path.join(self.tmp_dir, "prune.db")
+
+    def teardown_method(self):
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def test_retention_defaults_to_the_configured_value(self, monkeypatch):
+        monkeypatch.setattr(config, "get", lambda key: 7 if key == "db_prune_days" else None)
+        tracker = SavingsTracker(session_id="s")
+        try:
+            assert tracker.prune_days == 7
+        finally:
+            tracker.close()
+
+    def test_explicit_argument_still_wins(self):
+        tracker = SavingsTracker(session_id="s", prune_days=3)
+        try:
+            assert tracker.prune_days == 3
+        finally:
+            tracker.close()
+
+    def test_rows_older_than_retention_are_pruned(self):
+        tracker = SavingsTracker(session_id="s", prune_days=30)
+        tracker.record_saving(
+            command="git status",
+            processor="git",
+            original_size=1000,
+            compressed_size=100,
+            platform="claude_code",
+        )
+        # Backdate the row past the retention window, then reopen: pruning
+        # runs on construction.
+        cutoff = time.time() - (31 * 86400)
+        tracker.conn.execute("UPDATE savings SET timestamp = ?", (cutoff,))
+        tracker.conn.commit()
+        tracker.close()
+
+        reopened = SavingsTracker(session_id="s", prune_days=30)
+        try:
+            rows = reopened.conn.execute("SELECT COUNT(*) FROM savings").fetchone()[0]
+            assert rows == 0
+        finally:
+            reopened.close()
+
+    def test_rows_inside_retention_survive(self):
+        tracker = SavingsTracker(session_id="s", prune_days=30)
+        tracker.record_saving(
+            command="git status",
+            processor="git",
+            original_size=1000,
+            compressed_size=100,
+            platform="claude_code",
+        )
+        cutoff = time.time() - (5 * 86400)
+        tracker.conn.execute("UPDATE savings SET timestamp = ?", (cutoff,))
+        tracker.conn.commit()
+        tracker.close()
+
+        reopened = SavingsTracker(session_id="s", prune_days=30)
+        try:
+            rows = reopened.conn.execute("SELECT COUNT(*) FROM savings").fetchone()[0]
+            assert rows == 1
+        finally:
+            reopened.close()
