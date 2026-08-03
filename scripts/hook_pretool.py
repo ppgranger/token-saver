@@ -16,6 +16,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.chain_utils import CHAIN_SPLIT_RE, split_chain
+from src.console import use_utf8_io
 from src.shell_syntax import has_output_redirection, has_unquoted
 
 # --- Debug logging (writes to data_dir/hook.log when TOKEN_SAVER_DEBUG=true) ---
@@ -406,6 +407,7 @@ def explain_decision(command: str) -> dict:
 
 
 def main():
+    use_utf8_io()
     try:
         raw_input = sys.stdin.read()
         _log.debug("stdin: %s", raw_input[:500])

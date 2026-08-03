@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src import config, core
 from src.chain_utils import extract_primary_command, split_chain_with_ops
+from src.console import use_utf8_io
 from src.diffstat import format_summary, summarize
 from src.engine import CompressionEngine
 
@@ -243,6 +244,7 @@ def _print_dry_run(
 
 
 def main():
+    use_utf8_io()
     dry_run = "--dry-run" in sys.argv
     show_removed = "--show-removed" in sys.argv
     args = [a for a in sys.argv[1:] if a not in ("--dry-run", "--show-removed")]
