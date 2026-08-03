@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import shlex
 import subprocess
 import sys
 
@@ -63,7 +64,12 @@ def test_wrap_prints_undecodable_command_output_on_a_cp1252_console():
     which substitutes ``\\ufffd`` — a character cp1252 cannot encode.  So the
     decode-side fix creates the encode-side crash unless both are handled.
     """
-    emit = f"{sys.executable} -c \"import sys; sys.stdout.buffer.write(b'ok-\\x80-end')\""
+    # shlex.quote keeps a Windows executable path intact: wrap.py runs this
+    # through bash, where the backslashes in C:\... would otherwise be eaten as
+    # escapes and the interpreter would not be found.
+    emit = (
+        f"{shlex.quote(sys.executable)} -c \"import sys; sys.stdout.buffer.write(b'ok-\\x80-end')\""
+    )
     result = _run(["scripts/wrap.py", emit], _cp1252_env())
     assert "UnicodeEncodeError" not in result.stderr, result.stderr
     assert result.returncode == 0, result.stderr

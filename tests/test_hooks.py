@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import sys
 from unittest import mock
 
@@ -984,14 +985,30 @@ class TestChainPerSegmentCompression:
             assert "#" not in line or line.rstrip().endswith("# note")
 
     def _run_rewritten(self, parts, prefix="M_"):
-        """Execute an inject_markers rewrite through a real shell."""
+        """Execute an inject_markers rewrite through a real POSIX shell.
+
+        The rewrite is POSIX syntax, so it must reach a POSIX shell — the same
+        one wrap.py picks.  Using bare ``shell=True`` here sent it to cmd.exe on
+        Windows, and the test then failed on ``'{' is not recognized`` while the
+        product was doing the right thing.
+        """
         import subprocess
 
         wrap = self._import_wrap()
         rewritten = wrap.inject_markers(parts, prefix)
-        # shell=True is the point: we are asserting the rewrite actually parses.
-        proc = subprocess.run(  # noqa: S602
-            rewritten, shell=True, capture_output=True, text=True, encoding="utf-8", check=False
+        bash = wrap.posix_shell()
+        if bash:
+            args, use_shell = [bash, "-c", rewritten], False
+        else:
+            # POSIX host: shell=True is already /bin/sh.
+            args, use_shell = rewritten, True
+        proc = subprocess.run(  # noqa: S603
+            args,
+            shell=use_shell,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
         )
         return proc.returncode, proc.stdout, proc.stderr
 
@@ -1183,7 +1200,13 @@ class TestChainPerSegmentCompression:
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         wrap_path = os.path.join(repo_root, "scripts", "wrap.py")
         # 0x80 is a continuation byte with no lead byte — invalid UTF-8 anywhere.
-        emit = f"{sys.executable} -c \"import sys; sys.stdout.buffer.write(b'ok-\\x80-end')\""
+        # shlex.quote keeps a Windows executable path intact: wrap.py runs this
+        # through bash, where the backslashes in C:\... would otherwise be eaten as
+        # escapes and the interpreter would not be found.
+        emit = (
+            f"{shlex.quote(sys.executable)} -c "
+            "\"import sys; sys.stdout.buffer.write(b'ok-\\x80-end')\""
+        )
         result = subprocess.run(  # noqa: S603, PLW1510
             [sys.executable, wrap_path, emit],
             capture_output=True,
