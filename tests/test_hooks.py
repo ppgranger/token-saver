@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -830,6 +831,122 @@ class TestWrapperRunners:
         assert is_compressible("cd /project && npx jest --coverage")
         assert is_compressible("cd /project && poetry run pytest tests/")
         assert is_compressible("cd /project && uv run ruff check .")
+
+
+class TestWindowsShellSelection:
+    """wrap.py must not hand bash syntax to cmd.exe.
+
+    ``shell=True`` means ``/bin/sh`` on POSIX but **cmd.exe** on Windows, while
+    the commands we are given are bash — Claude Code's Bash tool runs them
+    through Git Bash.  The first Windows CI run showed the consequence: every
+    chained command came back as ``'{' is not recognized as an internal or
+    external command`` with the user's output gone.
+
+    ``IS_WINDOWS`` is patched rather than skipped so the Windows branch is
+    exercised on every OS; nothing here spawns a process.
+    """
+
+    def _import_wrap(self):
+        import importlib
+
+        return importlib.import_module("scripts.wrap")
+
+    def test_posix_needs_no_explicit_shell(self):
+        """On POSIX, shell=True is already /bin/sh — nothing to resolve."""
+        wrap = self._import_wrap()
+        with mock.patch.object(wrap, "IS_WINDOWS", False):
+            assert wrap.posix_shell() is None
+            assert wrap.supports_posix_chaining() is True
+
+    def test_windows_honours_the_documented_git_bash_override(self, tmp_path):
+        wrap = self._import_wrap()
+        fake_bash = tmp_path / "bash.exe"
+        fake_bash.write_text("", encoding="utf-8")
+        with (
+            mock.patch.object(wrap, "IS_WINDOWS", True),
+            mock.patch.dict(os.environ, {"CLAUDE_CODE_GIT_BASH_PATH": str(fake_bash)}),
+        ):
+            assert wrap.posix_shell() == str(fake_bash)
+
+    def test_windows_ignores_an_override_pointing_nowhere(self, tmp_path):
+        """A stale CLAUDE_CODE_GIT_BASH_PATH must not win over a real bash."""
+        wrap = self._import_wrap()
+        real = tmp_path / "real-bash.exe"
+        real.write_text("", encoding="utf-8")
+        with (
+            mock.patch.object(wrap, "IS_WINDOWS", True),
+            mock.patch.dict(os.environ, {"CLAUDE_CODE_GIT_BASH_PATH": str(tmp_path / "gone.exe")}),
+            mock.patch.object(wrap.shutil, "which", return_value=str(real)),
+        ):
+            assert wrap.posix_shell() == str(real)
+
+    def test_windows_falls_back_to_the_git_for_windows_install_path(self, tmp_path):
+        wrap = self._import_wrap()
+        candidate = tmp_path / "Git" / "bin" / "bash.exe"
+        candidate.parent.mkdir(parents=True)
+        candidate.write_text("", encoding="utf-8")
+        with (
+            mock.patch.object(wrap, "IS_WINDOWS", True),
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(wrap.shutil, "which", return_value=None),
+            mock.patch.object(wrap, "_WINDOWS_BASH_CANDIDATES", (str(candidate),)),
+        ):
+            assert wrap.posix_shell() == str(candidate)
+
+    def _popen_call(self, wrap, bash):
+        """Capture how _run_command would invoke the shell, without running it."""
+        captured = {}
+
+        class _FakeProc:
+            returncode = 0
+
+            def communicate(self, timeout=None):
+                return "", ""
+
+            def poll(self):
+                return 0
+
+        def _fake_popen(target, **kwargs):
+            captured["target"] = target
+            captured["shell"] = kwargs.get("shell")
+            return _FakeProc()
+
+        with (
+            mock.patch.object(wrap, "posix_shell", return_value=bash),
+            mock.patch.object(wrap.subprocess, "Popen", _fake_popen),
+        ):
+            wrap._run_command("ls -la", timeout=5, merge_stderr=True)
+        return captured
+
+    def test_windows_runs_the_command_through_bash_not_cmd(self):
+        """The behaviour that actually broke: bash syntax must reach bash."""
+        wrap = self._import_wrap()
+        call = self._popen_call(wrap, r"C:\Git\bin\bash.exe")
+        assert call["target"] == [r"C:\Git\bin\bash.exe", "-c", "ls -la"]
+        assert call["shell"] is False, "shell=True on Windows routes to cmd.exe"
+
+    def test_posix_still_uses_plain_shell_execution(self):
+        """No behaviour change where things already worked."""
+        wrap = self._import_wrap()
+        call = self._popen_call(wrap, None)
+        assert call["target"] == "ls -la"
+        assert call["shell"] is True
+
+    def test_windows_without_any_bash_disables_chain_rewriting(self):
+        """No POSIX shell means the `{ ... }` rewrite would corrupt the command.
+
+        Falling back to whole-output compression loses per-segment processors,
+        which is a far smaller loss than losing the command's output entirely.
+        """
+        wrap = self._import_wrap()
+        with (
+            mock.patch.object(wrap, "IS_WINDOWS", True),
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(wrap.shutil, "which", return_value=None),
+            mock.patch.object(wrap, "_WINDOWS_BASH_CANDIDATES", ()),
+        ):
+            assert wrap.posix_shell() is None
+            assert wrap.supports_posix_chaining() is False
 
 
 class TestChainPerSegmentCompression:

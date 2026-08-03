@@ -9,6 +9,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src import __version__
 
+IS_WINDOWS = os.name == "nt"
+
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -212,20 +214,36 @@ class TestMarketplaceDetection:
 
 
 class TestBinScript:
+    """The CLI entry point ships as two files: a POSIX script and a .cmd shim.
+
+    ``bin/token-saver`` has a ``#!`` line, which Windows does not honour — it
+    cannot be executed directly there, which is exactly why
+    ``bin/token-saver.cmd`` exists.  Testing only the POSIX one left the shim
+    completely unexercised until CI first ran on Windows.
+    """
+
+    @staticmethod
+    def _entry_point() -> str:
+        name = "token-saver.cmd" if IS_WINDOWS else "token-saver"
+        return os.path.join(REPO_DIR, "bin", name)
+
     def test_bin_script_exists_and_executable(self):
         bin_path = os.path.join(REPO_DIR, "bin", "token-saver")
         assert os.path.exists(bin_path)
         assert os.access(bin_path, os.X_OK)
 
+    def test_windows_shim_exists(self):
+        """Present on every OS, so a POSIX-only contributor cannot delete it."""
+        assert os.path.isfile(os.path.join(REPO_DIR, "bin", "token-saver.cmd"))
+
     def test_bin_script_runs_version(self):
-        bin_path = os.path.join(REPO_DIR, "bin", "token-saver")
         result = subprocess.run(  # noqa: S603
-            [bin_path, "version"],
+            [self._entry_point(), "version"],
             capture_output=True,
             text=True,
             encoding="utf-8",
             cwd=REPO_DIR,
             check=False,
         )
-        assert result.returncode == 0
+        assert result.returncode == 0, result.stderr
         assert f"token-saver v{__version__}" in result.stdout

@@ -56,6 +56,18 @@ def _data_dir(home: str) -> str:
     return os.path.join(home, ".token-saver")
 
 
+def _claude_dir(home: str) -> str:
+    """Claude Code's settings directory inside the sandbox home.
+
+    Mirrors ``installers.claude._settings_dir()``: the roaming profile on
+    Windows, a dotfile on POSIX.  Hardcoding ``.claude`` here made this test
+    look for a file the installer had correctly written elsewhere.
+    """
+    if IS_WINDOWS:
+        return os.path.join(home, "AppData", "Roaming", "claude")
+    return os.path.join(home, ".claude")
+
+
 @pytest.fixture
 def home(tmp_path):
     d = tmp_path / "home"
@@ -108,8 +120,8 @@ def test_installed_tree_actually_compresses(home):
 
 def test_install_registers_the_hook(home):
     assert _run_installer(home, "--target", "claude").returncode == 0
-    settings = os.path.join(home, ".claude", "settings.json")
-    plugins = os.path.join(home, ".claude", "plugins", "installed_plugins.json")
+    settings = os.path.join(_claude_dir(home), "settings.json")
+    plugins = os.path.join(_claude_dir(home), "plugins", "installed_plugins.json")
     assert os.path.isfile(settings) or os.path.isfile(plugins), (
         "installer registered neither settings.json nor installed_plugins.json"
     )

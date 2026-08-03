@@ -70,7 +70,19 @@ class SavingsTracker:
         In WAL mode the -wal and -shm files hold committed-but-uncheckpointed
         data; removing only the main .db can leave stale sidecars that
         re-corrupt the freshly created database.
+
+        Any open connection is closed first.  ``sqlite3.connect()`` succeeds on
+        a corrupt file — it is the first statement that raises — so the caller
+        arrives here holding an open handle, and Windows refuses to unlink a
+        file that is still open (``WinError 32``).  The delete would then be
+        swallowed by the suppress below, the corrupt file would survive, and
+        recovery would fail on the very next statement.  POSIX unlink semantics
+        hide all of this, which is why it surfaced only on the Windows runner.
         """
+        conn = getattr(self, "conn", None)
+        if conn is not None:
+            with contextlib.suppress(sqlite3.Error):
+                conn.close()
         for suffix in ("", "-wal", "-shm"):
             with contextlib.suppress(OSError):
                 os.remove(self._db_path + suffix)

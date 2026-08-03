@@ -19,6 +19,7 @@ Flags:
 import logging
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -134,6 +135,53 @@ def split_output_by_markers(output: str, marker_prefix: str) -> list[tuple[int, 
     return chunks
 
 
+IS_WINDOWS = os.name == "nt"
+
+#: Where Git for Windows puts bash when it is not on PATH.  Claude Code looks
+#: in the same places, and honours the same override.
+_WINDOWS_BASH_CANDIDATES = (
+    r"C:\Program Files\Git\bin\bash.exe",
+    r"C:\Program Files (x86)\Git\bin\bash.exe",
+)
+
+
+def posix_shell() -> str | None:
+    """Path to a POSIX shell on Windows, or ``None`` if the machine has none.
+
+    Irrelevant on POSIX, where ``shell=True`` already means ``/bin/sh``.  It
+    matters on Windows, where ``shell=True`` means **cmd.exe** — and the
+    commands we are handed are bash: Claude Code's Bash tool runs them through
+    Git Bash, so ``ls -la`` and ``grep`` are as unintelligible to cmd.exe as
+    the ``{ ... }`` groups :func:`inject_markers` adds.  Running them there
+    produced ``'{' is not recognized as an internal or external command`` and
+    lost the user's output entirely.
+
+    ``CLAUDE_CODE_GIT_BASH_PATH`` is the documented way to point Claude Code at
+    a non-standard Git Bash, so honour it first and stay consistent with
+    whatever the user already configured.
+    """
+    if not IS_WINDOWS:
+        return None
+    configured = os.environ.get("CLAUDE_CODE_GIT_BASH_PATH")
+    if configured and os.path.isfile(configured):
+        return configured
+    found = shutil.which("bash")
+    if found:
+        return found
+    return next((c for c in _WINDOWS_BASH_CANDIDATES if os.path.isfile(c)), None)
+
+
+def supports_posix_chaining() -> bool:
+    """Whether per-segment chain compression can work on this machine.
+
+    Marker injection is POSIX shell syntax.  Without a POSIX shell we must not
+    rewrite the chain at all — a mangled command is far worse than an
+    uncompressed one — so the caller falls back to compressing the combined
+    output as a single command.
+    """
+    return not IS_WINDOWS or posix_shell() is not None
+
+
 def _run_command(
     command_str: str,
     timeout: int,
@@ -158,10 +206,17 @@ def _run_command(
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
+    # On Windows, hand the command to bash explicitly rather than letting
+    # shell=True route it to cmd.exe.  See posix_shell().
+    bash = posix_shell()
+    popen_target: str | list[str] = [bash, "-c", command_str] if bash else command_str
+
     try:
-        child_proc = subprocess.Popen(  # noqa: S602
-            command_str,
-            shell=True,
+        # S603: running the user's own command *is* this script's purpose — it is
+        # the command Claude Code was about to run anyway.
+        child_proc = subprocess.Popen(  # noqa: S603
+            popen_target,
+            shell=bash is None,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
             text=True,
@@ -260,7 +315,9 @@ def main():
     timeout = config.get("wrap_timeout")
 
     chain_parts = split_chain_with_ops(command_str)
-    is_chain = len(chain_parts) > 1
+    # Without a POSIX shell the marker rewrite cannot be executed, so treat
+    # the chain as one opaque command instead of corrupting it.
+    is_chain = len(chain_parts) > 1 and supports_posix_chaining()
 
     engine = CompressionEngine()
 
