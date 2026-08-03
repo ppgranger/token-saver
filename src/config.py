@@ -177,7 +177,7 @@ def _load_config() -> dict[str, Any]:
     config_path = os.path.join(data_dir(), "config.json")
     if os.path.exists(config_path):
         try:
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 user_config = json.load(f)
             _apply_file_overrides(config, user_config, f"global:{config_path}")
         except (json.JSONDecodeError, OSError):
@@ -187,7 +187,7 @@ def _load_config() -> dict[str, Any]:
     project_config_path = _find_project_config()
     if project_config_path is not None:
         try:
-            with open(project_config_path) as f:
+            with open(project_config_path, encoding="utf-8") as f:
                 project_config = json.load(f)
             _apply_file_overrides(config, project_config, f"project:{project_config_path}")
         except (json.JSONDecodeError, OSError):

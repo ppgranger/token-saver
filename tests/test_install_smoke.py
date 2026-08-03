@@ -42,6 +42,7 @@ def _run_installer(home: str, *args: str) -> subprocess.CompletedProcess:
         [sys.executable, os.path.join(REPO_ROOT, "install.py"), *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=_sandbox_env(home),
         cwd=REPO_ROOT,
         timeout=180,
@@ -95,6 +96,7 @@ def test_installed_tree_actually_compresses(home):
         [sys.executable, "-c", program, core],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=_sandbox_env(home),
         cwd=home,  # deliberately not the repo, so a stray import would fail
         timeout=60,
@@ -112,7 +114,7 @@ def test_install_registers_the_hook(home):
         "installer registered neither settings.json nor installed_plugins.json"
     )
     if os.path.isfile(plugins):
-        with open(plugins) as f:
+        with open(plugins, encoding="utf-8") as f:
             assert "token-saver" in json.dumps(json.load(f))
 
 

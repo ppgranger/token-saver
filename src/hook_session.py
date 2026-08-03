@@ -20,7 +20,7 @@ def _check_migration_message():
 
     os.makedirs(data_dir(), exist_ok=True)
     try:
-        with open(sentinel, "w") as f:
+        with open(sentinel, "w", encoding="utf-8") as f:
             f.write(__version__)
     except OSError:
         pass

@@ -40,7 +40,7 @@ def _corpus() -> list[str]:
     found: set[str] = set()
     pattern = re.compile(r'(?:is_compressible|can_handle|compress)\(\s*(["\'])(.+?)\1')
     for path in pathlib.Path(__file__).parent.glob("*.py"):
-        for match in pattern.finditer(path.read_text()):
+        for match in pattern.finditer(path.read_text(encoding="utf-8")):
             command = match.group(2)
             if command and len(command) < 120 and "\\n" not in command:
                 found.add(command)

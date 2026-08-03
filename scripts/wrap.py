@@ -164,6 +164,13 @@ def _run_command(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
             text=True,
+            # Without these, `text=True` decodes with the *locale* encoding —
+            # cp1252 on Windows — so a `git log` with an accent or npm's
+            # box-drawing output raises UnicodeDecodeError and takes the hook
+            # down with it.  `replace` keeps that fail-open: we would rather
+            # compress output with a mangled character than lose the command.
+            encoding="utf-8",
+            errors="replace",
             start_new_session=True,
         )
         stdout, stderr = child_proc.communicate(timeout=timeout)

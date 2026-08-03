@@ -27,7 +27,18 @@ target-version = "py310"
 line-length = 100
 
 [tool.ruff.lint]
+# Preview is enabled *for the linter only* — at [tool.ruff] level it also
+# switches the formatter to its preview style, which reformats 10 files for no
+# reason.  `explicit-preview-rules` then narrows it to preview rules named
+# below and nothing else; enabling them all surfaces ~300 unrelated findings.
+preview = true
+explicit-preview-rules = true
 select = [
+    # open() in text mode without encoding= uses the *locale* encoding, which is
+    # cp1252 on Windows.  This broke the Windows CI job the first time it ran:
+    # reading a UTF-8 test file raised UnicodeDecodeError.  Preview-only, hence
+    # the `preview = true` above.
+    "PLW1514",
     "F",      # Pyflakes — unused imports, undefined names, etc.
     "E",      # pycodestyle errors
     "W",      # pycodestyle warnings

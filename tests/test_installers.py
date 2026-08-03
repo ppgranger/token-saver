@@ -44,12 +44,12 @@ class TestStampVersion:
 
     def test_stamps_version_into_json(self):
         manifest_path = os.path.join(self.tmp_dir, "plugin.json")
-        with open(manifest_path, "w") as f:
+        with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump({"name": "test", "version": "0.0.0"}, f)
 
         stamp_version(self.tmp_dir, ["plugin.json"])
 
-        with open(manifest_path) as f:
+        with open(manifest_path, encoding="utf-8") as f:
             data = json.load(f)
         assert data["version"] == _read_version()
         assert data["name"] == "test"
@@ -57,7 +57,7 @@ class TestStampVersion:
     def test_skips_symlinked_manifest(self):
         # Create a real file and a symlink to it
         real_path = os.path.join(self.tmp_dir, "real.json")
-        with open(real_path, "w") as f:
+        with open(real_path, "w", encoding="utf-8") as f:
             json.dump({"version": "0.0.0"}, f)
 
         link_dir = os.path.join(self.tmp_dir, "linked")
@@ -68,7 +68,7 @@ class TestStampVersion:
         stamp_version(link_dir, ["plugin.json"])
 
         # Original should NOT have been stamped (symlink was skipped)
-        with open(real_path) as f:
+        with open(real_path, encoding="utf-8") as f:
             data = json.load(f)
         assert data["version"] == "0.0.0"
 
@@ -79,7 +79,7 @@ class TestStampVersion:
     def test_stamps_marketplace_plugin_entries(self):
         """stamp_version must update version inside plugins[] array."""
         manifest_path = os.path.join(self.tmp_dir, "marketplace.json")
-        with open(manifest_path, "w") as f:
+        with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(
                 {
                     "name": "test-marketplace",
@@ -92,7 +92,7 @@ class TestStampVersion:
 
         stamp_version(self.tmp_dir, ["marketplace.json"])
 
-        with open(manifest_path) as f:
+        with open(manifest_path, encoding="utf-8") as f:
             data = json.load(f)
         # The nested version must be stamped
         assert data["plugins"][0]["version"] == _read_version()
@@ -102,7 +102,7 @@ class TestStampVersion:
     def test_stamps_both_top_level_and_nested(self):
         """If a file has both top-level version AND plugins[], stamp both."""
         manifest_path = os.path.join(self.tmp_dir, "hybrid.json")
-        with open(manifest_path, "w") as f:
+        with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(
                 {
                     "name": "hybrid",
@@ -116,7 +116,7 @@ class TestStampVersion:
 
         stamp_version(self.tmp_dir, ["hybrid.json"])
 
-        with open(manifest_path) as f:
+        with open(manifest_path, encoding="utf-8") as f:
             data = json.load(f)
         assert data["version"] == _read_version()
         assert data["plugins"][0]["version"] == _read_version()
@@ -133,7 +133,7 @@ class TestMigrateFromLegacy:
         legacy_dir = os.path.join(self.tmp_home, ".claude", "plugins", "token-saving")
         os.makedirs(legacy_dir)
         # Write a dummy file to prove it gets removed
-        with open(os.path.join(legacy_dir, "dummy.txt"), "w") as f:
+        with open(os.path.join(legacy_dir, "dummy.txt"), "w", encoding="utf-8") as f:
             f.write("old")
 
         with mock.patch("installers.common.home", return_value=self.tmp_home):
@@ -221,14 +221,14 @@ class TestMigrateFromLegacy:
                 ],
             }
         }
-        with open(settings_path, "w") as f:
+        with open(settings_path, "w", encoding="utf-8") as f:
             json.dump(settings, f)
 
         with mock.patch("installers.common.home", return_value=self.tmp_home):
             found = migrate_from_legacy()
 
         assert found is True
-        with open(settings_path) as f:
+        with open(settings_path, encoding="utf-8") as f:
             result = json.load(f)
         # Only the token-saver hook should remain
         assert len(result["hooks"]["PreToolUse"]) == 1
@@ -247,7 +247,7 @@ class TestMigrateFromLegacy:
         settings_path = os.path.join(settings_dir, "settings.json")
 
         # hooks is a string instead of a dict
-        with open(settings_path, "w") as f:
+        with open(settings_path, "w", encoding="utf-8") as f:
             json.dump({"hooks": "invalid"}, f)
 
         with mock.patch("installers.common.home", return_value=self.tmp_home):
@@ -300,13 +300,13 @@ class TestInstallCli:
 
     def test_install_overwrites_existing(self):
         dst = os.path.join(self.tmp_dir, "token-saver")
-        with open(dst, "w") as f:
+        with open(dst, "w", encoding="utf-8") as f:
             f.write("old content")
 
         with mock.patch("installers.common._cli_install_dir", return_value=self.tmp_dir):
             install_cli(use_symlink=False)
 
-        with open(dst) as f:
+        with open(dst, encoding="utf-8") as f:
             content = f.read()
         assert "old content" not in content
 
@@ -319,7 +319,7 @@ class TestInstallCli:
         dst = os.path.join(self.tmp_dir, "token-saver")
         assert os.path.islink(dst)
         target_before = os.path.realpath(dst)
-        with open(target_before) as f:
+        with open(target_before, encoding="utf-8") as f:
             original_content = f.read()
 
         # Reinstall with copy — should NOT overwrite the symlink target
@@ -327,7 +327,7 @@ class TestInstallCli:
             install_cli(use_symlink=False)
 
         assert not os.path.islink(dst)  # should be a real file now
-        with open(target_before) as f:
+        with open(target_before, encoding="utf-8") as f:
             assert f.read() == original_content  # original source untouched
 
 
@@ -366,7 +366,7 @@ class TestInstallCore:
         # Simulate a DB file that should survive
         os.makedirs(self.tmp_dir, exist_ok=True)
         db_path = os.path.join(self.tmp_dir, "savings.db")
-        with open(db_path, "w") as f:
+        with open(db_path, "w", encoding="utf-8") as f:
             f.write("database")
 
         with mock.patch("installers.common.token_saver_data_dir", return_value=self.tmp_dir):
@@ -395,7 +395,7 @@ class TestInstallCore:
         """install_core should remove legacy claude/ subdirectory from data dir."""
         legacy_claude = os.path.join(self.tmp_dir, "claude")
         os.makedirs(legacy_claude)
-        with open(os.path.join(legacy_claude, "hook_pretool.py"), "w") as f:
+        with open(os.path.join(legacy_claude, "hook_pretool.py"), "w", encoding="utf-8") as f:
             f.write("# old hook")
 
         with mock.patch("installers.common.token_saver_data_dir", return_value=self.tmp_dir):
@@ -421,11 +421,11 @@ class TestMigrateFromV1:
 
     def _write_settings(self, settings):
         os.makedirs(self._settings_dir(), exist_ok=True)
-        with open(self._settings_path(), "w") as f:
+        with open(self._settings_path(), "w", encoding="utf-8") as f:
             json.dump(settings, f)
 
     def _read_settings(self):
-        with open(self._settings_path()) as f:
+        with open(self._settings_path(), encoding="utf-8") as f:
             return json.load(f)
 
     def test_removes_v1_hooks_from_settings(self):
@@ -501,7 +501,7 @@ class TestMigrateFromV1:
         old_dir = os.path.join(self._settings_dir(), "plugins", "token-saver")
         claude_subdir = os.path.join(old_dir, "claude")
         os.makedirs(claude_subdir)
-        with open(os.path.join(claude_subdir, "hook_pretool.py"), "w") as f:
+        with open(os.path.join(claude_subdir, "hook_pretool.py"), "w", encoding="utf-8") as f:
             f.write("# old")
 
         with mock.patch("installers.claude.home", return_value=self.tmp_home):
@@ -568,7 +568,7 @@ class TestRegisterPlugin:
         with mock.patch("installers.claude.home", return_value=self.tmp_home):
             _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
 
-        with open(self._known_marketplaces_path()) as f:
+        with open(self._known_marketplaces_path(), encoding="utf-8") as f:
             known = json.load(f)
         assert "token-saver-marketplace" in known
         entry = known["token-saver-marketplace"]
@@ -583,7 +583,7 @@ class TestRegisterPlugin:
         with mock.patch("installers.claude.home", return_value=self.tmp_home):
             _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
 
-        with open(self._installed_plugins_path()) as f:
+        with open(self._installed_plugins_path(), encoding="utf-8") as f:
             data = json.load(f)
         assert data["version"] == 2
         key = "token-saver@token-saver-marketplace"
@@ -600,7 +600,7 @@ class TestRegisterPlugin:
         with mock.patch("installers.claude.home", return_value=self.tmp_home):
             _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
 
-        with open(self._settings_path()) as f:
+        with open(self._settings_path(), encoding="utf-8") as f:
             settings = json.load(f)
         key = "token-saver@token-saver-marketplace"
         assert settings["enabledPlugins"][key] is True
@@ -612,7 +612,7 @@ class TestRegisterPlugin:
             _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
             _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
 
-        with open(self._installed_plugins_path()) as f:
+        with open(self._installed_plugins_path(), encoding="utf-8") as f:
             data = json.load(f)
         key = "token-saver@token-saver-marketplace"
         assert len(data["plugins"][key]) == 1
@@ -623,7 +623,7 @@ class TestRegisterPlugin:
         # Pre-populate with another marketplace
         km_path = self._known_marketplaces_path()
         os.makedirs(os.path.dirname(km_path), exist_ok=True)
-        with open(km_path, "w") as f:
+        with open(km_path, "w", encoding="utf-8") as f:
             json.dump(
                 {
                     "claude-plugins-official": {
@@ -637,7 +637,7 @@ class TestRegisterPlugin:
         with mock.patch("installers.claude.home", return_value=self.tmp_home):
             _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
 
-        with open(km_path) as f:
+        with open(km_path, encoding="utf-8") as f:
             known = json.load(f)
         assert "claude-plugins-official" in known
         assert "token-saver-marketplace" in known
@@ -648,7 +648,7 @@ class TestRegisterPlugin:
         # Pre-populate with another plugin in v2 format
         plugins_path = self._installed_plugins_path()
         os.makedirs(os.path.dirname(plugins_path), exist_ok=True)
-        with open(plugins_path, "w") as f:
+        with open(plugins_path, "w", encoding="utf-8") as f:
             json.dump(
                 {
                     "version": 2,
@@ -662,7 +662,7 @@ class TestRegisterPlugin:
         with mock.patch("installers.claude.home", return_value=self.tmp_home):
             _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
 
-        with open(plugins_path) as f:
+        with open(plugins_path, encoding="utf-8") as f:
             data = json.load(f)
         assert "other@official" in data["plugins"]
         assert "token-saver@token-saver-marketplace" in data["plugins"]
@@ -704,7 +704,7 @@ class TestUnregisterPlugin:
         os.makedirs(plugins_dir, exist_ok=True)
 
         # Set up installed state in v2 format
-        with open(self._installed_plugins_path(), "w") as f:
+        with open(self._installed_plugins_path(), "w", encoding="utf-8") as f:
             json.dump(
                 {
                     "version": 2,
@@ -717,7 +717,7 @@ class TestUnregisterPlugin:
                 f,
             )
 
-        with open(self._known_marketplaces_path(), "w") as f:
+        with open(self._known_marketplaces_path(), "w", encoding="utf-8") as f:
             json.dump(
                 {
                     "token-saver-marketplace": {
@@ -728,7 +728,7 @@ class TestUnregisterPlugin:
             )
 
         os.makedirs(os.path.dirname(self._settings_path()), exist_ok=True)
-        with open(self._settings_path(), "w") as f:
+        with open(self._settings_path(), "w", encoding="utf-8") as f:
             json.dump(
                 {
                     "enabledPlugins": {
@@ -741,14 +741,14 @@ class TestUnregisterPlugin:
         with mock.patch("installers.claude.home", return_value=self.tmp_home):
             _unregister_plugin()
 
-        with open(self._installed_plugins_path()) as f:
+        with open(self._installed_plugins_path(), encoding="utf-8") as f:
             data = json.load(f)
         assert "token-saver@token-saver-marketplace" not in data["plugins"]
 
-        with open(self._known_marketplaces_path()) as f:
+        with open(self._known_marketplaces_path(), encoding="utf-8") as f:
             assert "token-saver-marketplace" not in json.load(f)
 
-        with open(self._settings_path()) as f:
+        with open(self._settings_path(), encoding="utf-8") as f:
             assert "enabledPlugins" not in json.load(f)
 
     def test_removes_from_v1_format(self):
@@ -758,7 +758,7 @@ class TestUnregisterPlugin:
         plugins_dir = os.path.join(self._settings_dir(), "plugins")
         os.makedirs(plugins_dir, exist_ok=True)
 
-        with open(self._installed_plugins_path(), "w") as f:
+        with open(self._installed_plugins_path(), "w", encoding="utf-8") as f:
             json.dump(
                 [
                     {
@@ -770,7 +770,7 @@ class TestUnregisterPlugin:
             )
 
         os.makedirs(os.path.dirname(self._settings_path()), exist_ok=True)
-        with open(self._settings_path(), "w") as f:
+        with open(self._settings_path(), "w", encoding="utf-8") as f:
             json.dump(
                 {
                     "enabledPlugins": {
@@ -783,14 +783,14 @@ class TestUnregisterPlugin:
         with mock.patch("installers.claude.home", return_value=self.tmp_home):
             _unregister_plugin()
 
-        with open(self._installed_plugins_path()) as f:
+        with open(self._installed_plugins_path(), encoding="utf-8") as f:
             assert len(json.load(f)) == 0
 
     def test_cleans_legacy_hooks(self):
         from installers.claude import _unregister_plugin
 
         os.makedirs(os.path.dirname(self._settings_path()), exist_ok=True)
-        with open(self._settings_path(), "w") as f:
+        with open(self._settings_path(), "w", encoding="utf-8") as f:
             json.dump(
                 {
                     "enabledPlugins": {
@@ -816,7 +816,7 @@ class TestUnregisterPlugin:
         with mock.patch("installers.claude.home", return_value=self.tmp_home):
             _unregister_plugin()
 
-        with open(self._settings_path()) as f:
+        with open(self._settings_path(), encoding="utf-8") as f:
             settings = json.load(f)
         assert "enabledPlugins" not in settings
         assert "hooks" not in settings
@@ -831,7 +831,7 @@ class TestPluginStructure:
     def test_plugin_json_valid(self):
         path = os.path.join(self._repo_root(), ".claude-plugin", "plugin.json")
         assert os.path.isfile(path)
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
         assert "name" in data
         assert "version" in data
@@ -840,7 +840,7 @@ class TestPluginStructure:
     def test_marketplace_json_valid(self):
         path = os.path.join(self._repo_root(), ".claude-plugin", "marketplace.json")
         assert os.path.isfile(path)
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
         assert "plugins" in data
         assert isinstance(data["plugins"], list)
@@ -849,7 +849,7 @@ class TestPluginStructure:
     def test_hooks_json_uses_plugin_root_var(self):
         path = os.path.join(self._repo_root(), "hooks", "hooks.json")
         assert os.path.isfile(path)
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             content = f.read()
         data = json.loads(content)
         # All command paths must use ${CLAUDE_PLUGIN_ROOT}, not absolute paths

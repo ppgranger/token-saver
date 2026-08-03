@@ -260,7 +260,7 @@ class TestSavingsTracker:
         """If DB is corrupted, it should be recreated."""
         self.tracker.close()
         # Corrupt the DB file
-        with open(SavingsTracker.DB_PATH, "w") as f:
+        with open(SavingsTracker.DB_PATH, "w", encoding="utf-8") as f:
             f.write("not a valid sqlite database")
 
         # Should recreate without error
@@ -304,6 +304,7 @@ class TestStatsCLI:
             [sys.executable, self.stats_script, *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             env=env,
         )
         return result

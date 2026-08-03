@@ -71,6 +71,18 @@ jobs:
       - name: Run tests with coverage
         run: python -m pytest tests/ -v --cov=src --cov-report=xml --cov-report=term
 
+      # Text I/O that omits `encoding=` decodes with the *locale* encoding —
+      # cp1252 on Windows — which is how the first Windows run died: a fixture
+      # containing "❌" was unreadable.  Ruff's PLW1514 catches open() but not
+      # subprocess(text=True), which is most of our exposure, so this flag is
+      # the real guard.  Linux-only: it is a property of the source, not the OS,
+      # and one run is enough to fail the PR.
+      - name: Check for locale-dependent text I/O
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        env:
+          PYTHONWARNDEFAULTENCODING: "1"
+        run: python -W error::EncodingWarning -m pytest tests/ -q
+
       - name: Upload coverage
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         uses: codecov/codecov-action@v4

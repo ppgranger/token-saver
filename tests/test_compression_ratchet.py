@@ -14,7 +14,7 @@ alters a ratio, regenerate:
         pathlib.Path('tests/compression_baselines.json').write_text(json.dumps( \\
             {r.label: {'processor': r.processor, 'was_compressed': r.was_compressed, \\
                        'ratio': round(r.ratio,1)} for r in measure()}, \\
-            indent=2, sort_keys=True) + chr(10))"
+            indent=2, sort_keys=True) + chr(10), encoding='utf-8')"
 
 and justify the change in the PR.
 """
@@ -36,7 +36,9 @@ from scripts.audit_compression import SCENARIOS, measure
 #: refactors — not a real loss of compression.
 TOLERANCE_PP = 2.0
 
-BASELINES = json.loads((pathlib.Path(__file__).parent / "compression_baselines.json").read_text())
+BASELINES = json.loads(
+    (pathlib.Path(__file__).parent / "compression_baselines.json").read_text(encoding="utf-8")
+)
 
 RESULTS = {r.label: r for r in measure()}
 

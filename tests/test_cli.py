@@ -18,6 +18,7 @@ def _run_cli(*args, stdin=None):
         [sys.executable, "-m", "src.cli", *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=REPO_DIR,
         input=stdin,
         check=False,
@@ -222,6 +223,7 @@ class TestBinScript:
             [bin_path, "version"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=REPO_DIR,
             check=False,
         )

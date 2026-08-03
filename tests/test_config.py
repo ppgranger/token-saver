@@ -116,7 +116,7 @@ class TestProjectConfig:
         """Test that .token-saver.json in cwd overrides global defaults."""
         project_config = {"max_diff_hunk_lines": 300, "max_log_entries": 50}
         config_file = tmp_path / ".token-saver.json"
-        config_file.write_text(json.dumps(project_config))
+        config_file.write_text(json.dumps(project_config), encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         config.reload()
 
@@ -129,7 +129,7 @@ class TestProjectConfig:
         """Test that config is found in parent directories."""
         project_config = {"generic_truncate_threshold": 1000}
         config_file = tmp_path / ".token-saver.json"
-        config_file.write_text(json.dumps(project_config))
+        config_file.write_text(json.dumps(project_config), encoding="utf-8")
         subdir = tmp_path / "deep" / "nested" / "path"
         subdir.mkdir(parents=True)
         monkeypatch.chdir(subdir)
@@ -149,7 +149,7 @@ class TestProjectConfig:
     def test_invalid_project_config_ignored(self, tmp_path, monkeypatch):
         """Test that invalid JSON in project config is silently ignored."""
         config_file = tmp_path / ".token-saver.json"
-        config_file.write_text("{ invalid json !!!")
+        config_file.write_text("{ invalid json !!!", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         config.reload()
 
@@ -160,7 +160,7 @@ class TestProjectConfig:
         """Test that _config_source tracks where values come from."""
         project_config = {"max_log_entries": 99}
         config_file = tmp_path / ".token-saver.json"
-        config_file.write_text(json.dumps(project_config))
+        config_file.write_text(json.dumps(project_config), encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         config.reload()
 
@@ -173,7 +173,7 @@ class TestProjectConfig:
         """A wrong-typed file value must not reach downstream arithmetic."""
         project_config = {"max_chain_depth": "deep", "wrap_timeout": [1, 2]}
         config_file = tmp_path / ".token-saver.json"
-        config_file.write_text(json.dumps(project_config))
+        config_file.write_text(json.dumps(project_config), encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         config.reload()
 
@@ -186,7 +186,7 @@ class TestProjectConfig:
         """Numeric strings in file config are coerced to the default's type."""
         project_config = {"wrap_timeout": "120", "min_compression_ratio": "0.25"}
         config_file = tmp_path / ".token-saver.json"
-        config_file.write_text(json.dumps(project_config))
+        config_file.write_text(json.dumps(project_config), encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         config.reload()
 
@@ -198,7 +198,7 @@ class TestProjectConfig:
         """Typo'd / unknown keys in file config are dropped."""
         project_config = {"max_diff_hunkk_lines": 999}
         config_file = tmp_path / ".token-saver.json"
-        config_file.write_text(json.dumps(project_config))
+        config_file.write_text(json.dumps(project_config), encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         config.reload()
 

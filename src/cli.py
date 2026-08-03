@@ -326,6 +326,10 @@ def cmd_benchmark(args):
             shell=True,
             capture_output=True,
             text=True,
+            # See scripts/wrap.py: locale decoding is a Windows crash waiting
+            # to happen, and losing the command is worse than a mangled char.
+            encoding="utf-8",
+            errors="replace",
             timeout=config.get("wrap_timeout"),
             check=False,
         )

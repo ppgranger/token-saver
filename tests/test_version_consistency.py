@@ -35,7 +35,7 @@ REPO_ROOT = pathlib.Path(__file__).parent.parent
 
 
 def _load(rel: str) -> dict:
-    return json.loads((REPO_ROOT / rel).read_text())
+    return json.loads((REPO_ROOT / rel).read_text(encoding="utf-8"))
 
 
 @pytest.mark.parametrize(
@@ -60,7 +60,7 @@ def test_marketplace_catalog_version_matches_source():
 
 def test_pyproject_declares_no_literal_version():
     """A hand-maintained duplicate is what caused the drift; keep it derived."""
-    pyproject = (REPO_ROOT / "pyproject.toml").read_text()
+    pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     project_table = pyproject.split("[project]", 1)[1].split("\n[", 1)[0]
     assert not re.search(r'^\s*version\s*=\s*["\']', project_table, re.M), (
         "pyproject.toml declares a literal version again — it should stay "

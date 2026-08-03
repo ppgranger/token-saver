@@ -347,6 +347,7 @@ class TestHookPretoolIntegration:
             input=json.dumps(input_data),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
         )
         return result.stdout, result.returncode
@@ -383,6 +384,7 @@ class TestHookPretoolIntegration:
             input="not json",
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
         )
         assert result.returncode == 0
@@ -872,7 +874,7 @@ class TestChainPerSegmentCompression:
         rewritten = wrap.inject_markers(parts, prefix)
         # shell=True is the point: we are asserting the rewrite actually parses.
         proc = subprocess.run(  # noqa: S602
-            rewritten, shell=True, capture_output=True, text=True, check=False
+            rewritten, shell=True, capture_output=True, text=True, encoding="utf-8", check=False
         )
         return proc.returncode, proc.stdout, proc.stderr
 
@@ -932,6 +934,7 @@ class TestChainPerSegmentCompression:
             [sys.executable, wrap_path, cmd],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=10,
         )
         assert result.returncode == 0, result.stderr
@@ -1008,6 +1011,7 @@ class TestChainPerSegmentCompression:
             [sys.executable, wrap_path, "seq 1 100000"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=30,
             env=env,
         )
@@ -1023,6 +1027,7 @@ class TestChainPerSegmentCompression:
             [sys.executable, wrap_path, "--dry-run", "echo segA && echo segB"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=10,
         )
         assert result.returncode == 0, result.stderr
@@ -1041,11 +1046,37 @@ class TestChainPerSegmentCompression:
             [sys.executable, wrap_path, "echo hello"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=10,
         )
         assert result.returncode == 0
         assert "hello" in result.stdout
         assert "__TS_MARK_" not in result.stdout
+
+    def test_e2e_wrap_survives_undecodable_output(self):
+        """A command emitting bytes that are not valid UTF-8 must not kill the hook.
+
+        ``_run_command`` decodes with ``errors="replace"`` precisely so this
+        stays fail-open: mangling a byte is acceptable, losing the user's
+        command is not.  With strict decoding this raises UnicodeDecodeError
+        inside the wrapper and the user gets nothing back.
+        """
+        import subprocess
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        wrap_path = os.path.join(repo_root, "scripts", "wrap.py")
+        # 0x80 is a continuation byte with no lead byte — invalid UTF-8 anywhere.
+        emit = f"{sys.executable} -c \"import sys; sys.stdout.buffer.write(b'ok-\\x80-end')\""
+        result = subprocess.run(  # noqa: S603, PLW1510
+            [sys.executable, wrap_path, emit],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "ok-" in result.stdout
+        assert "-end" in result.stdout
 
     def _run_wrap_chain(self, cmd, timeout=10):
         import subprocess
@@ -1056,6 +1087,7 @@ class TestChainPerSegmentCompression:
             [sys.executable, wrap_path, cmd],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=timeout,
         )
 
@@ -1109,6 +1141,7 @@ class TestChainPerSegmentCompression:
             [sys.executable, wrap_path, "sh -c 'echo early; sleep 10'"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=15,
             env=env,
         )
@@ -1148,7 +1181,7 @@ class TestHookManifests:
 
     def test_timeouts_are_plausible_seconds(self):
         for path in self._manifests():
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 manifest = json.load(f)
             for event, entries in manifest["hooks"].items():
                 for entry in entries:
@@ -1260,6 +1293,7 @@ class TestCmdExplain:
             [sys.executable, "-m", "src.cli", "explain", *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=repo_root,
             timeout=20,
         )
