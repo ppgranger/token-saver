@@ -149,43 +149,48 @@ def compress_diff(lines, max_hunk, max_context):
     return result
 
 
-def group_files_by_dir(lines, max_files):
-    """Group a list of file paths by directory.
+def group_paths_by_dir(paths: list[str]) -> dict[str, list[str]]:
+    """Bucket file paths by their parent directory.
 
-    Returns a formatted list of strings ready for output.
+    A path with no separator is filed under ``"."``; one rooted at ``/`` keeps
+    its empty parent, so it renders as ``/name`` rather than ``./name``.
     """
     by_dir: dict[str, list[str]] = defaultdict(list)
-    for raw_path in lines:
+    for raw_path in paths:
         path = raw_path.strip()
         if not path:
             continue
-        parts = path.rsplit("/", 1)
-        dir_name = parts[0] if len(parts) > 1 else "."
-        file_name = parts[-1] if len(parts) > 1 else path
-        by_dir[dir_name].append(file_name)
-
-    result = [f"{len(lines)} files found:"]
-    dirs = sorted(by_dir.items(), key=lambda x: -len(x[1]))
-    for dir_path, files in dirs[:max_files]:
-        if len(files) > 10:
-            exts: dict[str, int] = defaultdict(int)
-            for f in files:
-                ext = f.rsplit(".", 1)[-1] if "." in f else "(none)"
-                exts[ext] += 1
-            ext_desc = ", ".join(
-                f"*.{e}:{n}" for e, n in sorted(exts.items(), key=lambda x: -x[1])[:4]
-            )
-            result.append(f"  {dir_path}/ ({len(files)} files: {ext_desc})")
-        elif len(files) > 5:
-            result.append(f"  {dir_path}/ ({len(files)} files): {', '.join(files[:3])} ...")
+        head, sep, tail = path.rpartition("/")
+        if sep:
+            by_dir[head].append(tail)
         else:
-            for f in files:
-                result.append(f"  {dir_path}/{f}")
+            by_dir["."].append(path)
+    return by_dir
 
-    if len(dirs) > max_files:
-        result.append(f"... ({len(dirs) - max_files} more directories)")
 
-    return result
+def format_dir_group(dir_path: str, files: list[str], ext_threshold: int = 10) -> list[str]:
+    """Render one directory bucket, summarising harder as it gets bigger.
+
+    Three tiers: an extension histogram above ``ext_threshold`` files, a
+    count plus a sample above five, and the plain list below that.
+
+    This and :func:`group_paths_by_dir` are the parts ``search._process_fd``
+    and ``file_listing._process_find`` genuinely share.  They used to be
+    copy-pasted into both (and a third time into an unused helper here, whose
+    thresholds had drifted from both callers).  What legitimately differs —
+    directory ordering, whether to cap the number of directories, and this
+    threshold — stays with the callers.
+    """
+    if len(files) > ext_threshold:
+        exts: dict[str, int] = defaultdict(int)
+        for f in files:
+            ext = f.rsplit(".", 1)[-1] if "." in f else "(none)"
+            exts[ext] += 1
+        ext_desc = ", ".join(f"*.{e}:{n}" for e, n in sorted(exts.items(), key=lambda x: -x[1])[:4])
+        return [f"  {dir_path}/ ({len(files)} files: {ext_desc})"]
+    if len(files) > 5:
+        return [f"  {dir_path}/ ({len(files)} files): {', '.join(files[:3])} ..."]
+    return [f"  {dir_path}/{f}" for f in files]
 
 
 def compress_log_lines(

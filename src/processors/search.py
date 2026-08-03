@@ -5,6 +5,7 @@ from collections import defaultdict
 
 from .. import config
 from .base import Processor
+from .utils import format_dir_group, group_paths_by_dir
 
 
 class SearchProcessor(Processor):
@@ -164,32 +165,15 @@ class SearchProcessor(Processor):
         if len(lines) < 20:
             return output
 
-        by_dir: dict[str, list[str]] = defaultdict(list)
-        for path in lines:
-            parts = path.rsplit("/", 1)
-            dir_name = parts[0] if len(parts) > 1 else "."
-            file_name = parts[-1] if len(parts) > 1 else path
-            by_dir[dir_name].append(file_name)
-
+        by_dir = group_paths_by_dir(lines)
         max_files = config.get("search_max_files")
 
+        # Busiest directories first, capped: fd output is a haystack, and the
+        # directories with the most hits are the ones worth showing.
         result = [f"{len(lines)} files found:"]
         dirs = sorted(by_dir.items(), key=lambda x: -len(x[1]))
         for dir_path, files in dirs[:max_files]:
-            if len(files) > 10:
-                exts: dict[str, int] = defaultdict(int)
-                for f in files:
-                    ext = f.rsplit(".", 1)[-1] if "." in f else "(none)"
-                    exts[ext] += 1
-                ext_desc = ", ".join(
-                    f"*.{e}:{n}" for e, n in sorted(exts.items(), key=lambda x: -x[1])[:4]
-                )
-                result.append(f"  {dir_path}/ ({len(files)} files: {ext_desc})")
-            elif len(files) > 5:
-                result.append(f"  {dir_path}/ ({len(files)} files): {', '.join(files[:3])} ...")
-            else:
-                for f in files:
-                    result.append(f"  {dir_path}/{f}")
+            result.extend(format_dir_group(dir_path, files))
 
         if len(dirs) > max_files:
             result.append(f"... ({len(dirs) - max_files} more directories)")

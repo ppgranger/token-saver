@@ -5,6 +5,7 @@ from collections import defaultdict
 
 from .. import config
 from .base import Processor
+from .utils import format_dir_group, group_paths_by_dir
 
 
 class FileListingProcessor(Processor):
@@ -129,30 +130,15 @@ class FileListingProcessor(Processor):
         if len(lines) <= threshold:
             return output
 
-        by_dir: dict[str, list[str]] = defaultdict(list)
-        for path in lines:
-            parts = path.rsplit("/", 1)
-            dir_name = parts[0] if len(parts) > 1 else "."
-            file_name = parts[-1] if len(parts) > 1 else path
-            by_dir[dir_name].append(file_name)
+        by_dir = group_paths_by_dir(lines)
 
+        # Alphabetical and uncapped, unlike fd: `find` output is a tree the
+        # user is reading structurally, so path order carries meaning and
+        # dropping directories would hide branches.  The larger extension
+        # threshold follows from that — keep listing until it is really long.
         result = [f"{len(lines)} files found:"]
         for dir_path, files in sorted(by_dir.items()):
-            if len(files) > 20:
-                # Show extension breakdown
-                exts: dict[str, int] = defaultdict(int)
-                for f in files:
-                    ext = f.rsplit(".", 1)[-1] if "." in f else "(none)"
-                    exts[ext] += 1
-                ext_desc = ", ".join(
-                    f"*.{e}:{n}" for e, n in sorted(exts.items(), key=lambda x: -x[1])[:4]
-                )
-                result.append(f"  {dir_path}/ ({len(files)} files: {ext_desc})")
-            elif len(files) > 5:
-                result.append(f"  {dir_path}/ ({len(files)} files): {', '.join(files[:3])} ...")
-            else:
-                for f in files:
-                    result.append(f"  {dir_path}/{f}")
+            result.extend(format_dir_group(dir_path, files, ext_threshold=20))
 
         return "\n".join(result)
 
