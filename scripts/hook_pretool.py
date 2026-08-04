@@ -16,6 +16,14 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.chain_utils import CHAIN_SPLIT_RE, split_chain
+from src.console import use_utf8_io
+from src.shell_syntax import (
+    has_output_redirection,
+    has_shell_construct_open,
+    has_unquoted,
+    has_unquoted_background_operator,
+    has_unquoted_newline,
+)
 
 # --- Debug logging (writes to data_dir/hook.log when TOKEN_SAVER_DEBUG=true) ---
 _log = logging.getLogger("token-saver.hook_pretool")
@@ -52,9 +60,34 @@ def _load_compressible_patterns() -> list[str]:
 try:
     COMPRESSIBLE_PATTERNS = _load_compressible_patterns()
 except Exception:
-    _log.exception("Failed to load compressible patterns")
-    raise
-COMPILED_PATTERNS = [re.compile(p) for p in COMPRESSIBLE_PATTERNS]
+    # Fail open, like every other error path in this project.  A broken
+    # processor — most likely a user one under ~/.token-saver/processors/ —
+    # must not take down *every* Bash command in the session.  With no
+    # patterns loaded nothing matches, so commands run unwrapped.
+    _log.exception("Failed to load compressible patterns — compression disabled")
+    COMPRESSIBLE_PATTERNS = []
+
+
+def _compile_patterns(patterns: list[str]) -> tuple[list[str], list[re.Pattern]]:
+    """Compile patterns one by one, dropping (and logging) any invalid one.
+
+    Returns the sources and the compiled patterns as two parallel lists, so
+    ``_matched_compressible`` can still zip them to report *which* source
+    regex matched.
+    """
+    sources: list[str] = []
+    compiled: list[re.Pattern] = []
+    for p in patterns:
+        try:
+            compiled.append(re.compile(p))
+        except re.error:  # noqa: PERF203 — per-pattern isolation is the point, ~50 items once
+            _log.exception("Skipping invalid hook pattern %r", p)
+        else:
+            sources.append(p)
+    return sources, compiled
+
+
+COMPRESSIBLE_PATTERNS, COMPILED_PATTERNS = _compile_patterns(COMPRESSIBLE_PATTERNS)
 
 # Trailing pipe suffixes that are safe to wrap.
 # These are stripped before checking exclusions so commands like
@@ -135,67 +168,14 @@ def _normalize_cmd(cmd: str) -> str:
     return _PATH_PREFIX_RE.sub("", cmd)
 
 
-def _has_unquoted_construct(cmd: str, constructs: tuple[str, ...]) -> bool:
-    """Return True if any of ``constructs`` appears outside of single/double quotes.
-
-    Used to reject commands containing $(), backticks, or heredocs at the top
-    level — these break naive chain splitting and per-segment execution.
-    Constructs nested inside quoted strings (e.g. inside `git commit -m "..."`)
-    are tolerated because they don't affect splitting.
-    """
-    i, n = 0, len(cmd)
-    while i < n:
-        ch = cmd[i]
-        if ch in ("'", '"'):
-            quote = ch
-            i += 1
-            while i < n and cmd[i] != quote:
-                if cmd[i] == "\\" and i + 1 < n:
-                    i += 2
-                    continue
-                i += 1
-            if i < n:
-                i += 1
-            continue
-        for c in constructs:
-            if cmd.startswith(c, i):
-                return True
-        i += 1
-    return False
-
-
 # Constructs that break naive chain splitting / per-segment execution.
 _DANGEROUS_CONSTRUCTS = ("$(", "`", "<<")
 
-
-def _has_output_redirection(cmd: str) -> bool:
-    """Return True if an unquoted output redirection (>, >>, 2>, &>) is present.
-
-    Quote-aware: a ``>`` inside single/double quotes (e.g. ``git commit -m
-    "fixes >50%"``) is ignored.  Arrow/comparison operators ``->`` and ``=>``
-    are not treated as redirections.  Catches the no-space form (``log>out``)
-    that the old ``>\\s`` regex missed.
-    """
-    i, n = 0, len(cmd)
-    while i < n:
-        ch = cmd[i]
-        if ch in ("'", '"'):
-            quote = ch
-            i += 1
-            while i < n and cmd[i] != quote:
-                if cmd[i] == "\\" and i + 1 < n:
-                    i += 2
-                    continue
-                i += 1
-            if i < n:
-                i += 1
-            continue
-        if ch == ">":
-            prev = cmd[i - 1] if i > 0 else ""
-            if prev not in ("-", "="):
-                return True
-        i += 1
-    return False
+# Both checks now share the single quote-aware scanner in src.shell_syntax,
+# alongside the chain splitters.  Re-exported under the historical names so
+# the rest of this module (and its tests) read unchanged.
+_has_unquoted_construct = has_unquoted
+_has_output_redirection = has_output_redirection
 
 
 # Per-segment safety checks applied inside _is_chain_compressible().
@@ -225,6 +205,29 @@ _SEGMENT_EXCLUDED_PATTERNS = [
 _COMPILED_SEGMENT_EXCLUDED = [re.compile(p) for p in _SEGMENT_EXCLUDED_PATTERNS]
 
 
+def _ends_with_line_continuation(segment: str) -> bool:
+    """Return True if the segment ends with an unescaped backslash.
+
+    ``wrap.py`` closes each chain segment's brace group with a newline; a
+    trailing backslash would splice that newline away and swallow the closing
+    brace.  An even-length run of backslashes is an escaped backslash, not a
+    continuation.
+    """
+    stripped = segment.rstrip()
+    trailing = len(stripped) - len(stripped.rstrip("\\"))
+    return trailing % 2 == 1
+
+
+def _is_comment_only(segment: str) -> bool:
+    """Return True if the segment is nothing but a shell comment.
+
+    Such a segment would produce an empty brace group (``{ # foo\\n}``), which
+    is a syntax error.  Today it also silently comments out the rest of the
+    rewritten line, so the command never runs — either way, don't wrap it.
+    """
+    return segment.lstrip().startswith("#")
+
+
 def _is_segment_safe(segment: str) -> bool:
     """Return True if a single chain segment has no dangerous constructs.
 
@@ -232,6 +235,21 @@ def _is_segment_safe(segment: str) -> bool:
     ``/usr/bin/vim``, ``./python``, or ``.venv/bin/sudo`` are still caught.
     """
     if _has_output_redirection(segment):
+        return False
+    # A backgrounded segment (`npm run dev &`) detaches from wrap.py's
+    # subprocess entirely — nothing to compress, and the timeout can never
+    # reclaim a process it no longer has a handle on.
+    if has_unquoted_background_operator(segment):
+        return False
+    # An opening fragment of a for/while/if/case/... compound statement is
+    # not a real, independent segment: the chain splitter only saw one of
+    # its internal `;`s.  Wrapping it in its own brace group is a shell
+    # syntax error, so the whole command — every segment, not just this
+    # one — must be declined.  See has_shell_construct_open's docstring.
+    if has_shell_construct_open(segment):
+        return False
+    # Both break wrap.py's brace-group rewrite — see the helpers above.
+    if _ends_with_line_continuation(segment) or _is_comment_only(segment):
         return False
     norm = _normalize_cmd(segment)
     for pattern in _COMPILED_SEGMENT_EXCLUDED:
@@ -287,6 +305,13 @@ def is_compressible(command: str) -> bool:
     if re.search(r"(?<!['\"])\|\|(?!['\"])", cmd):
         return False
 
+    # A newline is a statement separator the chain splitter never sees (it
+    # only splits on && / ;), so a hidden second line bypasses every
+    # per-segment safety check below AND has its output silently discarded
+    # by wrap.py, which only ever compresses the first line as "the" command.
+    if has_unquoted_newline(cmd):
+        return False
+
     # Reject commands with unquoted $(), backticks, or heredocs — these break
     # naive chain splitting and per-segment execution.  Quoted occurrences
     # (e.g. inside `git commit -m "$(...)"`) are tolerated.
@@ -300,6 +325,11 @@ def is_compressible(command: str) -> bool:
 
     # Output redirections (quote-aware) are never wrapped.
     if _has_output_redirection(cmd):
+        return False
+
+    # A backgrounded command (`npm run dev &`) detaches immediately; there is
+    # no output to compress and no way for wrap.py's timeout to reclaim it.
+    if has_unquoted_background_operator(cmd):
         return False
 
     # Single command — strip safe trailing pipes for exclusion check only
@@ -358,6 +388,11 @@ def explain_decision(command: str) -> dict:
         result["excluded_by"] = r"||"
         return result
 
+    if has_unquoted_newline(cmd):
+        result["reason"] = "contains an unquoted newline (multiple statements)"
+        result["excluded_by"] = "unquoted newline"
+        return result
+
     if _has_unquoted_construct(cmd, _DANGEROUS_CONSTRUCTS):
         result["reason"] = "contains unquoted $(), backtick, or heredoc"
         result["excluded_by"] = "dangerous shell construct"
@@ -387,6 +422,11 @@ def explain_decision(command: str) -> dict:
         result["excluded_by"] = "output redirection"
         return result
 
+    if has_unquoted_background_operator(cmd):
+        result["reason"] = "contains an unquoted '&' (backgrounded command)"
+        result["excluded_by"] = "background operator"
+        return result
+
     check_cmd = _SAFE_TRAILING_PIPE_RE.sub("", cmd)
     norm_cmd = _normalize_cmd(check_cmd)
     excl = _matched_exclusion(check_cmd, norm_cmd)
@@ -407,6 +447,7 @@ def explain_decision(command: str) -> dict:
 
 
 def main():
+    use_utf8_io()
     try:
         raw_input = sys.stdin.read()
         _log.debug("stdin: %s", raw_input[:500])

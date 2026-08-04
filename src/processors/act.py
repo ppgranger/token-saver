@@ -19,6 +19,7 @@ _ERROR_RE = re.compile(r"\b(error|Error|ERROR|failed|Failed|FAILED|panic)\b")
 
 class ActProcessor(Processor):
     priority = 19
+    handles_failure = True
     hook_patterns = [
         r"^act(\s|$)",
     ]

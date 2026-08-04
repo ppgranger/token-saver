@@ -86,6 +86,17 @@ class EnvProcessor(Processor):
         r"^(env|printenv|set)\s*$",
     ]
 
+    def redacted_secrets(self, command: str, output: str) -> bool:
+        # Cheap, conservative pre-check mirroring process()'s own redaction
+        # logic (system-var and allowlist filtering aside — a false positive
+        # here only costs the ratio-fallback safety net on an output that
+        # turns out to have nothing sensitive, never the reverse).
+        return any(
+            _SENSITIVE_PATTERNS.search(line.split("=", 1)[0])
+            for line in output.splitlines()
+            if "=" in line
+        )
+
     @property
     def name(self) -> str:
         return "env"

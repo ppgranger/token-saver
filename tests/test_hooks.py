@@ -2,7 +2,9 @@
 
 import json
 import os
+import shlex
 import sys
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -347,6 +349,7 @@ class TestHookPretoolIntegration:
             input=json.dumps(input_data),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
         )
         return result.stdout, result.returncode
@@ -383,6 +386,7 @@ class TestHookPretoolIntegration:
             input="not json",
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
         )
         assert result.returncode == 0
@@ -830,6 +834,122 @@ class TestWrapperRunners:
         assert is_compressible("cd /project && uv run ruff check .")
 
 
+class TestWindowsShellSelection:
+    """wrap.py must not hand bash syntax to cmd.exe.
+
+    ``shell=True`` means ``/bin/sh`` on POSIX but **cmd.exe** on Windows, while
+    the commands we are given are bash — Claude Code's Bash tool runs them
+    through Git Bash.  The first Windows CI run showed the consequence: every
+    chained command came back as ``'{' is not recognized as an internal or
+    external command`` with the user's output gone.
+
+    ``IS_WINDOWS`` is patched rather than skipped so the Windows branch is
+    exercised on every OS; nothing here spawns a process.
+    """
+
+    def _import_wrap(self):
+        import importlib
+
+        return importlib.import_module("scripts.wrap")
+
+    def test_posix_needs_no_explicit_shell(self):
+        """On POSIX, shell=True is already /bin/sh — nothing to resolve."""
+        wrap = self._import_wrap()
+        with mock.patch.object(wrap, "IS_WINDOWS", False):
+            assert wrap.posix_shell() is None
+            assert wrap.supports_posix_chaining() is True
+
+    def test_windows_honours_the_documented_git_bash_override(self, tmp_path):
+        wrap = self._import_wrap()
+        fake_bash = tmp_path / "bash.exe"
+        fake_bash.write_text("", encoding="utf-8")
+        with (
+            mock.patch.object(wrap, "IS_WINDOWS", True),
+            mock.patch.dict(os.environ, {"CLAUDE_CODE_GIT_BASH_PATH": str(fake_bash)}),
+        ):
+            assert wrap.posix_shell() == str(fake_bash)
+
+    def test_windows_ignores_an_override_pointing_nowhere(self, tmp_path):
+        """A stale CLAUDE_CODE_GIT_BASH_PATH must not win over a real bash."""
+        wrap = self._import_wrap()
+        real = tmp_path / "real-bash.exe"
+        real.write_text("", encoding="utf-8")
+        with (
+            mock.patch.object(wrap, "IS_WINDOWS", True),
+            mock.patch.dict(os.environ, {"CLAUDE_CODE_GIT_BASH_PATH": str(tmp_path / "gone.exe")}),
+            mock.patch.object(wrap.shutil, "which", return_value=str(real)),
+        ):
+            assert wrap.posix_shell() == str(real)
+
+    def test_windows_falls_back_to_the_git_for_windows_install_path(self, tmp_path):
+        wrap = self._import_wrap()
+        candidate = tmp_path / "Git" / "bin" / "bash.exe"
+        candidate.parent.mkdir(parents=True)
+        candidate.write_text("", encoding="utf-8")
+        with (
+            mock.patch.object(wrap, "IS_WINDOWS", True),
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(wrap.shutil, "which", return_value=None),
+            mock.patch.object(wrap, "_WINDOWS_BASH_CANDIDATES", (str(candidate),)),
+        ):
+            assert wrap.posix_shell() == str(candidate)
+
+    def _popen_call(self, wrap, bash):
+        """Capture how _run_command would invoke the shell, without running it."""
+        captured = {}
+
+        class _FakeProc:
+            returncode = 0
+
+            def communicate(self, timeout=None):
+                return "", ""
+
+            def poll(self):
+                return 0
+
+        def _fake_popen(target, **kwargs):
+            captured["target"] = target
+            captured["shell"] = kwargs.get("shell")
+            return _FakeProc()
+
+        with (
+            mock.patch.object(wrap, "posix_shell", return_value=bash),
+            mock.patch.object(wrap.subprocess, "Popen", _fake_popen),
+        ):
+            wrap._run_command("ls -la", timeout=5, merge_stderr=True)
+        return captured
+
+    def test_windows_runs_the_command_through_bash_not_cmd(self):
+        """The behaviour that actually broke: bash syntax must reach bash."""
+        wrap = self._import_wrap()
+        call = self._popen_call(wrap, r"C:\Git\bin\bash.exe")
+        assert call["target"] == [r"C:\Git\bin\bash.exe", "-c", "ls -la"]
+        assert call["shell"] is False, "shell=True on Windows routes to cmd.exe"
+
+    def test_posix_still_uses_plain_shell_execution(self):
+        """No behaviour change where things already worked."""
+        wrap = self._import_wrap()
+        call = self._popen_call(wrap, None)
+        assert call["target"] == "ls -la"
+        assert call["shell"] is True
+
+    def test_windows_without_any_bash_disables_chain_rewriting(self):
+        """No POSIX shell means the `{ ... }` rewrite would corrupt the command.
+
+        Falling back to whole-output compression loses per-segment processors,
+        which is a far smaller loss than losing the command's output entirely.
+        """
+        wrap = self._import_wrap()
+        with (
+            mock.patch.object(wrap, "IS_WINDOWS", True),
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(wrap.shutil, "which", return_value=None),
+            mock.patch.object(wrap, "_WINDOWS_BASH_CANDIDATES", ()),
+        ):
+            assert wrap.posix_shell() is None
+            assert wrap.supports_posix_chaining() is False
+
+
 class TestChainPerSegmentCompression:
     """Tests for wrap.py's per-segment chain compression."""
 
@@ -841,17 +961,74 @@ class TestChainPerSegmentCompression:
     def test_inject_markers_single_segment(self):
         wrap = self._import_wrap()
         out = wrap.inject_markers([("git status", "")], "M_")
-        assert out == "git status"
+        assert out == "{ git status\n}"
 
     def test_inject_markers_two_segments_and(self):
         wrap = self._import_wrap()
         out = wrap.inject_markers([("a", "&&"), ("b", "")], "M_")
-        assert out == "a && { echo 'M_1'; b; }"
+        assert out == "{ a\n} && { echo 'M_1'\nb\n}"
 
     def test_inject_markers_three_segments_mixed(self):
         wrap = self._import_wrap()
         out = wrap.inject_markers([("a", "&&"), ("b", ";"), ("c", "")], "M_")
-        assert out == "a && { echo 'M_1'; b; } ; { echo 'M_2'; c; }"
+        assert out == "{ a\n} && { echo 'M_1'\nb\n} ; { echo 'M_2'\nc\n}"
+
+    def test_inject_markers_closes_groups_on_their_own_line(self):
+        """Regression: a trailing `#` comment used to eat the closing `; }`.
+
+        The rewritten command then failed to parse and the user's command never
+        ran at all — they got a shell syntax error instead of their output.
+        """
+        wrap = self._import_wrap()
+        out = wrap.inject_markers([("echo a # note", "&&"), ("echo b", "")], "M_")
+        for line in out.splitlines():
+            assert "#" not in line or line.rstrip().endswith("# note")
+
+    def _run_rewritten(self, parts, prefix="M_"):
+        """Execute an inject_markers rewrite through a real POSIX shell.
+
+        The rewrite is POSIX syntax, so it must reach a POSIX shell — the same
+        one wrap.py picks.  Using bare ``shell=True`` here sent it to cmd.exe on
+        Windows, and the test then failed on ``'{' is not recognized`` while the
+        product was doing the right thing.
+        """
+        import subprocess
+
+        wrap = self._import_wrap()
+        rewritten = wrap.inject_markers(parts, prefix)
+        bash = wrap.posix_shell()
+        if bash:
+            args, use_shell = [bash, "-c", rewritten], False
+        else:
+            # POSIX host: shell=True is already /bin/sh.
+            args, use_shell = rewritten, True
+        proc = subprocess.run(  # noqa: S603
+            args,
+            shell=use_shell,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        return proc.returncode, proc.stdout, proc.stderr
+
+    def test_rewrite_executes_with_trailing_comment(self):
+        code, out, err = self._run_rewritten([("echo a # note", "&&"), ("echo b", "")])
+        assert code == 0, err
+        assert "a" in out
+        assert "b" in out
+
+    def test_rewrite_keeps_cd_visible_to_later_segments(self):
+        """Brace groups, not subshells: `cd` must still affect the next segment."""
+        code, out, err = self._run_rewritten([("cd /tmp", "&&"), ("pwd", "")])
+        assert code == 0, err
+        assert "/tmp" in out
+
+    def test_rewrite_tolerates_braces_inside_quotes(self):
+        code, out, err = self._run_rewritten([('echo "a } b"', "&&"), ("echo c", "")])
+        assert code == 0, err
+        assert "a } b" in out
+        assert "c" in out
 
     def test_split_output_no_markers(self):
         wrap = self._import_wrap()
@@ -880,6 +1057,37 @@ class TestChainPerSegmentCompression:
         chunks = wrap.split_output_by_markers(text, "M_")
         assert chunks == [(0, ""), (1, "body1")]
 
+    def test_split_output_marker_glued_to_unterminated_segment(self):
+        """A segment without a trailing newline (e.g. `printf 'done'`) leaves
+        the next marker glued onto the same line instead of starting one.
+        The split must still find the boundary — and must not lose the
+        second segment's content to the wrong chunk."""
+        wrap = self._import_wrap()
+        text = "doneM_1\nbody1"
+        chunks = wrap.split_output_by_markers(text, "M_")
+        assert chunks == [(0, "done"), (1, "body1")]
+
+    def test_split_output_marker_glued_with_large_second_segment(self):
+        """Regression for the collapse where an unterminated first segment
+        swallowed nearly all of a large second segment into the wrong chunk."""
+        wrap = self._import_wrap()
+        big = "\n".join(f"line{i}" for i in range(200))
+        text = f"done_no_newlineM_1\n{big}"
+        chunks = wrap.split_output_by_markers(text, "M_")
+        assert chunks[0] == (0, "done_no_newline")
+        assert chunks[1][0] == 1
+        assert chunks[1][1] == big
+        assert chunks[1][1].count("\n") == 199
+
+    def test_strip_markers_glued_to_unterminated_segment(self):
+        """The raw shell output really is `donebody1` with no separator (the
+        first segment had no trailing newline) — stripping the marker text
+        must reproduce exactly that, matching what split_output_by_markers
+        treats as the segment boundary."""
+        wrap = self._import_wrap()
+        text = "doneM_1\nbody1"
+        assert wrap.strip_markers(text, "M_") == "donebody1"
+
     def test_e2e_wrap_chain_compresses_per_segment(self):
         """Run wrap.py via subprocess on a real chain; verify both segments survive."""
         import subprocess
@@ -891,11 +1099,33 @@ class TestChainPerSegmentCompression:
             [sys.executable, wrap_path, cmd],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=10,
         )
         assert result.returncode == 0, result.stderr
         # Both segments' output should appear; markers should NOT leak
         assert "segA" in result.stdout
+        assert "segB" in result.stdout
+        assert "__TS_MARK_" not in result.stdout
+
+    def test_e2e_wrap_chain_survives_segment_without_trailing_newline(self):
+        """`printf` (unlike `echo`) does not append a trailing newline, so the
+        marker for the next segment lands glued onto the same line.  Both
+        segments' output must still come through, marker-free."""
+        import subprocess
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        wrap_path = os.path.join(repo_root, "scripts", "wrap.py")
+        cmd = "printf noNewlineHere && echo segB"
+        result = subprocess.run(  # noqa: S603, PLW1510
+            [sys.executable, wrap_path, cmd],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "noNewlineHere" in result.stdout
         assert "segB" in result.stdout
         assert "__TS_MARK_" not in result.stdout
 
@@ -967,6 +1197,7 @@ class TestChainPerSegmentCompression:
             [sys.executable, wrap_path, "seq 1 100000"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=30,
             env=env,
         )
@@ -982,6 +1213,7 @@ class TestChainPerSegmentCompression:
             [sys.executable, wrap_path, "--dry-run", "echo segA && echo segB"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=10,
         )
         assert result.returncode == 0, result.stderr
@@ -1000,11 +1232,43 @@ class TestChainPerSegmentCompression:
             [sys.executable, wrap_path, "echo hello"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=10,
         )
         assert result.returncode == 0
         assert "hello" in result.stdout
         assert "__TS_MARK_" not in result.stdout
+
+    def test_e2e_wrap_survives_undecodable_output(self):
+        """A command emitting bytes that are not valid UTF-8 must not kill the hook.
+
+        ``_run_command`` decodes with ``errors="replace"`` precisely so this
+        stays fail-open: mangling a byte is acceptable, losing the user's
+        command is not.  With strict decoding this raises UnicodeDecodeError
+        inside the wrapper and the user gets nothing back.
+        """
+        import subprocess
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        wrap_path = os.path.join(repo_root, "scripts", "wrap.py")
+        # 0x80 is a continuation byte with no lead byte — invalid UTF-8 anywhere.
+        # shlex.quote keeps a Windows executable path intact: wrap.py runs this
+        # through bash, where the backslashes in C:\... would otherwise be eaten as
+        # escapes and the interpreter would not be found.
+        emit = (
+            f"{shlex.quote(sys.executable)} -c "
+            "\"import sys; sys.stdout.buffer.write(b'ok-\\x80-end')\""
+        )
+        result = subprocess.run(  # noqa: S603, PLW1510
+            [sys.executable, wrap_path, emit],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "ok-" in result.stdout
+        assert "-end" in result.stdout
 
     def _run_wrap_chain(self, cmd, timeout=10):
         import subprocess
@@ -1015,6 +1279,7 @@ class TestChainPerSegmentCompression:
             [sys.executable, wrap_path, cmd],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=timeout,
         )
 
@@ -1068,11 +1333,86 @@ class TestChainPerSegmentCompression:
             [sys.executable, wrap_path, "sh -c 'echo early; sleep 10'"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=15,
             env=env,
         )
         assert result.returncode == 124
         assert "timed out" in (result.stdout + result.stderr).lower()
+
+
+class TestChainSegmentGrouping:
+    """Segments that would break wrap.py's brace-group rewrite must not be wrapped."""
+
+    def test_trailing_line_continuation_rejected(self):
+        # The backslash-newline would swallow the group's closing brace.
+        assert not is_compressible("echo a \\\n&& git status")
+
+    def test_escaped_backslash_is_not_a_continuation(self):
+        # An even-length backslash run is a literal backslash, not a continuation.
+        assert is_compressible("echo 'a\\\\' && git status")
+
+    def test_comment_only_segment_rejected(self):
+        # Would produce an empty brace group, and today silently eats the chain.
+        assert not is_compressible("# note && git status")
+
+    def test_trailing_comment_on_a_segment_is_still_compressible(self):
+        # This is the case the brace-group fix exists for — it must stay wrapped.
+        assert is_compressible("ls && git status # note")
+
+
+class TestHookManifests:
+    """The `timeout` field in hooks.json is in SECONDS, not milliseconds."""
+
+    def _manifests(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return [
+            os.path.join(root, "hooks", "hooks.json"),
+            os.path.join(root, "antigravity", "hooks.json"),
+        ]
+
+    def test_timeouts_are_plausible_seconds(self):
+        for path in self._manifests():
+            with open(path, encoding="utf-8") as f:
+                manifest = json.load(f)
+            for event, entries in manifest["hooks"].items():
+                for entry in entries:
+                    for hook in entry["hooks"]:
+                        timeout = hook.get("timeout")
+                        assert timeout is not None, f"{path}:{event} has no timeout"
+                        # A millisecond value (e.g. 5000) would mean 83 minutes.
+                        assert 1 <= timeout <= 120, (
+                            f"{path}:{event} timeout={timeout} — "
+                            "the unit is seconds, this looks like milliseconds"
+                        )
+
+
+class TestPatternLoadingFailsOpen:
+    """A broken processor registry must not break every Bash command."""
+
+    def test_registry_failure_disables_compression_instead_of_raising(self):
+        import importlib
+        import unittest.mock as mock
+
+        import scripts.hook_pretool as hook
+
+        try:
+            with mock.patch(
+                "src.processors.collect_hook_patterns", side_effect=RuntimeError("boom")
+            ):
+                broken = importlib.reload(hook)
+                assert broken.COMPRESSIBLE_PATTERNS == []
+                assert broken.is_compressible("git status") is False
+        finally:
+            # Restore the real patterns for every subsequent test in the session.
+            importlib.reload(hook)
+
+    def test_invalid_pattern_is_skipped_not_fatal(self):
+        import scripts.hook_pretool as hook
+
+        sources, compiled = hook._compile_patterns([r"^git\b", r"(unclosed", r"^ls\b"])
+        assert sources == [r"^git\b", r"^ls\b"]
+        assert len(compiled) == 2
 
 
 class TestExplainDecision:
@@ -1145,6 +1485,7 @@ class TestCmdExplain:
             [sys.executable, "-m", "src.cli", "explain", *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=repo_root,
             timeout=20,
         )

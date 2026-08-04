@@ -9,6 +9,7 @@ from .utils import compress_log_lines
 
 class SyslogProcessor(Processor):
     priority = 42
+    handles_failure = True
     hook_patterns = [
         r"^(journalctl|dmesg)\b",
     ]

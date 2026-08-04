@@ -41,7 +41,7 @@ See `ansible_output.py` in this directory for a complete example.
 
 ## Custom Directory
 
-By default, user processors are loaded from `~/.token-saver/processors/`. To change this, set `user_processors_dir` in your config:
+By default, user processors are loaded from `~/.token-saver/processors/`. To change this, set `user_processors_dir` in your **global** config file at `~/.token-saver/config.json`:
 
 ```json
 {
@@ -49,7 +49,12 @@ By default, user processors are loaded from `~/.token-saver/processors/`. To cha
 }
 ```
 
+You can also set it via the `TOKEN_SAVER_USER_PROCESSORS_DIR` environment variable.
+
+**This key cannot be set from a project-level `.token-saver.json`.** That file is auto-discovered by walking up from the current directory, so any repository you `cd` into could otherwise point this at a directory of its choosing — and every file there is imported as Python at hook load time, on every Bash command. Only the global config file (which you write yourself) and environment variables are trusted for this key, along with `disabled_processors` and `redaction_allowlist`.
+
 ## Safety
 
 - A broken user processor (syntax error, missing class, runtime error) is skipped with a warning — it never crashes the engine.
 - Enable `TOKEN_SAVER_DEBUG=true` to see skip messages in stderr.
+- `user_processors_dir`, `disabled_processors`, and `redaction_allowlist` can only come from the global config file or an environment variable — never from a project's `.token-saver.json` (see above).

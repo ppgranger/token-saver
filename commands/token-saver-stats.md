@@ -9,10 +9,12 @@ Run the token-saver stats command to display savings:
 token-saver stats
 ```
 
-If the `token-saver` CLI is not in PATH, use:
+If the `token-saver` CLI is not in PATH, use the bundled wrapper script (not
+`src/cli.py` directly — it imports via the `src` package and needs the repo
+root on `sys.path`, which only `bin/token-saver` sets up):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/src/cli.py" stats
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/token-saver" stats
 ```
 
 Present a summary of tokens saved in the current session and overall.

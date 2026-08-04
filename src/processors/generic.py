@@ -4,6 +4,7 @@ import re
 
 from .. import config
 from .base import Processor
+from .critical import is_critical
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07")
 
@@ -212,7 +213,15 @@ class GenericProcessor(Processor):
             result.extend(group)
 
     def _truncate_middle(self, lines: list[str]) -> list[str]:
-        """Truncate middle of long output."""
+        """Truncate middle of long output, keeping any critical lines it contains.
+
+        Generic is the safety net: it is where failed commands and unrecognized
+        output land.  Plain head+tail truncation would drop an error that
+        happens to sit in the middle — which is exactly where a stack trace or
+        a compiler error usually is.  Critical lines from the truncated region
+        are therefore pulled out and kept, capped so a wall of errors can't
+        defeat the truncation entirely.
+        """
         keep_head = config.get("generic_keep_head")
         keep_tail = config.get("generic_keep_tail")
         total = len(lines)
@@ -220,11 +229,22 @@ class GenericProcessor(Processor):
         # every line back (worse than the original).  Use explicit empty slices.
         head = lines[:keep_head] if keep_head > 0 else []
         tail = lines[-keep_tail:] if keep_tail > 0 else []
+        middle = lines[len(head) : total - len(tail)] if keep_tail > 0 else lines[len(head) :]
         removed = total - len(head) - len(tail)
         if removed <= 0:
             return lines
+
+        max_kept = config.get("generic_keep_critical")
+        kept = [ln for ln in middle if is_critical(ln)][:max_kept] if max_kept > 0 else []
+        dropped = removed - len(kept)
+
+        marker = f"... ({dropped} lines truncated, {total} total) ..."
+        if not kept:
+            return [*head, marker, *tail]
         return [
             *head,
-            f"... ({removed} lines truncated, {total} total) ...",
+            marker,
+            *kept,
+            f"... ({len(kept)} critical lines kept from the truncated section) ...",
             *tail,
         ]

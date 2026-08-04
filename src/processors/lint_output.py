@@ -9,6 +9,7 @@ from .base import PYTHON_CMD, Processor
 
 class LintOutputProcessor(Processor):
     priority = 27
+    handles_failure = True
     hook_patterns = [
         r"^(eslint|ruff(\s+check)?|flake8|pylint|rubocop|golangci-lint|stylelint|biome\s+(check|lint))\b",
         rf"^{PYTHON_CMD}\s+-m\s+(flake8|pylint|ruff|mypy)\b",

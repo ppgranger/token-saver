@@ -12,10 +12,12 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src import core
+from src.console import use_utf8_io
 from src.platforms import Platform, get_command, get_tool_output
 
 
 def main():
+    use_utf8_io()
     try:
         input_data = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):

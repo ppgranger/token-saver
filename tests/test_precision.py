@@ -7,9 +7,12 @@ information survives compression.
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.engine import CompressionEngine
+from tests.failure_fixtures import CASES
 
 
 class TestGitPrecision:
@@ -525,6 +528,68 @@ class TestEnvPrecision:
         assert "AWS_SECRET_ACCESS_KEY" in compressed
         assert "DATABASE_PASSWORD" in compressed
         assert "GITHUB_TOKEN" in compressed
+
+    def test_short_secrets_not_leaked_via_ratio_fallback(self):
+        """Regression: when redacting a *short* secret makes the labelled
+        output ("14 environment variables...") no smaller than the input —
+        or not smaller by min_compression_ratio — the engine used to discard
+        the redacted result and fall back to the raw, unredacted original.
+        The secret must survive redaction regardless of how the ratio comes
+        out."""
+        lines = [f"VAR{i}=v" for i in range(12)] + ["API_KEY=s", "DB_PASSWORD=p"]
+        output = "\n".join(lines)
+        compressed, processor, was_compressed = self.engine.compress("env", output)
+        assert processor == "env"
+        assert was_compressed
+        assert not compressed.endswith("API_KEY=s")
+        assert "API_KEY=s\n" not in compressed
+        assert not compressed.endswith("DB_PASSWORD=p")
+        assert "DB_PASSWORD=p\n" not in compressed
+        assert "API_KEY=***" in compressed
+        assert "DB_PASSWORD=***" in compressed
+
+    def test_secret_not_leaked_via_generic_mismatch_fallback(self):
+        """Regression: when the *redacted* env output still doesn't clear
+        the ratio gate, the engine's mismatch-fallback used to re-run
+        GenericProcessor on the raw, unredacted `output` — leaking the
+        secret through a completely different code path than the direct
+        fallback above."""
+        lines = [f"VAR{i}=verbose_value_padding_to_make_this_long_{i}" for i in range(300)]
+        lines.append("API_KEY=SUPERSECRETVALUE12345")
+        output = "\n".join(lines)
+        compressed, _processor, was_compressed = self.engine.compress("env", output)
+        assert was_compressed
+        assert "SUPERSECRETVALUE12345" not in compressed
+        assert "API_KEY=***" in compressed
+
+
+class TestFileContentEnvPrecision:
+    def setup_method(self):
+        self.engine = CompressionEngine()
+
+    def test_short_secret_in_env_variant_not_leaked_via_ratio_fallback(self):
+        """Same regression as TestEnvPrecision, for the file_content
+        processor's .env.* redaction path (cat .env.production etc.)."""
+        compressed, processor, was_compressed = self.engine.compress(
+            "cat .env.production", "API_KEY=s"
+        )
+        assert processor == "file_content"
+        assert was_compressed
+        assert compressed != "API_KEY=s"
+        assert "API_KEY=***" in compressed
+
+    def test_source_code_ratio_gate_is_unaffected(self):
+        """redacted_secrets() must be scoped to the .env branch only — an
+        ordinary source file must still go through the normal ratio gate
+        unmodified."""
+        # Source code is returned verbatim (never compressed) regardless of
+        # ratio; this specifically checks that path is untouched by the
+        # redaction carve-out, not that it now "always compresses".
+        output = "def f():\n    return 1\n"
+        compressed, processor, was_compressed = self.engine.compress("cat file.py", output)
+        assert processor == "file_content"
+        assert compressed == output
+        assert not was_compressed
 
 
 class TestKubectlPrecision:
@@ -1146,3 +1211,76 @@ class TestJqPrecision:
         assert "users" in compressed
         assert "metadata" in compressed
         assert "status" in compressed
+
+
+class TestFailureHandling:
+    """The central promise, enforced mechanically: a failed command's reason
+    must survive compression — for every processor, at every exit code.
+
+    Each case in ``tests/failure_fixtures.py`` is realistic output from a
+    command that failed, long enough to trigger compression, with the reason
+    buried in the middle where naive head+tail truncation would drop it.
+    """
+
+    def setup_method(self):
+        self.engine = CompressionEngine()
+
+    @pytest.mark.parametrize("case", CASES, ids=lambda c: c.processor)
+    def test_case_routes_to_its_processor(self, case):
+        """A fixture that silently stopped routing would test nothing."""
+        selected = next(
+            (p.name for p in self.engine.processors if p.can_handle(case.command)), "none"
+        )
+        assert selected == case.processor
+
+    @pytest.mark.parametrize("case", CASES, ids=lambda c: c.processor)
+    @pytest.mark.parametrize("exit_code", [0, 1, None])
+    def test_failure_reason_survives(self, case, exit_code):
+        compressed, _proc, _was = self.engine.compress(
+            case.command, case.output, exit_code=exit_code
+        )
+        for marker in case.critical:
+            assert marker in compressed, (
+                f"{case.processor} dropped {marker!r} at exit_code={exit_code}"
+            )
+
+    @pytest.mark.parametrize("case", CASES, ids=lambda c: c.processor)
+    def test_handles_failure_claim_is_earned(self, case):
+        """``handles_failure = True`` is a claim; this is what makes it true.
+
+        A processor that opts out of the generic downgrade must preserve the
+        failure reason on its own, without the engine's recovery net.
+        """
+        processor = next(p for p in self.engine.processors if p.name == case.processor)
+        if not processor.handles_failure:
+            pytest.skip(f"{case.processor} does not claim handles_failure")
+        raw = processor.process(case.command, case.output)
+        for marker in case.critical:
+            assert marker in raw, (
+                f"{case.processor} sets handles_failure = True but drops {marker!r}; "
+                "either fix the processor or remove the claim"
+            )
+
+    def test_every_processor_has_a_case(self):
+        """A new processor must ship a failure fixture with it."""
+        covered = {c.processor for c in CASES}
+        registered = {p.name for p in self.engine.processors}
+        assert registered - covered == set(), (
+            f"processors without a failure fixture: {sorted(registered - covered)}"
+        )
+
+    def test_failed_command_downgrades_to_generic(self):
+        """The exit-code mechanism itself: an opted-out processor is bypassed."""
+        case = next(c for c in CASES if c.processor == "search")
+        _c, proc_ok, _ = self.engine.compress(case.command, case.output, exit_code=0)
+        _c, proc_fail, _ = self.engine.compress(case.command, case.output, exit_code=1)
+        assert proc_ok == "search"
+        assert proc_fail == "generic"
+        assert self.engine.last_event["failure_fallback"] is True
+
+    def test_opted_in_processor_still_used_on_failure(self):
+        """…and an opted-in one keeps its specialized compression."""
+        case = next(c for c in CASES if c.processor == "test")
+        _c, proc, _ = self.engine.compress(case.command, case.output, exit_code=1)
+        assert proc == "test"
+        assert self.engine.last_event["failure_fallback"] is False

@@ -15,6 +15,7 @@ _ERROR_RE = re.compile(r"\b(error|Error|failed|Failed|warn|WARN|warning)\b")
 
 class MiseProcessor(Processor):
     priority = 49
+    handles_failure = True
     hook_patterns = [
         r"^mise\s+(install|use|upgrade|up|i)\b",
     ]

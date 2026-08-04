@@ -47,6 +47,7 @@ def _categorize_lint(rule: str) -> str:
 
 class CargoClippyProcessor(Processor):
     priority = 26
+    handles_failure = True
     chain_to = ["lint"]
     hook_patterns = [
         r"^cargo\s+clippy\b",

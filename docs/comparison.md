@@ -8,7 +8,7 @@ Token-Saver focuses specifically on **command output compression** — it doesn'
 |---------|------------|-------------------|--------------------|--------------------|
 | **Approach** | Deterministic compression per command type | Delegates simple tasks to local LLM | Caching + compression via MCP | Sandboxed execution + FTS5 indexing |
 | **Requires LLM calls** | No | Yes (local LLM) | Yes | No |
-| **Added latency** | ~0ms (regex/parsing only) | Variable (LLM inference) | Variable | ~0ms for sandbox, variable for indexing |
+| **Added latency** | ~60ms/command (regex/parsing only) | Variable (LLM inference) | Variable | ~0ms for sandbox, variable for indexing |
 | **Platform support** | Claude Code, Antigravity CLI | Claude Code only | Claude Code only | Claude Code only |
 | **Compression method** | 36 specialized processors (git, pytest, cargo, go, terraform, pulumi, docker, k8s...) | Task delegation (not output compression) | Response caching | Output sandboxing + summarization |
 | **Preserves all errors/traces** | Yes (precision-tested) | N/A | Depends on cache hit | Depends on summary |
@@ -21,10 +21,10 @@ Token-Saver focuses specifically on **command output compression** — it doesn'
 
 Token-Saver intercepts command output and applies **deterministic, per-command compression** using 36 specialized processors. It understands the structure of `git diff`, `pytest`, `terraform plan`, and other common CLI outputs, and removes only noise (progress bars, passing tests, installation logs) while preserving all actionable information (errors, diffs, warnings).
 
-- Zero latency overhead (regex and string parsing only)
+- ~60ms of overhead per wrapped command (regex and string parsing only, no LLM inference — dominated by Python interpreter startup, not compression logic itself)
 - Fully deterministic — same input always produces same output
 - Works offline, no external dependencies
-- 853 tests including precision tests that verify critical data survives compression
+- 1,300+ tests including precision tests that verify critical data survives compression, and a compression-ratchet suite gating CI on real-world ratios
 - Supports both Claude Code and Antigravity CLI
 
 ### cc_token_saver_mcp

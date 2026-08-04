@@ -138,7 +138,7 @@ def _register_plugin(marketplace_dir, cache_dir, version):
     known = {}
     if os.path.exists(km_path):
         try:
-            with open(km_path) as f:
+            with open(km_path, encoding="utf-8") as f:
                 known = json.load(f)
         except (json.JSONDecodeError, ValueError):
             known = {}
@@ -153,7 +153,7 @@ def _register_plugin(marketplace_dir, cache_dir, version):
         "lastUpdated": now,
     }
 
-    with open(km_path, "w") as f:
+    with open(km_path, "w", encoding="utf-8") as f:
         json.dump(known, f, indent=2)
         f.write("\n")
     print("  REGISTERED marketplace in known_marketplaces.json")
@@ -164,7 +164,7 @@ def _register_plugin(marketplace_dir, cache_dir, version):
     registry = {"version": 2, "plugins": {}}
     if os.path.exists(plugins_path):
         try:
-            with open(plugins_path) as f:
+            with open(plugins_path, encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict) and data.get("version") == 2:
                 registry = data
@@ -181,7 +181,7 @@ def _register_plugin(marketplace_dir, cache_dir, version):
         },
     ]
 
-    with open(plugins_path, "w") as f:
+    with open(plugins_path, "w", encoding="utf-8") as f:
         json.dump(registry, f, indent=2)
         f.write("\n")
     print("  REGISTERED in installed_plugins.json")
@@ -193,7 +193,7 @@ def _register_plugin(marketplace_dir, cache_dir, version):
         # A corrupt/hand-edited settings.json must not abort installation —
         # fall back to an empty object (matching the unregister path's leniency).
         try:
-            with open(settings_path) as f:
+            with open(settings_path, encoding="utf-8") as f:
                 settings = json.load(f)
             if not isinstance(settings, dict):
                 settings = {}
@@ -205,7 +205,7 @@ def _register_plugin(marketplace_dir, cache_dir, version):
     enabled[_PLUGIN_KEY] = True
 
     os.makedirs(os.path.dirname(settings_path), exist_ok=True)
-    with open(settings_path, "w") as f:
+    with open(settings_path, "w", encoding="utf-8") as f:
         json.dump(settings, f, indent=2)
         f.write("\n")
     print("  ENABLED in settings.json (enabledPlugins)")
@@ -221,11 +221,11 @@ def _unregister_plugin():
     km_path = _known_marketplaces_path()
     if os.path.exists(km_path):
         try:
-            with open(km_path) as f:
+            with open(km_path, encoding="utf-8") as f:
                 known = json.load(f)
             if _MARKETPLACE_NAME in known:
                 del known[_MARKETPLACE_NAME]
-                with open(km_path, "w") as f:
+                with open(km_path, "w", encoding="utf-8") as f:
                     json.dump(known, f, indent=2)
                     f.write("\n")
                 print("  REMOVED from known_marketplaces.json")
@@ -236,7 +236,7 @@ def _unregister_plugin():
     plugins_path = _installed_plugins_path()
     if os.path.exists(plugins_path):
         try:
-            with open(plugins_path) as f:
+            with open(plugins_path, encoding="utf-8") as f:
                 data = json.load(f)
 
             changed = False
@@ -254,7 +254,7 @@ def _unregister_plugin():
                 changed = len(data) != original_len
 
             if changed:
-                with open(plugins_path, "w") as f:
+                with open(plugins_path, "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2)
                     f.write("\n")
                 print("  REMOVED from installed_plugins.json")
@@ -264,7 +264,7 @@ def _unregister_plugin():
     # --- 3. Remove from enabledPlugins + clean legacy hooks from settings.json ---
     settings_path = _settings_path()
     if os.path.exists(settings_path):
-        with open(settings_path) as f:
+        with open(settings_path, encoding="utf-8") as f:
             settings = json.load(f)
 
         changed = False
@@ -293,7 +293,7 @@ def _unregister_plugin():
             del settings["hooks"]
 
         if changed:
-            with open(settings_path, "w") as f:
+            with open(settings_path, "w", encoding="utf-8") as f:
                 json.dump(settings, f, indent=2)
                 f.write("\n")
             print("  REMOVED from settings.json")
@@ -314,7 +314,7 @@ def _migrate_from_v1():
     settings_path = _settings_path()
     if os.path.exists(settings_path):
         try:
-            with open(settings_path) as f:
+            with open(settings_path, encoding="utf-8") as f:
                 settings = json.load(f)
         except (json.JSONDecodeError, ValueError):
             settings = {}
@@ -333,7 +333,7 @@ def _migrate_from_v1():
         if had_changes:
             if not hooks:
                 settings.pop("hooks", None)
-            with open(settings_path, "w") as f:
+            with open(settings_path, "w", encoding="utf-8") as f:
                 json.dump(settings, f, indent=2)
                 f.write("\n")
             print("  MIGRATED: removed v1.x hooks from settings.json")

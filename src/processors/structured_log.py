@@ -21,6 +21,7 @@ _WARN_LEVELS = {"warn", "warning"}
 
 class StructuredLogProcessor(Processor):
     priority = 45
+    handles_failure = True
     hook_patterns = [
         r"^(stern|kubetail)\b",
     ]

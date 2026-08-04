@@ -23,6 +23,7 @@ _DOCKER_CMD_RE = re.compile(
 
 class DockerProcessor(Processor):
     priority = 31
+    handles_failure = True
     hook_patterns = [
         rf"^docker\s+{_DOCKER_OPTS}"
         r"(pull|push|images|ps|logs|inspect|stats|run|exec|compose)\b",

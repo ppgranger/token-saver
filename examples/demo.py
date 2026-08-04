@@ -49,7 +49,7 @@ def main() -> None:
             print(f"  [SKIP] {fixture_file} not found")
             continue
 
-        with open(fixture_path) as f:
+        with open(fixture_path, encoding="utf-8") as f:
             raw_output = f.read()
 
         compressed, processor, was_compressed = engine.compress(command, raw_output)

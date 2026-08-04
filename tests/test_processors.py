@@ -42,6 +42,7 @@ from src.processors.syslog import SyslogProcessor
 from src.processors.system_info import SystemInfoProcessor
 from src.processors.terraform import TerraformProcessor
 from src.processors.test_output import TestOutputProcessor
+from src.processors.utils import format_dir_group, group_paths_by_dir
 
 
 class TestGitProcessor:
@@ -3169,6 +3170,41 @@ class TestBuildOutputPipeGuard:
         assert "Build succeeded" in result
 
 
+class TestBuildOutputExitCodeFallback:
+    """A failed build with no recognized error vocabulary at all must not be
+    reported as a success — the only remaining signal is the exit code."""
+
+    def setup_method(self):
+        self.p = BuildOutputProcessor()
+
+    def test_no_vocabulary_but_nonzero_exit_is_not_a_success(self):
+        output = "\n".join([f"cc -c file{i}.c -o file{i}.o" for i in range(40)])
+        result = self.p.process("make", output, exit_code=2)
+        assert "Build succeeded" not in result
+        assert "exited non-zero" in result
+
+    def test_no_vocabulary_and_zero_exit_is_still_a_success(self):
+        output = "\n".join([f"cc -c file{i}.c -o file{i}.o" for i in range(40)])
+        result = self.p.process("make", output, exit_code=0)
+        assert "Build succeeded" in result
+
+    def test_no_vocabulary_and_unknown_exit_defaults_to_success(self):
+        """exit_code=None (unknown) preserves prior behaviour: best effort
+        from text alone.  Antigravity never supplies an exit code."""
+        output = "\n".join([f"cc -c file{i}.c -o file{i}.o" for i in range(40)])
+        result = self.p.process("make", output, exit_code=None)
+        assert "Build succeeded" in result
+
+    def test_recognized_error_wins_regardless_of_exit_code(self):
+        output = "\n".join(
+            [f"cc -c file{i}.c -o file{i}.o" for i in range(40)]
+            + ["main.c:10:5: error: expected ';' before '}' token"]
+        )
+        result = self.p.process("make", output, exit_code=1)
+        assert "Build succeeded" not in result
+        assert "expected ';'" in result
+
+
 class TestLintNewPatterns:
     """Test new lint patterns: oxlint, deno lint, golangci-lint, rubocop."""
 
@@ -4642,3 +4678,53 @@ class TestActProcessor:
         out = "\n".join(lines)
         result = self.p.process("act", out)
         assert "error: step failed" in result
+
+
+class TestPathGroupingHelpers:
+    """The grouping shared by search (fd) and file_listing (find).
+
+    It used to exist three times: once in each caller, plus an unused copy in
+    utils whose thresholds had drifted from both.
+    """
+
+    def test_groups_by_parent_directory(self):
+        grouped = group_paths_by_dir(["src/a.py", "src/b.py", "tests/c.py"])
+        assert dict(grouped) == {"src": ["a.py", "b.py"], "tests": ["c.py"]}
+
+    def test_bare_filename_goes_to_dot(self):
+        assert dict(group_paths_by_dir(["main.py"])) == {".": ["main.py"]}
+
+    def test_root_path_keeps_its_empty_parent(self):
+        # Renders as "/etc.conf", not "./etc.conf".
+        assert dict(group_paths_by_dir(["/etc.conf"])) == {"": ["etc.conf"]}
+
+    def test_blank_lines_are_dropped_and_paths_stripped(self):
+        assert dict(group_paths_by_dir(["  src/a.py  ", "", "   "])) == {"src": ["a.py"]}
+
+    def test_small_group_is_listed_in_full(self):
+        assert format_dir_group("src", ["a.py", "b.py"]) == ["  src/a.py", "  src/b.py"]
+
+    def test_medium_group_is_sampled(self):
+        files = [f"f{i}.py" for i in range(8)]
+        (line,) = format_dir_group("src", files)
+        assert line == "  src/ (8 files): f0.py, f1.py, f2.py ..."
+
+    def test_large_group_becomes_an_extension_histogram(self):
+        files = [f"f{i}.py" for i in range(9)] + [f"g{i}.md" for i in range(4)]
+        (line,) = format_dir_group("src", files)
+        assert line == "  src/ (13 files: *.py:9, *.md:4)"
+
+    def test_extension_threshold_is_per_caller(self):
+        """find keeps listing longer than fd does — that is deliberate."""
+        files = [f"f{i}.py" for i in range(12)]
+        # fd's threshold (10): 12 files tips into the histogram form.
+        assert format_dir_group("src", files, ext_threshold=10) == ["  src/ (12 files: *.py:12)"]
+        # find's threshold (20): the same 12 files still get the sample form.
+        assert format_dir_group("src", files, ext_threshold=20) == [
+            "  src/ (12 files): f0.py, f1.py, f2.py ..."
+        ]
+
+    def test_extensionless_files_are_counted_as_none(self):
+        files = [f"f{i}" for i in range(12)]
+        (line,) = format_dir_group("bin", files)
+        assert line == "  bin/ (12 files: *.(none):12)"

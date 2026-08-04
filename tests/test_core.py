@@ -104,6 +104,7 @@ class TestAntigravityHook:
             input=json.dumps(payload),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=REPO_DIR,
             timeout=20,
         )

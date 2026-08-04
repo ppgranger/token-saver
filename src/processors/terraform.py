@@ -11,6 +11,7 @@ _TF_CMD_RE = re.compile(
 
 class TerraformProcessor(Processor):
     priority = 33
+    handles_failure = True
     hook_patterns = [
         r"^(terraform|tofu)\s+(plan|apply|destroy|init|output|validate|fmt|state\s+(list|show))\b",
     ]

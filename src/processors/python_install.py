@@ -28,6 +28,7 @@ _WARNING_RE = re.compile(r"\b(warning|Warning|WARNING|DEPRECATION)\b")
 
 class PythonInstallProcessor(Processor):
     priority = 24
+    handles_failure = True
     hook_patterns = [
         r"^(pip3?\s+install|poetry\s+(install|update|add)|uv\s+(pip\s+install|sync))\b",
         rf"^{PYTHON_CMD}\s+-m\s+pip\s+install\b",

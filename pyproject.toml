@@ -1,17 +1,44 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "token-saver"
-version = "2.6.3"
+# Read from src/__init__.py, which installers/common.py:_read_version() already
+# treats as the source of truth (it stamps the plugin manifests from it).  The
+# literal that used to live here was maintained by hand and stamped by nothing,
+# so it was one forgotten edit away from disagreeing with every other manifest.
+dynamic = ["version"]
 requires-python = ">=3.10"
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-cov", "mypy"]
+
+[tool.setuptools.dynamic]
+version = { attr = "src.__version__" }
+
+# Flat layout with two top-level packages: name them rather than relying on
+# auto-discovery, which errors out on ambiguity in newer setuptools.
+[tool.setuptools]
+packages = ["src", "src.processors", "installers"]
 
 [tool.ruff]
 target-version = "py310"
 line-length = 100
 
 [tool.ruff.lint]
+# Preview is enabled *for the linter only* — at [tool.ruff] level it also
+# switches the formatter to its preview style, which reformats 10 files for no
+# reason.  `explicit-preview-rules` then narrows it to preview rules named
+# below and nothing else; enabling them all surfaces ~300 unrelated findings.
+preview = true
+explicit-preview-rules = true
 select = [
+    # open() in text mode without encoding= uses the *locale* encoding, which is
+    # cp1252 on Windows.  This broke the Windows CI job the first time it ran:
+    # reading a UTF-8 test file raised UnicodeDecodeError.  Preview-only, hence
+    # the `preview = true` above.
+    "PLW1514",
     "F",      # Pyflakes — unused imports, undefined names, etc.
     "E",      # pycodestyle errors
     "W",      # pycodestyle warnings
@@ -71,7 +98,7 @@ ignore = [
 "installers/**/*.py" = [
     "S103",     # chmod +x on the CLI binary is intentional
 ]
-"audit_compression.py" = [
+"scripts/audit_compression.py" = [
     "E501",     # long lines in test data builders
     "PERF401",  # readability over perf in data builders
 ]

@@ -23,7 +23,7 @@ def _cache_path():
 def _read_cache(ttl):
     """Return the cached latest-version string if still fresh, else None."""
     try:
-        with open(_cache_path()) as f:
+        with open(_cache_path(), encoding="utf-8") as f:
             data = json.load(f)
         if time.time() - float(data["checked_at"]) < ttl:
             return data["latest"]
@@ -37,7 +37,7 @@ def _write_cache(latest):
     try:
         path = _cache_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump({"latest": latest, "checked_at": time.time()}, f)
     except OSError:
         pass
@@ -64,7 +64,7 @@ def _fetch_latest_version(fetch_fn=None, timeout=1):
     if fetch_fn is not None:
         return fetch_fn()
 
-    req = urllib.request.Request(  # noqa: S310
+    req = urllib.request.Request(
         _GITHUB_API_URL,
         headers={"Accept": "application/vnd.github.v3+json", "User-Agent": "token-saver"},
     )
