@@ -64,12 +64,23 @@ def should_compress(command: str) -> bool:
 
 
 def compress(
-    command: str, output: str, *, engine: CompressionEngine | None = None
+    command: str,
+    output: str,
+    *,
+    engine: CompressionEngine | None = None,
+    exit_code: int | None = None,
 ) -> CompressResult:
-    """Compress ``output`` for ``command``; never raises (passes through on error)."""
+    """Compress ``output`` for ``command``; never raises (passes through on error).
+
+    ``exit_code`` is the command's exit status when the caller knows it.  A
+    non-zero value makes the engine prefer GenericProcessor over a specialized
+    one, so a failure reason in an unexpected shape isn't summarized away.
+    """
     engine = engine or CompressionEngine()
     try:
-        compressed, processor_name, was_compressed = engine.compress(command, output)
+        compressed, processor_name, was_compressed = engine.compress(
+            command, output, exit_code=exit_code
+        )
     except Exception:
         _log.exception("Compression failed for %r — passing through", command)
         compressed, processor_name, was_compressed = output, "passthrough", False

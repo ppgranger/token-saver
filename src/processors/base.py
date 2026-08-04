@@ -25,6 +25,23 @@ class Processor(ABC):
     hook_patterns: list[str] = []
     chain_to: str | list[str] | None = None
 
+    #: Whether this processor is safe to run on the output of a *failed*
+    #: command (non-zero exit code).
+    #:
+    #: Most processors summarize the happy path: they recognize a known output
+    #: shape and drop what doesn't match.  When a command fails, the
+    #: interesting text is usually in an unexpected shape, so summarizing it
+    #: risks discarding the very reason the command failed.  The engine
+    #: therefore routes failed commands to GenericProcessor — which truncates
+    #: with an explicit marker rather than dropping lines silently — unless the
+    #: processor opts in here.
+    #:
+    #: Only set this to True if reporting failures is what the processor is
+    #: *for* (test runners, compilers, linters).  ``TestFailureHandling`` in
+    #: tests/test_precision.py enforces the claim: every processor with
+    #: ``handles_failure = True`` must keep the error lines of a failing run.
+    handles_failure: bool = False
+
     @abstractmethod
     def can_handle(self, command: str) -> bool:
         """Return True if this processor can handle the given command."""

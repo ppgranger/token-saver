@@ -7,6 +7,7 @@ from .base import Processor
 
 class HelmProcessor(Processor):
     priority = 41
+    handles_failure = True
     hook_patterns = [
         r"^helm\s+(install|upgrade|list|template|status|rollback|history|uninstall|get)\b",
     ]

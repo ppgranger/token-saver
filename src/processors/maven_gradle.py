@@ -33,6 +33,7 @@ _GRADLE_TEST_RESULT_RE = re.compile(r"^\d+\s+tests?\s+(completed|passed|failed)"
 
 class MavenGradleProcessor(Processor):
     priority = 28
+    handles_failure = True
     hook_patterns = [
         r"^(\.?/?mvnw?|\.?/?gradlew?)\b",
     ]

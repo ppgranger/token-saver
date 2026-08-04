@@ -8,7 +8,7 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/hook_pretool.py\"",
-            "timeout": 5000
+            "timeout": 10
           }
         ]
       }
@@ -19,7 +19,7 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/hook_session.py\"",
-            "timeout": 3000
+            "timeout": 5
           }
         ]
       }

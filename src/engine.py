@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from . import config
 from .processors import discover_processors
+from .processors.critical import missing_critical
 
 if TYPE_CHECKING:
     from .processors.base import Processor
@@ -43,6 +44,7 @@ class CompressionEngine:
         is_mismatch: bool,
         original_len: int,
         compressed_len: int,
+        failure_fallback: bool = False,
     ) -> None:
         self.last_event = {
             "attempted_processor": attempted,
@@ -51,10 +53,70 @@ class CompressionEngine:
             "is_mismatch": is_mismatch,
             "original_len": original_len,
             "compressed_len": compressed_len,
+            "failure_fallback": failure_fallback,
         }
 
-    def compress(self, command: str, output: str) -> tuple[str, str, bool]:
+    def _select(self, command: str, exit_code: int | None) -> Processor | None:
+        """Return the processor that should handle ``command``, if any.
+
+        When the command failed, a processor that has not opted into
+        ``handles_failure`` is skipped in favour of GenericProcessor: the error
+        text is usually in a shape the specialized processor doesn't recognize,
+        and dropping unrecognized lines is exactly how a failure reason gets
+        lost.  Generic truncates with an explicit marker instead.
+        """
+        failed = exit_code is not None and exit_code != 0
+        for processor in self.processors:
+            if not processor.can_handle(command):
+                continue
+            if failed and not processor.handles_failure and processor is not self._generic:
+                return self._generic
+            return processor
+        return None
+
+    def _recover_critical(self, original: str, compressed: str, processor: Processor) -> str:
+        """Re-append error lines a processor dropped, so none are lost silently.
+
+        Most processors are heuristics over a human-readable format they may
+        not recognize, and the common failure mode is a loop with no ``else``
+        branch: unmatched lines vanish with no marker and no counter.  Rather
+        than audit 36 processors — and every future one — this is the single
+        place that enforces the promise.
+
+        Processors that set ``handles_failure`` are exempt.  Summarizing many
+        errors into one grouped line ("20 issues across 2 rules") is precisely
+        what makes a linter or test-runner processor valuable; re-appending the
+        raw lines would undo the compression entirely.  Those processors are
+        instead held to the promise directly, by
+        ``TestFailureHandling::test_handles_failure_claim_is_earned``.
+
+        The recovered block is capped (``recover_critical_lines``, 0 disables)
+        so a wall of errors can't undo the compression, and lines already
+        present in the compressed output are not repeated.
+        """
+        if processor.handles_failure:
+            return compressed
+        cap = config.get("recover_critical_lines")
+        if not cap or cap <= 0:
+            return compressed
+        missing = missing_critical(original, compressed)
+        if not missing:
+            return compressed
+        kept = missing[:cap]
+        note = f"[token-saver] {len(kept)} error line(s) recovered"
+        if len(missing) > cap:
+            note += f" ({len(missing) - cap} more omitted)"
+        return "\n".join([compressed, note, *kept])
+
+    def compress(
+        self, command: str, output: str, *, exit_code: int | None = None
+    ) -> tuple[str, str, bool]:
         """Compress output for a given command.
+
+        ``exit_code`` is the command's exit status when known (``None`` when
+        the caller has no way to know, e.g. Antigravity's captured output).  A
+        non-zero value routes to GenericProcessor unless the matched processor
+        sets ``handles_failure``.
 
         Returns (compressed_output, processor_name, was_compressed).
         """
@@ -68,74 +130,103 @@ class CompressionEngine:
         if len(output) < min_len:
             return output, "none", False
 
-        for processor in self.processors:
-            if processor.can_handle(command):
-                compressed = processor.process(command, output)
+        processor = self._select(command, exit_code)
+        if processor is None:
+            return output, "none", False
 
-                # If the processor returned output exactly unchanged, it
-                # explicitly chose not to compress (e.g. source code files).
-                # A deliberate no-op, not a weak-processor mismatch.
-                if compressed is output or compressed == output:
-                    self._set_event(
-                        processor.name, processor.name, False, False, len(output), len(output)
-                    )
-                    return output, processor.name, False
+        # True when a specialized processor was bypassed because the command
+        # failed — surfaced in last_event so `token-saver stats` can show it.
+        failure_fallback = bool(exit_code) and processor is self._generic
 
-                # Chain to secondary processors if declared
-                chain_list = processor.chain_to
-                if chain_list:
-                    if isinstance(chain_list, str):
-                        chain_list = [chain_list]
-                    max_depth = config.get("max_chain_depth")
-                    visited = {processor.name}
-                    depth = 0
-                    for chain_name in chain_list:
-                        if depth >= max_depth:
-                            break
-                        if chain_name in visited or chain_name not in self._by_name:
-                            continue
-                        secondary = self._by_name[chain_name]
-                        visited.add(chain_name)
-                        chained = secondary.process(command, compressed)
-                        if chained is not compressed and chained != compressed:
-                            compressed = chained
-                        depth += 1
+        compressed = processor.process(command, output)
 
-                # If a specialized processor handled it, also run generic
-                # cleanup (ANSI strip, blank line collapse) but not truncation
-                if processor is not self._generic:
-                    compressed = self._generic.clean(compressed)
+        # If the processor returned output exactly unchanged, it
+        # explicitly chose not to compress (e.g. source code files).
+        # A deliberate no-op, not a weak-processor mismatch.
+        if compressed is output or compressed == output:
+            self._set_event(
+                processor.name,
+                processor.name,
+                False,
+                False,
+                len(output),
+                len(output),
+                failure_fallback,
+            )
+            return output, processor.name, False
 
-                original_len = len(output)
-                compressed_len = len(compressed)
-                gain = (original_len - compressed_len) / original_len if original_len > 0 else 0
+        # Chain to secondary processors if declared
+        chain_list = processor.chain_to
+        if chain_list:
+            if isinstance(chain_list, str):
+                chain_list = [chain_list]
+            max_depth = config.get("max_chain_depth")
+            visited = {processor.name}
+            depth = 0
+            for chain_name in chain_list:
+                if depth >= max_depth:
+                    break
+                if chain_name in visited or chain_name not in self._by_name:
+                    continue
+                secondary = self._by_name[chain_name]
+                visited.add(chain_name)
+                chained = secondary.process(command, compressed)
+                if chained is not compressed and chained != compressed:
+                    compressed = chained
+                depth += 1
 
-                if compressed_len < original_len and gain >= min_ratio:
-                    self._set_event(
-                        processor.name, processor.name, True, False, original_len, compressed_len
-                    )
-                    return compressed, processor.name, True
+        # If a specialized processor handled it, also run generic
+        # cleanup (ANSI strip, blank line collapse) but not truncation
+        if processor is not self._generic:
+            compressed = self._generic.clean(compressed)
 
-                # Specialized processor didn't compress enough on its own — a
-                # mismatch (O3): record it and try the generic processor as a
-                # fallback (dedup, truncation, etc.).
-                mismatch = processor is not self._generic
-                if processor is not self._generic:
-                    generic_compressed = self._generic.process(command, output)
-                    generic_compressed = self._generic.clean(generic_compressed)
-                    generic_len = len(generic_compressed)
-                    generic_gain = (
-                        (original_len - generic_len) / original_len if original_len > 0 else 0
-                    )
-                    if generic_len < original_len and generic_gain >= min_ratio:
-                        self._set_event(
-                            processor.name, "generic", True, mismatch, original_len, generic_len
-                        )
-                        return generic_compressed, "generic", True
+        compressed = self._recover_critical(output, compressed, processor)
 
+        original_len = len(output)
+        compressed_len = len(compressed)
+        gain = (original_len - compressed_len) / original_len if original_len > 0 else 0
+
+        if compressed_len < original_len and gain >= min_ratio:
+            self._set_event(
+                processor.name,
+                processor.name,
+                True,
+                False,
+                original_len,
+                compressed_len,
+                failure_fallback,
+            )
+            return compressed, processor.name, True
+
+        # Specialized processor didn't compress enough on its own — a
+        # mismatch (O3): record it and try the generic processor as a
+        # fallback (dedup, truncation, etc.).
+        mismatch = processor is not self._generic
+        if processor is not self._generic:
+            generic_compressed = self._generic.process(command, output)
+            generic_compressed = self._generic.clean(generic_compressed)
+            generic_compressed = self._recover_critical(output, generic_compressed, self._generic)
+            generic_len = len(generic_compressed)
+            generic_gain = (original_len - generic_len) / original_len if original_len > 0 else 0
+            if generic_len < original_len and generic_gain >= min_ratio:
                 self._set_event(
-                    processor.name, processor.name, False, mismatch, original_len, compressed_len
+                    processor.name,
+                    "generic",
+                    True,
+                    mismatch,
+                    original_len,
+                    generic_len,
+                    failure_fallback,
                 )
-                return output, processor.name, False
+                return generic_compressed, "generic", True
 
-        return output, "none", False
+        self._set_event(
+            processor.name,
+            processor.name,
+            False,
+            mismatch,
+            original_len,
+            compressed_len,
+            failure_fallback,
+        )
+        return output, processor.name, False

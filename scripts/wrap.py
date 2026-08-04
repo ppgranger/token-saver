@@ -19,6 +19,7 @@ Flags:
 import logging
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -29,6 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src import config, core
 from src.chain_utils import extract_primary_command, split_chain_with_ops
+from src.console import use_utf8_io
 from src.diffstat import format_summary, summarize
 from src.engine import CompressionEngine
 
@@ -60,18 +62,36 @@ def inject_markers(parts: list[tuple[str, str]], marker_prefix: str) -> str:
     non-first segment.  Each marker+segment is wrapped in a brace group so the
     surrounding shell operator (`&&` / `;`) still applies to the user's segment.
 
+    Every segment — including the first — goes on its own line, and the group
+    is closed by a newline rather than `; }`.  A trailing `#` comment in a
+    segment would otherwise comment out the closing `; }` *and* the operator
+    that follows it, turning the whole rewrite into a shell syntax error and
+    preventing the user's command from running at all.  Putting the closing
+    brace on the next line confines the comment to its own segment.
+
+    Brace groups (not subshells) are used so that `cd`, `export`, variable
+    assignments etc. in one segment still affect the following ones.
+
+    Segments ending in an unquoted line continuation would still break this
+    form (the backslash-newline would swallow the closing brace); those are
+    rejected upstream by ``hook_pretool._is_segment_safe``.
+
     Example: parts=[(a,"&&"),(b,";"),(c,"")], prefix="M_"  ->
-        a && { echo 'M_1'; b; } ; { echo 'M_2'; c; }
+        { a
+        } && { echo 'M_1'
+        b
+        } ; { echo 'M_2'
+        c
+        }
     """
     pieces: list[str] = []
     for i, (seg, op) in enumerate(parts):
         if i == 0:
-            pieces.append(seg)
+            group = f"{{ {seg}\n}}"
         else:
             # Single-quote the marker; markers contain only [A-Za-z0-9_] so safe.
-            pieces.append(f"{{ echo '{marker_prefix}{i}'; {seg}; }}")
-        if op:
-            pieces.append(op)
+            group = f"{{ echo '{marker_prefix}{i}'\n{seg}\n}}"
+        pieces.append(f"{group} {op}" if op else group)
     return " ".join(pieces)
 
 
@@ -115,6 +135,53 @@ def split_output_by_markers(output: str, marker_prefix: str) -> list[tuple[int, 
     return chunks
 
 
+IS_WINDOWS = os.name == "nt"
+
+#: Where Git for Windows puts bash when it is not on PATH.  Claude Code looks
+#: in the same places, and honours the same override.
+_WINDOWS_BASH_CANDIDATES = (
+    r"C:\Program Files\Git\bin\bash.exe",
+    r"C:\Program Files (x86)\Git\bin\bash.exe",
+)
+
+
+def posix_shell() -> str | None:
+    """Path to a POSIX shell on Windows, or ``None`` if the machine has none.
+
+    Irrelevant on POSIX, where ``shell=True`` already means ``/bin/sh``.  It
+    matters on Windows, where ``shell=True`` means **cmd.exe** — and the
+    commands we are handed are bash: Claude Code's Bash tool runs them through
+    Git Bash, so ``ls -la`` and ``grep`` are as unintelligible to cmd.exe as
+    the ``{ ... }`` groups :func:`inject_markers` adds.  Running them there
+    produced ``'{' is not recognized as an internal or external command`` and
+    lost the user's output entirely.
+
+    ``CLAUDE_CODE_GIT_BASH_PATH`` is the documented way to point Claude Code at
+    a non-standard Git Bash, so honour it first and stay consistent with
+    whatever the user already configured.
+    """
+    if not IS_WINDOWS:
+        return None
+    configured = os.environ.get("CLAUDE_CODE_GIT_BASH_PATH")
+    if configured and os.path.isfile(configured):
+        return configured
+    found = shutil.which("bash")
+    if found:
+        return found
+    return next((c for c in _WINDOWS_BASH_CANDIDATES if os.path.isfile(c)), None)
+
+
+def supports_posix_chaining() -> bool:
+    """Whether per-segment chain compression can work on this machine.
+
+    Marker injection is POSIX shell syntax.  Without a POSIX shell we must not
+    rewrite the chain at all — a mangled command is far worse than an
+    uncompressed one — so the caller falls back to compressing the combined
+    output as a single command.
+    """
+    return not IS_WINDOWS or posix_shell() is not None
+
+
 def _run_command(
     command_str: str,
     timeout: int,
@@ -139,13 +206,27 @@ def _run_command(
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
+    # On Windows, hand the command to bash explicitly rather than letting
+    # shell=True route it to cmd.exe.  See posix_shell().
+    bash = posix_shell()
+    popen_target: str | list[str] = [bash, "-c", command_str] if bash else command_str
+
     try:
-        child_proc = subprocess.Popen(  # noqa: S602
-            command_str,
-            shell=True,
+        # S603: running the user's own command *is* this script's purpose — it is
+        # the command Claude Code was about to run anyway.
+        child_proc = subprocess.Popen(  # noqa: S603
+            popen_target,
+            shell=bash is None,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
             text=True,
+            # Without these, `text=True` decodes with the *locale* encoding —
+            # cp1252 on Windows — so a `git log` with an accent or npm's
+            # box-drawing output raises UnicodeDecodeError and takes the hook
+            # down with it.  `replace` keeps that fail-open: we would rather
+            # compress output with a mangled character than lose the command.
+            encoding="utf-8",
+            errors="replace",
             start_new_session=True,
         )
         stdout, stderr = child_proc.communicate(timeout=timeout)
@@ -218,6 +299,7 @@ def _print_dry_run(
 
 
 def main():
+    use_utf8_io()
     dry_run = "--dry-run" in sys.argv
     show_removed = "--show-removed" in sys.argv
     args = [a for a in sys.argv[1:] if a not in ("--dry-run", "--show-removed")]
@@ -233,7 +315,9 @@ def main():
     timeout = config.get("wrap_timeout")
 
     chain_parts = split_chain_with_ops(command_str)
-    is_chain = len(chain_parts) > 1
+    # Without a POSIX shell the marker rewrite cannot be executed, so treat
+    # the chain as one opaque command instead of corrupting it.
+    is_chain = len(chain_parts) > 1 and supports_posix_chaining()
 
     engine = CompressionEngine()
 
@@ -267,7 +351,12 @@ def main():
             if not chunk_out:
                 continue
             try:
-                c_out, proc_name, _was = engine.compress(seg_cmd, chunk_out)
+                # A chain's exit code belongs to its *last* executed segment;
+                # attributing it to an earlier one would wrongly downgrade that
+                # segment to generic.  With `&&`, every segment before the last
+                # one that ran did succeed.
+                seg_exit = returncode if seg_idx == chunks[-1][0] else 0
+                c_out, proc_name, _was = engine.compress(seg_cmd, chunk_out, exit_code=seg_exit)
                 if engine.last_event.get("is_mismatch"):
                     mismatches.append(
                         (seg_cmd, engine.last_event["attempted_processor"], len(chunk_out))
@@ -321,7 +410,7 @@ def main():
         sys.exit(returncode)
 
     primary_cmd = extract_primary_command(command_str)
-    result = core.compress(primary_cmd, output, engine=engine)
+    result = core.compress(primary_cmd, output, engine=engine, exit_code=returncode)
 
     if dry_run:
         diff_summary = summarize(output, result.compressed) if show_removed else None

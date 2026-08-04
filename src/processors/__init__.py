@@ -16,6 +16,9 @@ import sys
 
 from .base import Processor
 
+#: Module-name prefix given to processors loaded from the user directory.
+_USER_MODULE_PREFIX = "_user_processor_"
+
 
 def _load_user_processors(user_dir: str) -> None:
     """Import .py files from a user processors directory.
@@ -31,7 +34,7 @@ def _load_user_processors(user_dir: str) -> None:
         if not filename.endswith(".py") or filename.startswith("_"):
             continue
         filepath = os.path.join(user_dir, filename)
-        module_name = f"_user_processor_{filename[:-3]}"
+        module_name = f"{_USER_MODULE_PREFIX}{filename[:-3]}"
         try:
             spec = importlib.util.spec_from_file_location(module_name, filepath)
             if spec is None or spec.loader is None:
@@ -62,6 +65,19 @@ def _get_user_processors_dir() -> str:
     return os.path.join(data_dir(), "processors")
 
 
+def _is_registrable(cls: type) -> bool:
+    """Return True if ``cls`` is a processor this registry should own.
+
+    ``Processor.__subclasses__()`` sees *every* subclass defined anywhere in
+    the process, not just the ones we loaded.  Without this filter, a subclass
+    declared in a test module — or in any third-party code that happens to
+    import ``Processor`` — silently joins the routing table for the rest of
+    the process.  Only this package and the user processors directory count.
+    """
+    module = getattr(cls, "__module__", "") or ""
+    return module.startswith((f"{__name__}.", _USER_MODULE_PREFIX))
+
+
 def discover_processors() -> list[Processor]:
     """Auto-discover all Processor subclasses in this package.
 
@@ -85,7 +101,7 @@ def discover_processors() -> list[Processor]:
     def _all_subclasses(cls):
         result = set()
         for sub in cls.__subclasses__():
-            if not inspect.isabstract(sub):
+            if not inspect.isabstract(sub) and _is_registrable(sub):
                 result.add(sub)
             result.update(_all_subclasses(sub))
         return result

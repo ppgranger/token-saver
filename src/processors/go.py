@@ -16,6 +16,7 @@ _GO_GENERATE_RUN_RE = re.compile(r"^(\S+\.go):\d+:\s+running\s+")
 
 class GoProcessor(Processor):
     priority = 23
+    handles_failure = True
     hook_patterns = [
         r"^go\s+(build|vet|mod|generate|install)\b",
     ]

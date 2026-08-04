@@ -486,7 +486,8 @@ token-saver/
 │   ├── __init__.py                  # Package init (prevents namespace conflicts)
 │   ├── hook_pretool.py              # PreToolUse hook (Claude Code)
 │   ├── wrap.py                      # CLI wrapper (Claude Code)
-│   └── hook_session.py              # SessionStart hook wrapper
+│   ├── hook_session.py              # SessionStart hook wrapper
+│   └── audit_compression.py         # Compression ratio corpus + report
 ├── antigravity/                     # Antigravity CLI specific files
 │   ├── antigravity-plugin.json      # Antigravity plugin metadata
 │   ├── hooks.json                   # Antigravity hook definitions
@@ -570,8 +571,10 @@ token-saver/
 │   ├── test_version_check.py        # Version check + fail-open tests (18)
 │   ├── test_cli.py                  # CLI subcommand tests (23)
 │   ├── test_user_processors.py      # Custom processor loading tests (7)
-│   └── test_installers.py           # Installer utility tests (48)
-├── audit_compression.py             # Deep audit tool for compression analysis
+│   ├── test_installers.py           # Installer utility tests (48)
+│   ├── failure_fixtures.py          # One failing-command fixture per processor
+│   ├── compression_baselines.json   # Recorded ratios guarded by the ratchet test
+│   └── test_compression_ratchet.py  # Fails if any scenario compresses worse
 ├── pyproject.toml                   # Python project config + Ruff rules
 ├── CONTRIBUTING.md                  # Developer guide
 ├── LICENSE                          # Apache 2.0

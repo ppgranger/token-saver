@@ -2,6 +2,8 @@
 
 import re
 
+from .shell_syntax import iter_unquoted
+
 # Matches unquoted && or ; for detection purposes only (use split_chain()
 # for actual splitting, which respects quoted strings).
 CHAIN_SPLIT_RE = re.compile(r"(?<!['\"])(?:&&|;)(?!['\"])")
@@ -22,111 +24,41 @@ SILENT_CMDS_RE = re.compile(
 )
 
 
-def split_chain(command: str) -> list[str]:
-    """Split a command string on unquoted ``&&`` and ``;`` into segments.
-
-    Respects single- and double-quoted strings so that e.g.
-    ``git commit -m "fix; done"`` is NOT split on the ``;``.
-    """
-    segments: list[str] = []
-    current: list[str] = []
-    i = 0
-    n = len(command)
-
-    while i < n:
-        ch = command[i]
-
-        # Skip over quoted strings
-        if ch in ("'", '"'):
-            quote = ch
-            current.append(ch)
-            i += 1
-            while i < n and command[i] != quote:
-                current.append(command[i])
-                i += 1
-            if i < n:
-                current.append(command[i])  # closing quote
-                i += 1
-            continue
-
-        # Check for &&
-        if ch == "&" and i + 1 < n and command[i + 1] == "&":
-            seg = "".join(current).strip()
-            if seg:
-                segments.append(seg)
-            current = []
-            i += 2
-            continue
-
-        # Check for ;
-        if ch == ";":
-            seg = "".join(current).strip()
-            if seg:
-                segments.append(seg)
-            current = []
-            i += 1
-            continue
-
-        current.append(ch)
-        i += 1
-
-    seg = "".join(current).strip()
-    if seg:
-        segments.append(seg)
-
-    return segments
-
-
 def split_chain_with_ops(command: str) -> list[tuple[str, str]]:
-    """Like :func:`split_chain` but preserves the operator following each segment.
+    """Split on unquoted ``&&`` / ``;``, keeping the operator after each segment.
 
     Returns a list of ``(segment, operator)`` tuples where operator is
-    ``"&&"``, ``";"``, or ``""`` for the final segment.
+    ``"&&"``, ``";"``, or ``""`` for the final segment.  Quoted strings are
+    respected, so ``git commit -m "fix; done"`` is NOT split on the ``;``.
     """
     result: list[tuple[str, str]] = []
-    current: list[str] = []
-    i = 0
-    n = len(command)
+    start = 0
+    skip_to = 0
 
-    while i < n:
-        ch = command[i]
-
-        if ch in ("'", '"'):
-            quote = ch
-            current.append(ch)
-            i += 1
-            while i < n and command[i] != quote:
-                current.append(command[i])
-                i += 1
-            if i < n:
-                current.append(command[i])
-                i += 1
+    for i, ch in iter_unquoted(command):
+        if i < skip_to:
+            continue  # second '&' of an operator we already consumed
+        if ch == "&" and command.startswith("&&", i):
+            op, width = "&&", 2
+        elif ch == ";":
+            op, width = ";", 1
+        else:
             continue
+        seg = command[start:i].strip()
+        if seg:
+            result.append((seg, op))
+        start = skip_to = i + width
 
-        if ch == "&" and i + 1 < n and command[i + 1] == "&":
-            seg = "".join(current).strip()
-            if seg:
-                result.append((seg, "&&"))
-            current = []
-            i += 2
-            continue
-
-        if ch == ";":
-            seg = "".join(current).strip()
-            if seg:
-                result.append((seg, ";"))
-            current = []
-            i += 1
-            continue
-
-        current.append(ch)
-        i += 1
-
-    seg = "".join(current).strip()
+    seg = command[start:].strip()
     if seg:
         result.append((seg, ""))
 
     return result
+
+
+def split_chain(command: str) -> list[str]:
+    """Split a command string on unquoted ``&&`` and ``;`` into segments."""
+    return [segment for segment, _op in split_chain_with_ops(command)]
 
 
 def extract_primary_command(command: str) -> str:

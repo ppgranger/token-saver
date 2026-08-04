@@ -42,6 +42,7 @@ from src.processors.syslog import SyslogProcessor
 from src.processors.system_info import SystemInfoProcessor
 from src.processors.terraform import TerraformProcessor
 from src.processors.test_output import TestOutputProcessor
+from src.processors.utils import format_dir_group, group_paths_by_dir
 
 
 class TestGitProcessor:
@@ -4642,3 +4643,53 @@ class TestActProcessor:
         out = "\n".join(lines)
         result = self.p.process("act", out)
         assert "error: step failed" in result
+
+
+class TestPathGroupingHelpers:
+    """The grouping shared by search (fd) and file_listing (find).
+
+    It used to exist three times: once in each caller, plus an unused copy in
+    utils whose thresholds had drifted from both.
+    """
+
+    def test_groups_by_parent_directory(self):
+        grouped = group_paths_by_dir(["src/a.py", "src/b.py", "tests/c.py"])
+        assert dict(grouped) == {"src": ["a.py", "b.py"], "tests": ["c.py"]}
+
+    def test_bare_filename_goes_to_dot(self):
+        assert dict(group_paths_by_dir(["main.py"])) == {".": ["main.py"]}
+
+    def test_root_path_keeps_its_empty_parent(self):
+        # Renders as "/etc.conf", not "./etc.conf".
+        assert dict(group_paths_by_dir(["/etc.conf"])) == {"": ["etc.conf"]}
+
+    def test_blank_lines_are_dropped_and_paths_stripped(self):
+        assert dict(group_paths_by_dir(["  src/a.py  ", "", "   "])) == {"src": ["a.py"]}
+
+    def test_small_group_is_listed_in_full(self):
+        assert format_dir_group("src", ["a.py", "b.py"]) == ["  src/a.py", "  src/b.py"]
+
+    def test_medium_group_is_sampled(self):
+        files = [f"f{i}.py" for i in range(8)]
+        (line,) = format_dir_group("src", files)
+        assert line == "  src/ (8 files): f0.py, f1.py, f2.py ..."
+
+    def test_large_group_becomes_an_extension_histogram(self):
+        files = [f"f{i}.py" for i in range(9)] + [f"g{i}.md" for i in range(4)]
+        (line,) = format_dir_group("src", files)
+        assert line == "  src/ (13 files: *.py:9, *.md:4)"
+
+    def test_extension_threshold_is_per_caller(self):
+        """find keeps listing longer than fd does — that is deliberate."""
+        files = [f"f{i}.py" for i in range(12)]
+        # fd's threshold (10): 12 files tips into the histogram form.
+        assert format_dir_group("src", files, ext_threshold=10) == ["  src/ (12 files: *.py:12)"]
+        # find's threshold (20): the same 12 files still get the sample form.
+        assert format_dir_group("src", files, ext_threshold=20) == [
+            "  src/ (12 files): f0.py, f1.py, f2.py ..."
+        ]
+
+    def test_extensionless_files_are_counted_as_none(self):
+        files = [f"f{i}" for i in range(12)]
+        (line,) = format_dir_group("bin", files)
+        assert line == "  bin/ (12 files: *.(none):12)"

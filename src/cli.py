@@ -13,6 +13,7 @@ import urllib.error
 import urllib.request
 
 from src import __version__
+from src.console import use_utf8_io
 from src.version_check import _fetch_latest_version, _parse_version
 
 
@@ -326,6 +327,10 @@ def cmd_benchmark(args):
             shell=True,
             capture_output=True,
             text=True,
+            # See scripts/wrap.py: locale decoding is a Windows crash waiting
+            # to happen, and losing the command is worse than a mangled char.
+            encoding="utf-8",
+            errors="replace",
             timeout=config.get("wrap_timeout"),
             check=False,
         )
@@ -439,6 +444,7 @@ def cmd_explain(args):
 
 def main():
     """CLI entry point."""
+    use_utf8_io()
     parser = argparse.ArgumentParser(
         prog="token-saver",
         description="Token-Saver: compress verbose tool outputs to save tokens",

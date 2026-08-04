@@ -36,7 +36,7 @@ def demo_fixture(label: str, command: str, fixture_file: str) -> None:
         print(f"  [SKIP] {fixture_file} not found")
         return
 
-    with open(fixture_path) as f:
+    with open(fixture_path, encoding="utf-8") as f:
         raw_output = f.read()
 
     compressed, processor, _was_compressed = engine.compress(command, raw_output)

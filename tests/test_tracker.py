@@ -2,14 +2,33 @@
 
 import json
 import os
+import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import threading
+import time
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from src import config
 from src.tracker import SavingsTracker
+
+
+def _connection_is_open(conn) -> bool:
+    """True if ``conn`` still accepts statements (closed connections raise)."""
+    if conn is None:
+        return False
+    try:
+        conn.execute("SELECT 1")
+    except sqlite3.ProgrammingError:
+        return False
+    except sqlite3.Error:
+        # Corrupt but still open — which is exactly the state we care about.
+        return True
+    return True
 
 
 class TestSavingsTracker:
@@ -22,15 +41,11 @@ class TestSavingsTracker:
 
     def teardown_method(self):
         self.tracker.close()
-        db_path = os.path.join(self.tmp_dir, "test_savings.db")
-        if os.path.exists(db_path):
-            os.remove(db_path)
-        # Clean up WAL files
-        for ext in ("-wal", "-shm"):
-            wal = db_path + ext
-            if os.path.exists(wal):
-                os.remove(wal)
-        os.rmdir(self.tmp_dir)
+        # rmtree(ignore_errors) rather than remove()+rmdir(): a test that leaves
+        # a stray file makes rmdir raise, and on Windows an unclosed sqlite
+        # handle makes remove() raise WinError 32.  Neither is worth failing
+        # teardown over — the temp dir is disposable.
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
     def test_record_and_retrieve(self):
         self.tracker.record_saving(
@@ -257,7 +272,7 @@ class TestSavingsTracker:
         """If DB is corrupted, it should be recreated."""
         self.tracker.close()
         # Corrupt the DB file
-        with open(SavingsTracker.DB_PATH, "w") as f:
+        with open(SavingsTracker.DB_PATH, "w", encoding="utf-8") as f:
             f.write("not a valid sqlite database")
 
         # Should recreate without error
@@ -266,6 +281,56 @@ class TestSavingsTracker:
         stats = tracker2.get_session_stats()
         assert stats["commands"] == 1
         tracker2.close()
+
+    def test_corruption_recovery_closes_the_db_before_unlinking(self):
+        """The handle must be closed *before* the file is deleted.
+
+        ``sqlite3.connect()`` succeeds on a corrupt file — the first statement
+        is what raises — so recovery arrives at the delete still holding an
+        open connection.  POSIX happily unlinks an open file, so the leak is
+        invisible there and the test above passes either way.  Windows returns
+        ``WinError 32``, the suppressed delete silently does nothing, and the
+        corrupt file survives to break the reconnect.
+
+        Asserting on the ordering rather than the platform behaviour is what
+        makes this catch the bug on Linux and macOS too.
+        """
+        self.tracker.close()
+        with open(SavingsTracker.DB_PATH, "w", encoding="utf-8") as f:
+            f.write("not a valid sqlite database")
+
+        open_at_delete = []
+        real_remove = os.remove
+
+        def spy_remove(path):
+            tracker = getattr(SavingsTracker, "_recovering", None)
+            if tracker is not None:
+                open_at_delete.append(_connection_is_open(tracker.conn))
+            return real_remove(path)
+
+        original_remove_files = SavingsTracker._remove_db_files
+
+        def traced_remove_files(inner_self):
+            SavingsTracker._recovering = inner_self
+            try:
+                return original_remove_files(inner_self)
+            finally:
+                SavingsTracker._recovering = None
+
+        with (
+            mock.patch.object(SavingsTracker, "_remove_db_files", traced_remove_files),
+            mock.patch("src.tracker.os.remove", spy_remove),
+        ):
+            tracker2 = SavingsTracker(session_id="recovery-order")
+
+        try:
+            assert open_at_delete, "recovery never tried to delete the corrupt database"
+            assert not any(open_at_delete), (
+                "the sqlite connection was still open when the file was unlinked — "
+                "Windows would refuse the delete and leave the corrupt DB in place"
+            )
+        finally:
+            tracker2.close()
 
 
 class TestStatsCLI:
@@ -301,6 +366,7 @@ class TestStatsCLI:
             [sys.executable, self.stats_script, *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             env=env,
         )
         return result
@@ -362,3 +428,78 @@ class TestStatsCLI:
         # git saved 12500 (5000-500 + 10000-2000), test saved 2200 (3000-800)
         assert data["top_processors"][0]["processor"] == "git"
         assert data["top_processors"][1]["processor"] == "test"
+
+
+class TestPruneRetention:
+    """`db_prune_days` is documented in the README but was never read.
+
+    Every caller got the hardcoded 90 days, so configuring retention did
+    nothing at all.
+    """
+
+    def setup_method(self):
+        self.tmp_dir = tempfile.mkdtemp()
+        SavingsTracker.DB_DIR = self.tmp_dir
+        SavingsTracker.DB_PATH = os.path.join(self.tmp_dir, "prune.db")
+
+    def teardown_method(self):
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def test_retention_defaults_to_the_configured_value(self, monkeypatch):
+        monkeypatch.setattr(config, "get", lambda key: 7 if key == "db_prune_days" else None)
+        tracker = SavingsTracker(session_id="s")
+        try:
+            assert tracker.prune_days == 7
+        finally:
+            tracker.close()
+
+    def test_explicit_argument_still_wins(self):
+        tracker = SavingsTracker(session_id="s", prune_days=3)
+        try:
+            assert tracker.prune_days == 3
+        finally:
+            tracker.close()
+
+    def test_rows_older_than_retention_are_pruned(self):
+        tracker = SavingsTracker(session_id="s", prune_days=30)
+        tracker.record_saving(
+            command="git status",
+            processor="git",
+            original_size=1000,
+            compressed_size=100,
+            platform="claude_code",
+        )
+        # Backdate the row past the retention window, then reopen: pruning
+        # runs on construction.
+        cutoff = time.time() - (31 * 86400)
+        tracker.conn.execute("UPDATE savings SET timestamp = ?", (cutoff,))
+        tracker.conn.commit()
+        tracker.close()
+
+        reopened = SavingsTracker(session_id="s", prune_days=30)
+        try:
+            rows = reopened.conn.execute("SELECT COUNT(*) FROM savings").fetchone()[0]
+            assert rows == 0
+        finally:
+            reopened.close()
+
+    def test_rows_inside_retention_survive(self):
+        tracker = SavingsTracker(session_id="s", prune_days=30)
+        tracker.record_saving(
+            command="git status",
+            processor="git",
+            original_size=1000,
+            compressed_size=100,
+            platform="claude_code",
+        )
+        cutoff = time.time() - (5 * 86400)
+        tracker.conn.execute("UPDATE savings SET timestamp = ?", (cutoff,))
+        tracker.conn.commit()
+        tracker.close()
+
+        reopened = SavingsTracker(session_id="s", prune_days=30)
+        try:
+            rows = reopened.conn.execute("SELECT COUNT(*) FROM savings").fetchone()[0]
+            assert rows == 1
+        finally:
+            reopened.close()

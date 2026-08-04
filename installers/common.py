@@ -119,10 +119,10 @@ def install_files(target_dir, file_list, use_symlink=False):
     for hooks_rel in ("antigravity/hooks.json", "hooks/hooks.json"):
         hooks_path = os.path.join(target_dir, hooks_rel)
         if IS_WINDOWS and os.path.exists(hooks_path) and not os.path.islink(hooks_path):
-            with open(hooks_path) as f:
+            with open(hooks_path, encoding="utf-8") as f:
                 content = f.read()
             content = content.replace("python3 ", "python ")
-            with open(hooks_path, "w") as f:
+            with open(hooks_path, "w", encoding="utf-8") as f:
                 f.write(content)
             print(f"  PATCHED {hooks_rel} for Windows python")
 
@@ -205,7 +205,7 @@ def migrate_from_legacy():
 
     if os.path.exists(settings_path):
         try:
-            with open(settings_path) as f:
+            with open(settings_path, encoding="utf-8") as f:
                 settings = json.load(f)
             hooks = settings.get("hooks", {})
             changed = False
@@ -223,7 +223,7 @@ def migrate_from_legacy():
             if changed:
                 if not hooks:
                     settings.pop("hooks", None)
-                with open(settings_path, "w") as f:
+                with open(settings_path, "w", encoding="utf-8") as f:
                     json.dump(settings, f, indent=2)
                     f.write("\n")
                 print("  REMOVED legacy hooks from settings.json")
@@ -239,7 +239,7 @@ def migrate_from_legacy():
 def _read_version():
     """Read __version__ from src/__init__.py using regex."""
     init_path = os.path.join(EXTENSION_DIR, "src", "__init__.py")
-    with open(init_path) as f:
+    with open(init_path, encoding="utf-8") as f:
         content = f.read()
     match = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', content)
     if not match:
@@ -265,7 +265,7 @@ def stamp_version(target_dir, manifest_paths):
         manifest = os.path.join(target_dir, rel_path)
         if not os.path.exists(manifest) or os.path.islink(manifest):
             continue
-        with open(manifest) as f:
+        with open(manifest, encoding="utf-8") as f:
             data = json.load(f)
 
         # Stamp top-level version if it exists or this isn't a marketplace file
@@ -278,7 +278,7 @@ def stamp_version(target_dir, manifest_paths):
                 if isinstance(plugin_entry, dict) and "version" in plugin_entry:
                     plugin_entry["version"] = version
 
-        with open(manifest, "w") as f:
+        with open(manifest, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
             f.write("\n")
         print(f"  STAMPED version {version} in {rel_path}")

@@ -23,6 +23,7 @@ _ERROR_RE = re.compile(r"\b(error|Error|failed|Failed|cannot|panic)\b")
 
 class NixProcessor(Processor):
     priority = 48
+    handles_failure = True
     hook_patterns = [
         r"^(nix\s+(build|develop|run|eval|shell|flake\s+\w+)|nix-build|nix-shell|nix-env)\b",
     ]

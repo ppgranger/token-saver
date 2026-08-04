@@ -7,6 +7,7 @@ from .base import Processor
 
 class BuildOutputProcessor(Processor):
     priority = 25
+    handles_failure = True
     hook_patterns = [
         r"^(npm\s+(run|install|build|ci|audit)|yarn\s+(run|install|build|add|audit)|pnpm\s+(run|install|build|add|audit))\b",
         r"^(make|cmake|ant)\b",

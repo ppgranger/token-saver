@@ -9,6 +9,7 @@ from .utils import compress_json_value
 
 class NetworkProcessor(Processor):
     priority = 30
+    handles_failure = True
     hook_patterns = [
         r"^(curl|wget|http|https)\b",
     ]

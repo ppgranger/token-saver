@@ -8,6 +8,7 @@ from .base import PYTHON_CMD, Processor
 
 class TestOutputProcessor(Processor):
     priority = 21
+    handles_failure = True
     hook_patterns = [
         rf"^(pytest|py\.test|{PYTHON_CMD}\s+-m\s+pytest|jest|mocha|vitest|cargo\s+test|go\s+test|rspec|phpunit|bun\s+test|dotnet\s+test|swift\s+test|mix\s+test)\b",
         r"^(npm\s+test|yarn\s+test|pnpm\s+test)\b",

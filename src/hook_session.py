@@ -7,6 +7,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from src.console import use_utf8_io
 from src.tracker import SavingsTracker
 
 
@@ -20,7 +21,7 @@ def _check_migration_message():
 
     os.makedirs(data_dir(), exist_ok=True)
     try:
-        with open(sentinel, "w") as f:
+        with open(sentinel, "w", encoding="utf-8") as f:
             f.write(__version__)
     except OSError:
         pass
@@ -32,6 +33,7 @@ def _check_migration_message():
 
 
 def main():
+    use_utf8_io()
     message = None
 
     # Read Claude Code's session_id from stdin JSON payload

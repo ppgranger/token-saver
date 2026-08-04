@@ -140,6 +140,7 @@ _LOG_ERROR_RE = re.compile(
 
 class FileContentProcessor(Processor):
     priority = 51
+    handles_failure = True
     hook_patterns = [
         r"^(cat|head|tail|less|more|bat)\b",
     ]

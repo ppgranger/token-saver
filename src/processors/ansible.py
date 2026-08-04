@@ -7,6 +7,7 @@ from .base import Processor
 
 class AnsibleProcessor(Processor):
     priority = 40
+    handles_failure = True
     hook_patterns = [
         r"^ansible(-playbook)?\b",
     ]

@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "python3 \"${extensionPath}/antigravity/hook_aftertool.py\"",
-            "timeout": 5000
+            "timeout": 10
           }
         ]
       }
@@ -18,7 +18,7 @@
           {
             "type": "command",
             "command": "python3 \"${extensionPath}/src/hook_session.py\"",
-            "timeout": 3000
+            "timeout": 5
           }
         ]
       }

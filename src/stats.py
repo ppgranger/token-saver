@@ -12,6 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from src.console import use_utf8_io
 from src.tracker import SavingsTracker
 
 # ── ANSI escape codes ──────────────────────────────────────────────
@@ -150,6 +151,7 @@ def _print_mismatches(mismatches):
 
 
 def main():
+    use_utf8_io()
     as_json = "--json" in sys.argv
 
     # Allow override for testing

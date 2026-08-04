@@ -1,0 +1,112 @@
+{
+  "cargo build (120 crates)": {
+    "processor": "cargo",
+    "ratio": 97.8,
+    "was_compressed": true
+  },
+  "cat large_file.py (1000 lines)": {
+    "processor": "file_content",
+    "ratio": 0.0,
+    "was_compressed": false
+  },
+  "curl download (100 progress lines)": {
+    "processor": "network",
+    "ratio": 100.0,
+    "was_compressed": true
+  },
+  "docker build (20 steps)": {
+    "processor": "build",
+    "ratio": 87.7,
+    "was_compressed": true
+  },
+  "eslint (55 violations, 2 rules)": {
+    "processor": "lint",
+    "ratio": 88.8,
+    "was_compressed": true
+  },
+  "find . -name '*.py' (205 results)": {
+    "processor": "file_listing",
+    "ratio": 75.1,
+    "was_compressed": true
+  },
+  "git diff (5 files, 20 context lines each)": {
+    "processor": "git",
+    "ratio": 75.9,
+    "was_compressed": true
+  },
+  "git diff --stat (25 files)": {
+    "processor": "git",
+    "ratio": 96.0,
+    "was_compressed": true
+  },
+  "git log --oneline (50 entries, already compact)": {
+    "processor": "git",
+    "ratio": 79.4,
+    "was_compressed": true
+  },
+  "git status (30+ files, verbose format)": {
+    "processor": "git",
+    "ratio": 32.7,
+    "was_compressed": true
+  },
+  "git status -s (45 files, short format)": {
+    "processor": "git",
+    "ratio": 0.0,
+    "was_compressed": false
+  },
+  "jest (50 suites, all passing)": {
+    "processor": "test",
+    "ratio": 94.4,
+    "was_compressed": true
+  },
+  "ls (126 items)": {
+    "processor": "file_listing",
+    "ratio": 57.0,
+    "was_compressed": true
+  },
+  "mypy (30 errors, 5 rules)": {
+    "processor": "lint",
+    "ratio": 54.8,
+    "was_compressed": true
+  },
+  "npm audit (15 vulnerabilities)": {
+    "processor": "build",
+    "ratio": 72.9,
+    "was_compressed": true
+  },
+  "npm install (220 packages)": {
+    "processor": "build",
+    "ratio": 99.9,
+    "was_compressed": true
+  },
+  "pip install -r requirements.txt (30 packages)": {
+    "processor": "python_install",
+    "ratio": 95.1,
+    "was_compressed": true
+  },
+  "pytest (200 passed, 30 warnings, 0 failures)": {
+    "processor": "test",
+    "ratio": 97.7,
+    "was_compressed": true
+  },
+  "pytest (500 passed, 2 failed)": {
+    "processor": "test",
+    "ratio": 95.4,
+    "was_compressed": true
+  },
+  "ruff check (110 violations, 4 rules)": {
+    "processor": "lint",
+    "ratio": 87.4,
+    "was_compressed": true
+  },
+  "tree (350+ lines)": {
+    "processor": "file_listing",
+    "ratio": 92.6,
+    "was_compressed": true
+  },
+  "tsc (7 type errors)": {
+    "processor": "build",
+    "ratio": 0.0,
+    "was_compressed": false
+  }
+}

@@ -17,7 +17,7 @@ class TestUserProcessorLoading:
     def _write_processor(self, tmpdir, filename, content):
         """Write a processor file to the temp directory."""
         path = os.path.join(tmpdir, filename)
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(textwrap.dedent(content))
         return path
 
