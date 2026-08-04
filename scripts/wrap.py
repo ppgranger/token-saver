@@ -95,8 +95,22 @@ def inject_markers(parts: list[tuple[str, str]], marker_prefix: str) -> str:
     return " ".join(pieces)
 
 
+def isolate_markers(output: str, marker_prefix: str) -> str:
+    """Ensure every marker starts on its own line.
+
+    `inject_markers` emits each marker with `echo`, but the preceding segment's
+    stdout is not guaranteed to end with a newline (`cat` on a file with no
+    final newline, `printf` without `\\n`, ...).  The marker then lands at the
+    end of that segment's last line, where the line-anchored patterns below
+    cannot see it: the marker leaks into the returned output and every later
+    segment collapses into segment 0.
+    """
+    return re.sub(r"(?<=[^\n])(?=" + re.escape(marker_prefix) + r"\d+)", "\n", output)
+
+
 def strip_markers(output: str, marker_prefix: str) -> str:
     """Remove marker lines from output (used for dry-run display)."""
+    output = isolate_markers(output, marker_prefix)
     pattern = re.compile(r"^" + re.escape(marker_prefix) + r"\d+\s*\n?", re.MULTILINE)
     return pattern.sub("", output)
 
@@ -109,6 +123,7 @@ def split_output_by_markers(output: str, marker_prefix: str) -> list[tuple[int, 
     Markers may be missing if an `&&` short-circuited mid-chain; the
     embedded indices keep the mapping correct.
     """
+    output = isolate_markers(output, marker_prefix)
     pattern = re.compile(r"^" + re.escape(marker_prefix) + r"(\d+)\s*$", re.MULTILINE)
     matches = list(pattern.finditer(output))
     if not matches:
