@@ -1077,6 +1077,39 @@ class TestChainPerSegmentCompression:
         assert "segB" in result.stdout
         assert "__TS_MARK_" not in result.stdout
 
+    def test_split_output_marker_glued_to_previous_segment(self):
+        """A segment whose stdout has no trailing newline glues the next marker
+        onto its last line.  The marker must still split correctly.
+        """
+        wrap = self._import_wrap()
+        text = "out1M_1\nout2\nM_2\nout3"
+        chunks = wrap.split_output_by_markers(text, "M_")
+        assert chunks == [(0, "out1"), (1, "out2"), (2, "out3")]
+
+    def test_strip_markers_glued_to_previous_segment(self):
+        wrap = self._import_wrap()
+        text = "out1M_1\nout2"
+        assert wrap.strip_markers(text, "M_") == "out1\nout2"
+
+    def test_e2e_wrap_chain_no_marker_leak_without_trailing_newline(self):
+        """Real chain whose first segment emits no trailing newline."""
+        import subprocess
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        wrap_path = os.path.join(repo_root, "scripts", "wrap.py")
+        cmd = "printf segA; echo segB"
+        result = subprocess.run(  # noqa: S603, PLW1510
+            [sys.executable, wrap_path, cmd],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "segA" in result.stdout
+        assert "segB" in result.stdout
+        assert "__TS_MARK_" not in result.stdout
+
     def test_strip_markers_removes_lines(self):
         wrap = self._import_wrap()
         text = "out1\nM_1\nout2\nM_2\nout3"
