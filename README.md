@@ -12,7 +12,7 @@ Token-Saver is a drop-in **context-window optimizer for AI coding assistants**. 
 
 **36 specialized processors** understand the tools you already use — git, pytest, jest, cargo, go, docker, kubernetes, terraform, pulumi, helm, ansible, aws, gcloud, and more. Each one knows exactly what to keep and what to discard: errors, diffs, stack traces, and actionable data stay; progress bars, passing tests, download spinners, and boilerplate go.
 
-Compatible with **Claude Code** and **Antigravity CLI**. Zero added latency. No extra LLM calls. Fully deterministic. One install, instant savings.
+Compatible with **Claude Code** and **Antigravity CLI**. ~60ms of added overhead per wrapped command (regex/parsing only — dwarfed by the seconds most CLI commands take to run). No extra LLM calls. Fully deterministic. One install, instant savings.
 
 **Why developers use Token-Saver:**
 
@@ -27,15 +27,15 @@ Compatible with **Claude Code** and **Antigravity CLI**. Zero added latency. No 
 
 | Command | Raw Output | Compressed | Savings |
 |---------|-----------|------------|---------|
-| `git diff` (large refactor) | 2,270 tokens | 909 tokens | **60%** |
+| `git diff` (5 files, 20 context lines each) | 2,270 tokens | 547 tokens | **76%** |
 | `pytest` (500 tests, 2 failures) | 6,744 tokens | 308 tokens | **95%** |
-| `npm install` (220 packages) | 3,844 tokens | 4 tokens | **99%** |
-| `terraform plan` (15 resources) | 1,840 tokens | 137 tokens | **93%** |
-| `kubectl get pods` (40 pods) | 1,393 tokens | 79 tokens | **94%** |
-| `docker compose logs` (4 services) | 3,200 tokens | 480 tokens | **85%** |
-| `helm template` (12 manifests) | 2,100 tokens | 210 tokens | **90%** |
+| `npm install` (220 packages) | 3,844 tokens | 4 tokens | **99.9%** |
+| `cargo build` (120 crates) | 934 tokens | 21 tokens | **98%** |
+| `docker build` (20 steps) | 1,683 tokens | 208 tokens | **88%** |
+| `ruff check` (110 violations, 4 rules) | 1,475 tokens | 186 tokens | **87%** |
+| `tree` (350+ lines) | 1,840 tokens | 137 tokens | **93%** |
 
-> Run `token-saver benchmark <command>` to measure savings on your own workloads.
+These are locked to `tests/compression_baselines.json` and gated by CI (`tests/test_compression_ratchet.py`) — if a change makes any of them compress worse, the build fails. Run `python3 scripts/audit_compression.py` to see the full scenario set, or `token-saver benchmark <command>` to measure savings on your own workloads.
 
 ## Why
 
@@ -110,13 +110,14 @@ Antigravity CLI allows direct output replacement through the deny/reason mechani
 
 Compression is aggressive on noise, conservative on signal:
 
-- Short outputs (< 200 characters) are **never** modified
-- Compression is only applied if the gain exceeds 10%
+- Tiny outputs are never touched, and a result that doesn't actually get smaller is discarded in favor of the original (both thresholds are configurable — see [Configuration](#configuration))
 - All errors, stack traces, and actionable information are **fully preserved**
 - Source code files (`cat *.py`, `cat *.ts`, ...) pass through **unchanged** — the model needs exact content
-- Secrets in `.env` files are automatically **redacted** before reaching the model
+- Secrets in `.env.production`, `.env.local`, and other `.env.*` variants are automatically **redacted** before reaching the model (`.env`, `.env.example`, and `.env.template` pass through unchanged, by design — see the note below)
 - Only "noise" is removed: progress bars, passing tests, installation logs, ANSI codes, platform lines
-- 853 tests including 49 precision-specific tests that verify every critical piece of data survives compression
+- 1300+ tests including precision-specific tests that verify every critical piece of data survives compression, and a compression-ratchet suite that fails CI if a real-world scenario's compression ratio regresses
+
+> **Note on `.env`:** `.env`, `.env.example`, and `.env.template` are intentionally left untouched (not redacted, not compressed) — these are the files you're most likely actively editing, where exact values matter. Other `.env.*` variants (`.env.production`, `.env.local`, ...), which you're more likely to be reading than editing, get their values redacted. If you `cat .env` directly, treat that output as sensitive the same way you would without Token-Saver installed.
 
 ## Installation
 
@@ -294,12 +295,12 @@ Thresholds are configurable via JSON file or environment variables.
 ```json
 {
   "enabled": true,
-  "min_input_length": 200,
-  "min_compression_ratio": 0.10,
-  "max_diff_hunk_lines": 150,
-  "max_log_entries": 20,
-  "max_file_lines": 300,
-  "generic_truncate_threshold": 500,
+  "min_input_length": 1,
+  "min_compression_ratio": 0.0,
+  "max_diff_hunk_lines": 50,
+  "max_log_entries": 10,
+  "max_file_lines": 100,
+  "generic_truncate_threshold": 200,
   "debug": false
 }
 ```
@@ -330,47 +331,63 @@ Drop a `.token-saver.json` in your repository root to override global settings:
 
 Project settings are merged with global settings. Token-Saver walks up parent directories (like `.gitignore` resolution) to find the nearest `.token-saver.json`. Useful for monorepos or projects with atypical output patterns (large Terraform plans, verbose test suites, etc.).
 
+**Security note:** because this file is auto-discovered from any directory you `cd` into — including one you just cloned and haven't reviewed — three keys are never honored from it: `user_processors_dir` (would let a repo run arbitrary Python as soon as any Bash command executes), `disabled_processors`, and `redaction_allowlist` (both could silently weaken the secret-redaction safety net). Set those three only in `~/.token-saver/config.json` or via a `TOKEN_SAVER_*` environment variable.
+
 ### Complete Parameter List
+
+This table is generated from `src/config.py`'s `_DEFAULTS` dict — that file is the
+source of truth if the two ever disagree.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `enabled` | true | Master switch -- set to `false` to bypass all compression |
-| `min_input_length` | 200 | Minimum threshold (characters) to attempt compression |
-| `min_compression_ratio` | 0.10 | Minimum gain (10%) to apply compression |
-| `wrap_timeout` | 300 | Wrapper timeout in seconds |
-| `max_diff_hunk_lines` | 150 | Max lines per hunk in git diff |
-| `max_diff_context_lines` | 3 | Context lines kept before/after each change in diffs |
-| `max_log_entries` | 20 | Max entries in git log/reflog |
-| `max_file_lines` | 300 | Threshold before file content compression kicks in |
-| `file_keep_head` | 150 | Lines kept from the start of file (fallback strategy) |
-| `file_keep_tail` | 50 | Lines kept from the end of file (fallback strategy) |
-| `file_code_head_lines` | 20 | Import/header lines to preserve in code files |
-| `file_code_body_lines` | 3 | Body lines kept per function/class definition |
-| `file_log_context_lines` | 2 | Context lines around errors in log files |
-| `file_csv_head_rows` | 5 | Data rows kept from start of CSV files |
-| `file_csv_tail_rows` | 3 | Data rows kept from end of CSV files |
-| `generic_truncate_threshold` | 500 | Generic truncation threshold |
-| `generic_keep_head` | 200 | Lines kept from the start (generic) |
-| `generic_keep_tail` | 100 | Lines kept from the end (generic) |
-| `ls_compact_threshold` | 20 | Items before ls compaction |
-| `find_compact_threshold` | 30 | Results before find compaction |
-| `tree_compact_threshold` | 50 | Lines before tree truncation |
-| `lint_example_count` | 2 | Examples shown per lint rule |
-| `lint_group_threshold` | 3 | Occurrences before grouping by rule |
-| `search_max_per_file` | 3 | Max match lines shown per file |
-| `search_max_files` | 20 | Max files shown in search results |
-| `kubectl_keep_head` | 10 | Lines kept from start of kubectl logs |
-| `kubectl_keep_tail` | 20 | Lines kept from end of kubectl logs |
-| `docker_log_keep_head` | 10 | Lines kept from start of docker logs |
-| `docker_log_keep_tail` | 20 | Lines kept from end of docker logs |
-| `git_branch_threshold` | 30 | Branches before compaction |
-| `git_stash_threshold` | 10 | Stash entries before truncation |
-| `max_traceback_lines` | 30 | Max traceback lines before truncation |
-| `db_prune_days` | 90 | Stats retention in days |
-| `user_processors_dir` | `~/.token-saver/processors/` | Directory for custom processors |
-| `disabled_processors` | `[]` | List of processor names to disable (env: comma-separated) |
-| `max_chain_depth` | 3 | Maximum processor chain depth |
-| `debug` | false | Enable debug logging |
+| `enabled` | `true` | Master switch -- set to `false` to bypass all compression |
+| `min_input_length` | `1` | Minimum threshold (characters) to attempt compression |
+| `min_compression_ratio` | `0.0` | Minimum gain to apply compression (0 = apply any gain) |
+| `wrap_timeout` | `300` | Wrapper timeout in seconds |
+| `max_diff_hunk_lines` | `50` | Max lines per hunk in git diff |
+| `max_diff_context_lines` | `3` | Context lines kept before/after each change in diffs |
+| `max_log_entries` | `10` | Max entries in git log/reflog |
+| `max_file_lines` | `100` | Threshold before file content compression kicks in |
+| `file_keep_head` | `80` | Lines kept from the start of file (fallback strategy) |
+| `file_keep_tail` | `30` | Lines kept from the end of file (fallback strategy) |
+| `generic_truncate_threshold` | `200` | Generic truncation threshold |
+| `generic_keep_head` | `100` | Lines kept from the start (generic) |
+| `generic_keep_tail` | `50` | Lines kept from the end (generic) |
+| `generic_keep_critical` | `20` | Max error/failure lines rescued from the truncated middle (0 disables) |
+| `recover_critical_lines` | `20` | Max error lines the engine re-appends when a processor dropped them (0 disables) |
+| `ls_compact_threshold` | `15` | Items before ls compaction |
+| `find_compact_threshold` | `20` | Results before find compaction |
+| `tree_compact_threshold` | `30` | Lines before tree truncation |
+| `lint_example_count` | `2` | Examples shown per lint rule |
+| `lint_group_threshold` | `3` | Occurrences before grouping by rule |
+| `file_code_head_lines` | `15` | Import/header lines to preserve in code files |
+| `file_code_body_lines` | `2` | Body lines kept per function/class definition |
+| `file_log_context_lines` | `2` | Context lines around errors in log files |
+| `file_csv_head_rows` | `3` | Data rows kept from start of CSV files |
+| `file_csv_tail_rows` | `2` | Data rows kept from end of CSV files |
+| `search_max_per_file` | `3` | Max match lines shown per file |
+| `search_max_files` | `15` | Max files shown in search results |
+| `kubectl_keep_head` | `5` | Lines kept from start of kubectl logs |
+| `kubectl_keep_tail` | `10` | Lines kept from end of kubectl logs |
+| `docker_log_keep_head` | `5` | Lines kept from start of docker logs |
+| `docker_log_keep_tail` | `10` | Lines kept from end of docker logs |
+| `git_branch_threshold` | `15` | Branches before compaction |
+| `git_stash_threshold` | `5` | Stash entries before truncation |
+| `max_traceback_lines` | `30` | Max traceback lines before truncation |
+| `db_max_rows` | `20` | Max rows shown per database query result |
+| `db_prune_days` | `90` | Stats retention in days |
+| `chars_per_token` | `4` | Chars-per-token ratio used to estimate token counts (display only) |
+| `cargo_warning_example_count` | `2` | Example warnings shown per cargo/clippy lint |
+| `cargo_warning_group_threshold` | `3` | Occurrences before grouping cargo warnings |
+| `jq_passthrough_threshold` | `50` | Below this many lines, jq/yq output passes through unchanged |
+| `max_chain_depth` | `3` | Maximum processor chain depth (`chain_to`) |
+| `max_output_bytes` | `10000000` | Hard cap on output length (chars) before compression runs (0 disables) |
+| `debug` | `false` | Enable debug logging |
+| `user_processors_dir` | `""` (falls back to `~/.token-saver/processors/`) | Directory for custom processors — **global config / env var only, not project config** |
+| `disabled_processors` | `[]` | Processor names to disable (env: comma-separated) — **global config / env var only, not project config** |
+| `redaction_allowlist` | `[]` | Env var name patterns exempt from secret redaction — **global config / env var only, not project config** |
+
+The last three cannot be set from a project-level `.token-saver.json` — see [Per-Project Configuration](#per-project-configuration) below.
 
 ## Custom Processors
 
@@ -561,17 +578,21 @@ token-saver/
 ├── install.py                       # Installer entry point
 ├── CLAUDE.md                        # Plugin instructions
 ├── tests/
-│   ├── test_engine.py               # Engine + registry tests (46)
-│   ├── test_processors.py           # Per-processor tests (432)
-│   ├── test_hooks.py                # Hook pattern + integration tests (174)
-│   ├── test_precision.py            # Precision preservation tests (49)
-│   ├── test_core.py                 # Shared compression core tests (11)
-│   ├── test_tracker.py              # SQLite + concurrency tests (26)
-│   ├── test_config.py               # Configuration tests (19)
-│   ├── test_version_check.py        # Version check + fail-open tests (18)
-│   ├── test_cli.py                  # CLI subcommand tests (23)
-│   ├── test_user_processors.py      # Custom processor loading tests (7)
-│   ├── test_installers.py           # Installer utility tests (48)
+│   ├── test_engine.py               # Engine + registry tests
+│   ├── test_processors.py           # Per-processor tests (the largest file by far)
+│   ├── test_hooks.py                # Hook pattern + integration tests
+│   ├── test_precision.py            # Precision preservation tests
+│   ├── test_pattern_consistency.py  # hook_patterns vs. can_handle() agreement, per processor
+│   ├── test_core.py                 # Shared compression core tests
+│   ├── test_tracker.py              # SQLite + concurrency tests
+│   ├── test_config.py               # Configuration tests
+│   ├── test_console.py              # UTF-8 stdio forcing tests
+│   ├── test_version_check.py        # Version check + fail-open tests
+│   ├── test_version_consistency.py  # Manifest/marketplace version drift guard
+│   ├── test_cli.py                  # CLI subcommand tests
+│   ├── test_user_processors.py      # Custom processor loading tests
+│   ├── test_installers.py           # Installer utility tests
+│   ├── test_install_smoke.py        # End-to-end installer smoke tests
 │   ├── failure_fixtures.py          # One failing-command fixture per processor
 │   ├── compression_baselines.json   # Recorded ratios guarded by the ratchet test
 │   └── test_compression_ratchet.py  # Fails if any scenario compresses worse
@@ -587,19 +608,21 @@ token-saver/
 python3 -m pytest tests/ -v
 ```
 
-853 tests covering:
+1,300+ tests (run `python3 -m pytest tests/ --collect-only -q | tail -1` for the exact, current count) covering:
 
-- **test_engine.py** (46 tests): compression thresholds, processor priority, ANSI cleanup, generic fallback, hook pattern coverage for 85+ commands
-- **test_processors.py** (432 tests): each processor with nominal and edge cases, chained command routing, all subcommands (blame, inspect, stats, compose, apply/delete, init/output/state, fd, exa, httpie, dotnet/swift/mix test, shellcheck/hadolint/biome, traceback truncation, ansible, helm, syslog, parameterized tests, coverage, docker compose logs, tsc typecheck, .env redaction, minified files, search directory grouping, git lockfiles/stat grouping)
-- **test_hooks.py** (174 tests): matching patterns for all supported commands, exclusions (pipes, sudo, editors, redirections, remote rsync), subprocess integration, global options (git, docker, kubectl), chained commands (shared shell state, `&&` short-circuit, `;` continue), safe trailing pipes
-- **test_precision.py** (49 tests): verification that every critical piece of data survives compression (filenames, hashes, error messages, stack traces, line numbers, rule IDs, diff changes, warning types, secret redaction, unhealthy pods, terraform changes, unmet dependencies)
-- **test_core.py** (11 tests): shared compression core (decision, pass-through-on-error, audit logging) and the platform hook end-to-end
-- **test_tracker.py** (26 tests): CRUD, concurrency (4 threads), corruption recovery, session tracking, stats CLI
-- **test_config.py** (19 tests): defaults, env overrides, invalid values
-- **test_version_check.py** (18 tests): version parsing, comparison, fail-open on errors
-- **test_cli.py** (23 tests): version/stats/help/explain subcommands, bin script execution
-- **test_user_processors.py** (7 tests): custom processor discovery and loading from `~/.token-saver/processors/`
-- **test_installers.py** (48 tests): version stamping, legacy migration, CLI install/uninstall
+- **test_engine.py**: compression thresholds, processor priority, ANSI cleanup, generic fallback, hook pattern coverage across all supported commands
+- **test_processors.py**: each processor with nominal and edge cases, chained command routing, all subcommands (blame, inspect, stats, compose, apply/delete, init/output/state, fd, exa, httpie, dotnet/swift/mix test, shellcheck/hadolint/biome, traceback truncation, ansible, helm, syslog, parameterized tests, coverage, docker compose logs, tsc typecheck, .env redaction, minified files, search directory grouping, git lockfiles/stat grouping)
+- **test_hooks.py**: matching patterns for all supported commands, exclusions (pipes, sudo, editors, redirections, remote rsync, backgrounded `&`, unquoted newlines, shell-construct fragments), subprocess integration, global options (git, docker, kubectl), chained commands (shared shell state, `&&` short-circuit, `;` continue, unterminated-segment markers), safe trailing pipes
+- **test_precision.py**: verification that every critical piece of data survives compression (filenames, hashes, error messages, stack traces, line numbers, rule IDs, diff changes, warning types, secret redaction under every fallback path, unhealthy pods, terraform changes, unmet dependencies) — includes `TestFailureHandling`, which runs a realistic failing-command fixture through every processor and asserts the failure reason is never lost, for every processor, at every exit code
+- **test_compression_ratchet.py**: locks each real-world scenario's compression ratio, processor routing, and was-compressed status to a recorded baseline — a silent regression fails CI, not just a code review
+- **test_pattern_consistency.py**: every processor's `hook_patterns` (used by the PreToolUse hook, before any output exists) must agree with its `can_handle()` (used by the engine, after output exists) — otherwise a command gets wrapped but never actually routed
+- **test_core.py**: shared compression core (decision, pass-through-on-error, audit logging) and the platform hook end-to-end
+- **test_tracker.py**: CRUD, concurrency, corruption recovery, session tracking, stats CLI
+- **test_config.py**: defaults, env overrides, invalid values, project-config trust boundaries
+- **test_version_check.py**: version parsing, comparison, fail-open on errors
+- **test_cli.py**: version/stats/help/explain subcommands, bin script execution
+- **test_user_processors.py**: custom processor discovery and loading from `~/.token-saver/processors/`
+- **test_installers.py** / **test_install_smoke.py**: version stamping, legacy migration, CLI install/uninstall, end-to-end install smoke tests
 
 ## Debugging
 
