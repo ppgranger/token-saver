@@ -9,7 +9,15 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import sys
 from typing import Any
+
+
+def _debug_log(msg: str) -> None:
+    """Print a debug message if TOKEN_SAVER_DEBUG is set."""
+    if os.environ.get("TOKEN_SAVER_DEBUG", "").lower() in ("1", "true", "yes"):
+        print(f"[token-saver] {msg}", file=sys.stderr)
+
 
 _DEFAULTS = {
     "enabled": True,
@@ -69,6 +77,23 @@ _config: dict[str, Any] | None = None
 
 
 PROJECT_CONFIG_FILE = ".token-saver.json"
+
+#: Keys that a *project*-level ``.token-saver.json`` is not trusted to set.
+#:
+#: A project config is discovered by walking up from ``cwd`` — meaning any
+#: git repo you ``cd`` into can drop one, and it takes effect before you've
+#: reviewed a single file in it.  ``user_processors_dir`` is arbitrary code
+#: execution: ``discover_processors()`` (invoked at hook import time, on
+#: *every* Bash command, whether or not it ends up compressible) imports
+#: every ``.py`` file in that directory.  ``disabled_processors`` and
+#: ``redaction_allowlist`` don't run code, but they can silently switch off
+#: the secret-redaction safety net this same repo could then rely on you not
+#: noticing. None of the three has a legitimate per-project use that
+#: ``~/.token-saver/config.json`` or an env var doesn't already cover, so a
+#: project file setting them is dropped outright rather than coerced.
+_PROJECT_FORBIDDEN_KEYS = frozenset(
+    {"user_processors_dir", "disabled_processors", "redaction_allowlist"}
+)
 
 
 def _find_project_config() -> str | None:
@@ -150,13 +175,27 @@ def _coerce_value(default_val: Any, raw: Any) -> Any:
     return None
 
 
-def _apply_file_overrides(config: dict[str, Any], file_config: dict[str, Any], source: str) -> None:
-    """Merge a loaded config file, validating types and dropping unknown keys."""
+def _apply_file_overrides(
+    config: dict[str, Any], file_config: dict[str, Any], source: str, *, trusted: bool = True
+) -> None:
+    """Merge a loaded config file, validating types and dropping unknown keys.
+
+    ``trusted=False`` additionally drops ``_PROJECT_FORBIDDEN_KEYS`` — used
+    for project-level ``.token-saver.json``, which (unlike the global config
+    file or env vars) can be introduced by simply cloning or ``cd``-ing into
+    a repo you don't control.
+    """
     if not isinstance(file_config, dict):
         return
     for key, raw in file_config.items():
         if key not in _DEFAULTS:
             # Unknown/typo'd keys are ignored rather than polluting config.
+            continue
+        if not trusted and key in _PROJECT_FORBIDDEN_KEYS:
+            _debug_log(
+                f"Ignoring {key!r} from untrusted project config {source} "
+                "(set it in ~/.token-saver/config.json or an env var instead)"
+            )
             continue
         coerced = _coerce_value(_DEFAULTS[key], raw)
         if coerced is None:
@@ -183,13 +222,17 @@ def _load_config() -> dict[str, Any]:
         except (json.JSONDecodeError, OSError):
             pass
 
-    # Load project-level config (overrides global)
+    # Load project-level config (overrides global).  Untrusted: a project's
+    # .token-saver.json is discovered just by cd-ing into it — see
+    # _PROJECT_FORBIDDEN_KEYS for why some keys never come from here.
     project_config_path = _find_project_config()
     if project_config_path is not None:
         try:
             with open(project_config_path, encoding="utf-8") as f:
                 project_config = json.load(f)
-            _apply_file_overrides(config, project_config, f"project:{project_config_path}")
+            _apply_file_overrides(
+                config, project_config, f"project:{project_config_path}", trusted=False
+            )
         except (json.JSONDecodeError, OSError):
             # Invalid project config is silently ignored
             pass

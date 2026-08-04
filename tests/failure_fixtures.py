@@ -154,6 +154,24 @@ CASES: list[FailureCase] = [
         ("Module not found: Error: Can't resolve './missing'",),
     ),
     FailureCase(
+        # jest's failure marker is a bare "FAIL" — no literal "error" anywhere
+        # in a failing run.  Regression for the false "Build succeeded."
+        # this processor used to print on it (see build_output._BUILD_FAILURE_RE).
+        "build",
+        "npm run test",
+        _build(
+            ["> myapp@1.0.0 test", "> jest"],
+            _pad("PASS src/mod{i}.test.js", 40),
+            [
+                "FAIL src/payment.test.js",
+                "  ● charges card > declines expired cards",
+                "    expect(received).toBe(expected)",
+            ],
+            ["Tests: 1 failed, 402 passed, 403 total"],
+        ),
+        ("FAIL src/payment.test.js",),
+    ),
+    FailureCase(
         "cargo_clippy",
         "cargo clippy",
         _build(

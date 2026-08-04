@@ -4,7 +4,7 @@ import re
 
 from .. import config
 from .base import Processor
-from .critical import CRITICAL_RE
+from .critical import is_critical
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07")
 
@@ -235,7 +235,7 @@ class GenericProcessor(Processor):
             return lines
 
         max_kept = config.get("generic_keep_critical")
-        kept = [ln for ln in middle if CRITICAL_RE.search(ln)][:max_kept] if max_kept > 0 else []
+        kept = [ln for ln in middle if is_critical(ln)][:max_kept] if max_kept > 0 else []
         dropped = removed - len(kept)
 
         marker = f"... ({dropped} lines truncated, {total} total) ..."

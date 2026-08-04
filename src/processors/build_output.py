@@ -4,10 +4,40 @@ import re
 
 from .base import Processor
 
+# Case-sensitive on purpose: 'error'/'Error'/'ERROR' as literal tokens.
+# IGNORECASE would fold this into the same trap CRITICAL_RE's global
+# IGNORECASE has — matching 'Extracting', 'entry', '[emitted]' — which is
+# exactly the noise this processor's whole job is to filter out.
+_ERROR_RE = re.compile(r"\b(error|Error|ERROR)\b")
+_ZERO_ERRORS_RE = re.compile(r"\b0 errors?\b")
+
+# Build-tool failure vocabulary that never says the word "error": jest's
+# block header is bare "FAIL", make prints "Failure 1", ninja/rollup have
+# their own wording.  Feeds ``has_error`` below, which gates whether
+# "Build succeeded." is allowed to be printed at all.  Deliberately narrow
+# and case-sensitive for the same reason as ``_ERROR_RE``.
+_BUILD_FAILURE_RE = re.compile(
+    r"\bFAIL\b|\bFailure\b|\bfatal\b|ninja: build stopped|Rollup failed|"
+    r"compiled with \d+ errors?|✗"
+)
+
+
+def _is_error_line(stripped: str) -> bool:
+    """True if ``stripped`` (already .strip()-ed) reports a build failure."""
+    if _ZERO_ERRORS_RE.search(stripped):
+        return False
+    return bool(_ERROR_RE.search(stripped) or _BUILD_FAILURE_RE.search(stripped))
+
 
 class BuildOutputProcessor(Processor):
     priority = 25
     handles_failure = True
+    # The text-based checks above cover most failure shapes, but a build can
+    # fail with neither "error" nor any word in _BUILD_FAILURE_RE — a bare
+    # non-zero exit is the only signal.  wants_exit_code lets the engine pass
+    # it through so this processor never prints "Build succeeded." on a run
+    # that actually failed.
+    wants_exit_code = True
     hook_patterns = [
         r"^(npm\s+(run|install|build|ci|audit)|yarn\s+(run|install|build|add|audit)|pnpm\s+(run|install|build|add|audit))\b",
         r"^(make|cmake|ant)\b",
@@ -48,7 +78,7 @@ class BuildOutputProcessor(Processor):
             )
         )
 
-    def process(self, command: str, output: str) -> str:
+    def process(self, command: str, output: str, *, exit_code: int | None = None) -> str:
         if not output or not output.strip():
             return output
 
@@ -69,17 +99,24 @@ class BuildOutputProcessor(Processor):
         lines = output.splitlines()
 
         has_error = any(
-            re.search(r"\b(error|Error|ERROR)\b", line)
-            and not re.search(r"\b0 errors?\b", line)
-            and not self._is_progress_line(line.strip())
-            for line in lines
+            _is_error_line(line) and not self._is_progress_line(line.strip()) for line in lines
         )
 
-        if has_error:
-            return self._extract_errors(lines)
+        # The text-based check above misses failure shapes with no
+        # recognized vocabulary at all (e.g. a bare non-zero exit from a
+        # custom Makefile target).  A known non-zero exit code is decisive:
+        # never print "Build succeeded." over it.
+        failed_by_exit_code = exit_code is not None and exit_code != 0
+
+        if has_error or failed_by_exit_code:
+            return self._extract_errors(lines, forced=failed_by_exit_code and not has_error)
         return self._summarize_success(lines)
 
-    def _extract_errors(self, lines: list[str]) -> str:
+    def _extract_errors(self, lines: list[str], forced: bool = False) -> str:
+        """Pull out error blocks. ``forced`` means the caller knows the run
+        failed (non-zero exit) even though no line matched the error
+        vocabulary — in that case fall back to the last lines rather than
+        risk returning an empty ``result`` that reads as success."""
         result = []
         in_error_block = False
         blank_count = 0
@@ -91,9 +128,7 @@ class BuildOutputProcessor(Processor):
                 continue
 
             # Error start
-            if re.search(r"\b(error|Error|ERROR)\b", stripped) and not re.search(
-                r"\b0 errors?\b", stripped
-            ):
+            if _is_error_line(stripped):
                 in_error_block = True
                 blank_count = 0
                 result.append(line)
@@ -129,7 +164,14 @@ class BuildOutputProcessor(Processor):
                 result.append(line)
 
         if not result:
-            return "\n".join(lines[-30:])
+            tail = "\n".join(lines[-30:])
+            if forced:
+                # No recognized error vocabulary anywhere — the exit code is
+                # the only evidence of failure.  Say so explicitly rather
+                # than silently falling back to the raw tail, which could
+                # otherwise still read as an unremarkable, successful build.
+                return f"[token-saver] command exited non-zero; no error markers recognized\n{tail}"
+            return tail
         return "\n".join(result)
 
     def _summarize_success(self, lines: list[str]) -> str:

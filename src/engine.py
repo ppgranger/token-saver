@@ -74,6 +74,23 @@ class CompressionEngine:
             return processor
         return None
 
+    def _call_process(
+        self, processor: Processor, command: str, output: str, exit_code: int | None
+    ) -> str:
+        """Call ``processor.process()``, passing ``exit_code`` only if it wants it.
+
+        Every processor accepts ``(command, output)``; only the handful that
+        set ``wants_exit_code = True`` also accept the ``exit_code`` keyword.
+        Calling with it unconditionally would be a ``TypeError`` for the other
+        ~35 processors.
+        """
+        if processor.wants_exit_code:
+            # Processors that opt in via wants_exit_code declare a wider
+            # signature than the base class's abstract `process()` — mypy
+            # only sees the base signature here, hence the ignore.
+            return processor.process(command, output, exit_code=exit_code)  # type: ignore[call-arg]
+        return processor.process(command, output)
+
     def _recover_critical(self, original: str, compressed: str, processor: Processor) -> str:
         """Re-append error lines a processor dropped, so none are lost silently.
 
@@ -138,7 +155,7 @@ class CompressionEngine:
         # failed — surfaced in last_event so `token-saver stats` can show it.
         failure_fallback = bool(exit_code) and processor is self._generic
 
-        compressed = processor.process(command, output)
+        compressed = self._call_process(processor, command, output, exit_code)
 
         # If the processor returned output exactly unchanged, it
         # explicitly chose not to compress (e.g. source code files).
@@ -170,7 +187,7 @@ class CompressionEngine:
                     continue
                 secondary = self._by_name[chain_name]
                 visited.add(chain_name)
-                chained = secondary.process(command, compressed)
+                chained = self._call_process(secondary, command, compressed, exit_code)
                 if chained is not compressed and chained != compressed:
                     compressed = chained
                 depth += 1
@@ -203,7 +220,7 @@ class CompressionEngine:
         # fallback (dedup, truncation, etc.).
         mismatch = processor is not self._generic
         if processor is not self._generic:
-            generic_compressed = self._generic.process(command, output)
+            generic_compressed = self._call_process(self._generic, command, output, exit_code)
             generic_compressed = self._generic.clean(generic_compressed)
             generic_compressed = self._recover_critical(output, generic_compressed, self._generic)
             generic_len = len(generic_compressed)

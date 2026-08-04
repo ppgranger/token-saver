@@ -3170,6 +3170,41 @@ class TestBuildOutputPipeGuard:
         assert "Build succeeded" in result
 
 
+class TestBuildOutputExitCodeFallback:
+    """A failed build with no recognized error vocabulary at all must not be
+    reported as a success — the only remaining signal is the exit code."""
+
+    def setup_method(self):
+        self.p = BuildOutputProcessor()
+
+    def test_no_vocabulary_but_nonzero_exit_is_not_a_success(self):
+        output = "\n".join([f"cc -c file{i}.c -o file{i}.o" for i in range(40)])
+        result = self.p.process("make", output, exit_code=2)
+        assert "Build succeeded" not in result
+        assert "exited non-zero" in result
+
+    def test_no_vocabulary_and_zero_exit_is_still_a_success(self):
+        output = "\n".join([f"cc -c file{i}.c -o file{i}.o" for i in range(40)])
+        result = self.p.process("make", output, exit_code=0)
+        assert "Build succeeded" in result
+
+    def test_no_vocabulary_and_unknown_exit_defaults_to_success(self):
+        """exit_code=None (unknown) preserves prior behaviour: best effort
+        from text alone.  Antigravity never supplies an exit code."""
+        output = "\n".join([f"cc -c file{i}.c -o file{i}.o" for i in range(40)])
+        result = self.p.process("make", output, exit_code=None)
+        assert "Build succeeded" in result
+
+    def test_recognized_error_wins_regardless_of_exit_code(self):
+        output = "\n".join(
+            [f"cc -c file{i}.c -o file{i}.o" for i in range(40)]
+            + ["main.c:10:5: error: expected ';' before '}' token"]
+        )
+        result = self.p.process("make", output, exit_code=1)
+        assert "Build succeeded" not in result
+        assert "expected ';'" in result
+
+
 class TestLintNewPatterns:
     """Test new lint patterns: oxlint, deno lint, golangci-lint, rubocop."""
 

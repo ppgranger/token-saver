@@ -42,13 +42,33 @@ class Processor(ABC):
     #: ``handles_failure = True`` must keep the error lines of a failing run.
     handles_failure: bool = False
 
+    #: Whether ``process()`` accepts an ``exit_code`` keyword argument.
+    #:
+    #: Most processors decide success/failure purely from the shape of the
+    #: output text (a recognizable "error"/"FAILED"/traceback marker), which
+    #: is enough — the text usually says what happened.  A processor should
+    #: only opt in here when the *absence* of a recognizable failure marker
+    #: is itself ambiguous (e.g. a build tool that reports failure with a
+    #: bare "FAIL" your regex doesn't yet know, or silently via exit status
+    #: alone), so it needs the real exit status as a tie-breaker to avoid
+    #: summarizing a failed run as a success.  The engine only passes
+    #: ``exit_code`` to processors that set this flag; everyone else keeps
+    #: the simpler two-argument signature.
+    wants_exit_code: bool = False
+
     @abstractmethod
     def can_handle(self, command: str) -> bool:
         """Return True if this processor can handle the given command."""
 
     @abstractmethod
     def process(self, command: str, output: str) -> str:
-        """Process and compress the output. Return compressed version."""
+        """Process and compress the output. Return compressed version.
+
+        Processors that set ``wants_exit_code = True`` may instead declare
+        ``def process(self, command: str, output: str, *, exit_code: int |
+        None = None) -> str`` — the engine detects the flag and calls
+        accordingly.
+        """
 
     def clean(self, text: str) -> str:
         """Light cleanup pass (default: no-op). Overridden by GenericProcessor."""
