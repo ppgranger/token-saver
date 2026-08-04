@@ -1,5 +1,5 @@
 {
   "name": "token-saver",
-  "version": "2.6.3",
+  "version": "2.7.1",
   "description": "Compresses verbose tool outputs to save tokens while preserving critical information"
 }

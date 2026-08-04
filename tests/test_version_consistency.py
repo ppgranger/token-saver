@@ -5,7 +5,7 @@
 time.  But three other files carried the version too, and nothing kept them
 honest: ``pyproject.toml`` was maintained entirely by hand, and
 ``antigravity/antigravity-plugin.json`` had already drifted to ``1.0.0`` while
-the rest said ``2.6.3``.
+the rest said a different version.
 
 ``pyproject.toml`` no longer declares a version at all (it derives one via
 ``[tool.setuptools.dynamic]``), so it cannot drift.  The JSON manifests still
