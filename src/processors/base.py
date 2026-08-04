@@ -42,6 +42,28 @@ class Processor(ABC):
     #: ``handles_failure = True`` must keep the error lines of a failing run.
     handles_failure: bool = False
 
+    def redacted_secrets(self, command: str, output: str) -> bool:
+        """True if ``process(command, output)`` will redact secrets from output.
+
+        The engine's compression-ratio gate exists to protect against a
+        processor that made output *worse*: if the result isn't smaller by
+        ``min_compression_ratio``, the engine discards it and falls back to
+        returning the original, unmodified text.  That's the right call for
+        an ordinary processor — but if the processor's job on this call was
+        redacting secrets (``API_KEY=***``), "discard the result and fall
+        back to the original" means printing the secret in the clear, which
+        is worse than not compressing at all.  A processor that returns True
+        here for this ``(command, output)`` pair is exempt from that
+        fallback for this call: its result is always returned as-is.
+
+        Default False (the common case: nothing to redact).  Override for
+        commands/inputs where secrets are actually present — a processor
+        that only *sometimes* redacts (e.g. one that handles many file
+        types and redacts only a few of them) should check here, not opt in
+        for every call.
+        """
+        return False
+
     #: Whether ``process()`` accepts an ``exit_code`` keyword argument.
     #:
     #: Most processors decide success/failure purely from the shape of the

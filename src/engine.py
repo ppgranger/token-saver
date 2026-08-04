@@ -199,11 +199,19 @@ class CompressionEngine:
 
         compressed = self._recover_critical(output, compressed, processor)
 
+        # A processor that redacted secrets into `compressed` must never be
+        # undone by a fallback that reintroduces `output` (the raw,
+        # unredacted text) — whether that's this function returning `output`
+        # directly below, or the mismatch path re-running generic on
+        # `output` instead of on the already-redacted `compressed`.  Once
+        # this is true, `output` is radioactive for the rest of this call.
+        redacted = processor.redacted_secrets(command, output)
+
         original_len = len(output)
         compressed_len = len(compressed)
         gain = (original_len - compressed_len) / original_len if original_len > 0 else 0
 
-        if compressed_len < original_len and gain >= min_ratio:
+        if redacted or (compressed_len < original_len and gain >= min_ratio):
             self._set_event(
                 processor.name,
                 processor.name,
@@ -217,7 +225,9 @@ class CompressionEngine:
 
         # Specialized processor didn't compress enough on its own — a
         # mismatch (O3): record it and try the generic processor as a
-        # fallback (dedup, truncation, etc.).
+        # fallback (dedup, truncation, etc.).  Not reached when `redacted`,
+        # per the guard above — so there is no risk of generic seeing
+        # unredacted `output` here.
         mismatch = processor is not self._generic
         if processor is not self._generic:
             generic_compressed = self._call_process(self._generic, command, output, exit_code)
