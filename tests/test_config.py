@@ -204,3 +204,102 @@ class TestProjectConfig:
 
         assert config.get("max_diff_hunkk_lines") is None
         assert config.get("max_diff_hunk_lines") == 50
+
+
+class TestProjectConfigForbiddenKeys:
+    """A project-level .token-saver.json is discovered just by cd-ing into a
+    directory — untrusted input.  user_processors_dir is arbitrary code
+    execution (discover_processors() imports every .py file in it, on every
+    Bash command); disabled_processors/redaction_allowlist can silently turn
+    off the secret-redaction safety net.  None of the three may be set from
+    there, regardless of type-correctness."""
+
+    def setup_method(self):
+        config.reload()
+
+    def teardown_method(self):
+        config.reload()
+
+    def test_user_processors_dir_ignored_from_project_config(self, tmp_path, monkeypatch):
+        evil_dir = tmp_path / "evil"
+        evil_dir.mkdir()
+        project_config = {"user_processors_dir": str(evil_dir)}
+        config_file = tmp_path / ".token-saver.json"
+        config_file.write_text(json.dumps(project_config), encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        config.reload()
+
+        assert config.get("user_processors_dir") == ""
+
+    def test_disabled_processors_ignored_from_project_config(self, tmp_path, monkeypatch):
+        project_config = {"disabled_processors": ["generic", "git"]}
+        config_file = tmp_path / ".token-saver.json"
+        config_file.write_text(json.dumps(project_config), encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        config.reload()
+
+        assert config.get("disabled_processors") == []
+
+    def test_redaction_allowlist_ignored_from_project_config(self, tmp_path, monkeypatch):
+        project_config = {"redaction_allowlist": ["*"]}
+        config_file = tmp_path / ".token-saver.json"
+        config_file.write_text(json.dumps(project_config), encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        config.reload()
+
+        assert config.get("redaction_allowlist") == []
+
+    def test_other_keys_still_apply_from_project_config(self, tmp_path, monkeypatch):
+        """The forbidden-key filter must not become a blanket project-config
+        distrust — everything else still works exactly as before."""
+        project_config = {
+            "user_processors_dir": "/tmp/evil",
+            "max_diff_hunk_lines": 250,
+        }
+        config_file = tmp_path / ".token-saver.json"
+        config_file.write_text(json.dumps(project_config), encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        config.reload()
+
+        assert config.get("user_processors_dir") == ""
+        assert config.get("max_diff_hunk_lines") == 250
+
+    def test_forbidden_keys_still_apply_from_global_config(self, tmp_path, monkeypatch):
+        """The global ~/.token-saver/config.json is trusted (the user wrote
+        it themselves) — only the project-discovered file is restricted."""
+        from src import data_dir
+
+        global_dir = data_dir()
+        os.makedirs(global_dir, exist_ok=True)
+        global_config_path = os.path.join(global_dir, "config.json")
+        had_existing = os.path.exists(global_config_path)
+        existing_content = None
+        if had_existing:
+            with open(global_config_path, encoding="utf-8") as f:
+                existing_content = f.read()
+        try:
+            with open(global_config_path, "w", encoding="utf-8") as f:
+                json.dump({"disabled_processors": ["git"]}, f)
+            monkeypatch.chdir(tmp_path)  # no project .token-saver.json here
+            config.reload()
+            assert config.get("disabled_processors") == ["git"]
+        finally:
+            if had_existing:
+                with open(global_config_path, "w", encoding="utf-8") as f:
+                    f.write(existing_content)
+            else:
+                os.remove(global_config_path)
+            config.reload()
+
+    def test_env_var_still_applies_forbidden_keys(self, tmp_path, monkeypatch):
+        """Env vars are trusted too — the restriction is specifically about
+        the auto-discovered project file, not the key itself."""
+        project_config = {"disabled_processors": ["git"]}
+        config_file = tmp_path / ".token-saver.json"
+        config_file.write_text(json.dumps(project_config), encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("TOKEN_SAVER_DISABLED_PROCESSORS", "docker")
+        config.reload()
+
+        # Project config's value is dropped; env var (trusted) still wins.
+        assert config.get("disabled_processors") == ["docker"]

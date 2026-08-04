@@ -17,7 +17,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.chain_utils import CHAIN_SPLIT_RE, split_chain
 from src.console import use_utf8_io
-from src.shell_syntax import has_output_redirection, has_unquoted
+from src.shell_syntax import (
+    has_output_redirection,
+    has_shell_construct_open,
+    has_unquoted,
+    has_unquoted_background_operator,
+    has_unquoted_newline,
+)
 
 # --- Debug logging (writes to data_dir/hook.log when TOKEN_SAVER_DEBUG=true) ---
 _log = logging.getLogger("token-saver.hook_pretool")
@@ -230,6 +236,18 @@ def _is_segment_safe(segment: str) -> bool:
     """
     if _has_output_redirection(segment):
         return False
+    # A backgrounded segment (`npm run dev &`) detaches from wrap.py's
+    # subprocess entirely — nothing to compress, and the timeout can never
+    # reclaim a process it no longer has a handle on.
+    if has_unquoted_background_operator(segment):
+        return False
+    # An opening fragment of a for/while/if/case/... compound statement is
+    # not a real, independent segment: the chain splitter only saw one of
+    # its internal `;`s.  Wrapping it in its own brace group is a shell
+    # syntax error, so the whole command — every segment, not just this
+    # one — must be declined.  See has_shell_construct_open's docstring.
+    if has_shell_construct_open(segment):
+        return False
     # Both break wrap.py's brace-group rewrite — see the helpers above.
     if _ends_with_line_continuation(segment) or _is_comment_only(segment):
         return False
@@ -287,6 +305,13 @@ def is_compressible(command: str) -> bool:
     if re.search(r"(?<!['\"])\|\|(?!['\"])", cmd):
         return False
 
+    # A newline is a statement separator the chain splitter never sees (it
+    # only splits on && / ;), so a hidden second line bypasses every
+    # per-segment safety check below AND has its output silently discarded
+    # by wrap.py, which only ever compresses the first line as "the" command.
+    if has_unquoted_newline(cmd):
+        return False
+
     # Reject commands with unquoted $(), backticks, or heredocs — these break
     # naive chain splitting and per-segment execution.  Quoted occurrences
     # (e.g. inside `git commit -m "$(...)"`) are tolerated.
@@ -300,6 +325,11 @@ def is_compressible(command: str) -> bool:
 
     # Output redirections (quote-aware) are never wrapped.
     if _has_output_redirection(cmd):
+        return False
+
+    # A backgrounded command (`npm run dev &`) detaches immediately; there is
+    # no output to compress and no way for wrap.py's timeout to reclaim it.
+    if has_unquoted_background_operator(cmd):
         return False
 
     # Single command — strip safe trailing pipes for exclusion check only
@@ -358,6 +388,11 @@ def explain_decision(command: str) -> dict:
         result["excluded_by"] = r"||"
         return result
 
+    if has_unquoted_newline(cmd):
+        result["reason"] = "contains an unquoted newline (multiple statements)"
+        result["excluded_by"] = "unquoted newline"
+        return result
+
     if _has_unquoted_construct(cmd, _DANGEROUS_CONSTRUCTS):
         result["reason"] = "contains unquoted $(), backtick, or heredoc"
         result["excluded_by"] = "dangerous shell construct"
@@ -385,6 +420,11 @@ def explain_decision(command: str) -> dict:
     if _has_output_redirection(cmd):
         result["reason"] = "contains output redirection (>, >>, 2>, &>)"
         result["excluded_by"] = "output redirection"
+        return result
+
+    if has_unquoted_background_operator(cmd):
+        result["reason"] = "contains an unquoted '&' (backgrounded command)"
+        result["excluded_by"] = "background operator"
         return result
 
     check_cmd = _SAFE_TRAILING_PIPE_RE.sub("", cmd)

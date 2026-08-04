@@ -529,6 +529,68 @@ class TestEnvPrecision:
         assert "DATABASE_PASSWORD" in compressed
         assert "GITHUB_TOKEN" in compressed
 
+    def test_short_secrets_not_leaked_via_ratio_fallback(self):
+        """Regression: when redacting a *short* secret makes the labelled
+        output ("14 environment variables...") no smaller than the input —
+        or not smaller by min_compression_ratio — the engine used to discard
+        the redacted result and fall back to the raw, unredacted original.
+        The secret must survive redaction regardless of how the ratio comes
+        out."""
+        lines = [f"VAR{i}=v" for i in range(12)] + ["API_KEY=s", "DB_PASSWORD=p"]
+        output = "\n".join(lines)
+        compressed, processor, was_compressed = self.engine.compress("env", output)
+        assert processor == "env"
+        assert was_compressed
+        assert not compressed.endswith("API_KEY=s")
+        assert "API_KEY=s\n" not in compressed
+        assert not compressed.endswith("DB_PASSWORD=p")
+        assert "DB_PASSWORD=p\n" not in compressed
+        assert "API_KEY=***" in compressed
+        assert "DB_PASSWORD=***" in compressed
+
+    def test_secret_not_leaked_via_generic_mismatch_fallback(self):
+        """Regression: when the *redacted* env output still doesn't clear
+        the ratio gate, the engine's mismatch-fallback used to re-run
+        GenericProcessor on the raw, unredacted `output` — leaking the
+        secret through a completely different code path than the direct
+        fallback above."""
+        lines = [f"VAR{i}=verbose_value_padding_to_make_this_long_{i}" for i in range(300)]
+        lines.append("API_KEY=SUPERSECRETVALUE12345")
+        output = "\n".join(lines)
+        compressed, _processor, was_compressed = self.engine.compress("env", output)
+        assert was_compressed
+        assert "SUPERSECRETVALUE12345" not in compressed
+        assert "API_KEY=***" in compressed
+
+
+class TestFileContentEnvPrecision:
+    def setup_method(self):
+        self.engine = CompressionEngine()
+
+    def test_short_secret_in_env_variant_not_leaked_via_ratio_fallback(self):
+        """Same regression as TestEnvPrecision, for the file_content
+        processor's .env.* redaction path (cat .env.production etc.)."""
+        compressed, processor, was_compressed = self.engine.compress(
+            "cat .env.production", "API_KEY=s"
+        )
+        assert processor == "file_content"
+        assert was_compressed
+        assert compressed != "API_KEY=s"
+        assert "API_KEY=***" in compressed
+
+    def test_source_code_ratio_gate_is_unaffected(self):
+        """redacted_secrets() must be scoped to the .env branch only — an
+        ordinary source file must still go through the normal ratio gate
+        unmodified."""
+        # Source code is returned verbatim (never compressed) regardless of
+        # ratio; this specifically checks that path is untouched by the
+        # redaction carve-out, not that it now "always compresses".
+        output = "def f():\n    return 1\n"
+        compressed, processor, was_compressed = self.engine.compress("cat file.py", output)
+        assert processor == "file_content"
+        assert compressed == output
+        assert not was_compressed
+
 
 class TestKubectlPrecision:
     def setup_method(self):

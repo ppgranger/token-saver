@@ -152,6 +152,15 @@ class FileContentProcessor(Processor):
     def can_handle(self, command: str) -> bool:
         return bool(re.match(r"\s*(?:\S*/)?(cat|head|tail|less|more|bat)\b", command))
 
+    def redacted_secrets(self, command: str, output: str) -> bool:
+        # Only the .env-variant branch of process() redacts anything; every
+        # other extension (source code, lock files, logs, ...) either
+        # passes through verbatim or compresses non-sensitive content, so
+        # this must not blanket-exempt the whole processor from the ratio
+        # gate — that would let a source file's compression regress
+        # silently past the safety net that catches exactly that.
+        return self._is_env_file_to_redact(self._extract_filename(command))
+
     def process(self, command: str, output: str) -> str:
         if not output or not output.strip():
             return output

@@ -95,9 +95,28 @@ def inject_markers(parts: list[tuple[str, str]], marker_prefix: str) -> str:
     return " ".join(pieces)
 
 
+# A marker is expected to start its own line (the common case: the previous
+# segment's last line ended in a newline).  But a segment can also end
+# without a trailing newline — `printf 'done'` with no `\n`, or a file
+# written without a final EOL piped through `cat` — in which case the shell's
+# `echo '<marker>'` output is appended directly onto that unterminated line,
+# and the marker no longer starts at column 0.  A `^`-only anchor then never
+# matches: the marker token leaks into the model-facing text unstripped, and
+# worse, `split_output_by_markers` can't find the boundary at all, so the
+# entire remainder of the chain collapses into the wrong segment's chunk and
+# gets compressed (or dropped) by the wrong processor.  `(?:^|(?<=\S))`
+# accepts a true line start *or* being glued onto the end of prior non-
+# whitespace content, without weakening the match enough to fire inside
+# unrelated text — the prefix embeds a random 12-hex uuid, so a false
+# positive would require that exact token appearing by chance.
+_MARKER_LEFT_BOUNDARY = r"(?:^|(?<=\S))"
+
+
 def strip_markers(output: str, marker_prefix: str) -> str:
     """Remove marker lines from output (used for dry-run display)."""
-    pattern = re.compile(r"^" + re.escape(marker_prefix) + r"\d+\s*\n?", re.MULTILINE)
+    pattern = re.compile(
+        _MARKER_LEFT_BOUNDARY + re.escape(marker_prefix) + r"\d+\s*\n?", re.MULTILINE
+    )
     return pattern.sub("", output)
 
 
@@ -109,7 +128,9 @@ def split_output_by_markers(output: str, marker_prefix: str) -> list[tuple[int, 
     Markers may be missing if an `&&` short-circuited mid-chain; the
     embedded indices keep the mapping correct.
     """
-    pattern = re.compile(r"^" + re.escape(marker_prefix) + r"(\d+)\s*$", re.MULTILINE)
+    pattern = re.compile(
+        _MARKER_LEFT_BOUNDARY + re.escape(marker_prefix) + r"(\d+)\s*$", re.MULTILINE
+    )
     matches = list(pattern.finditer(output))
     if not matches:
         return [(0, output)]
@@ -169,6 +190,46 @@ def posix_shell() -> str | None:
     if found:
         return found
     return next((c for c in _WINDOWS_BASH_CANDIDATES if os.path.isfile(c)), None)
+
+
+def _shell_for_syntax_check() -> str | list[str]:
+    """Return the ``Popen`` target used to run the actual command, so the
+    syntax check below validates against the exact same interpreter."""
+    bash = posix_shell()
+    return [bash] if bash else ["/bin/sh"] if not IS_WINDOWS else []
+
+
+def rewrite_is_syntactically_valid(rewritten: str) -> bool:
+    """Ask the real shell to parse (not execute) the rewritten chain.
+
+    ``inject_markers`` assumes every chain segment is a complete, independent
+    command — true for an ordinary ``a && b`` chain, but not for one whose
+    naive ``;``-splitting sliced through a compound statement's *internal*
+    separators (``for f in a b; do echo $f; done`` has three unquoted ``;``s
+    that are not chain operators at all).  Wrapping such a fragment in its
+    own brace group produces syntactically invalid shell, and the user's
+    command would never run — wrapped or not.
+    ``hook_pretool.py`` already rejects the known shapes of this (a segment
+    starting with ``for``/``while``/``if``/...), but that is a finite
+    blocklist; asking the shell itself to parse the rewrite is exhaustive
+    against whatever it doesn't yet cover.  ``-n`` parses without running
+    anything, so this costs a few milliseconds, not a side effect.
+    """
+    target = _shell_for_syntax_check()
+    if not target:
+        return True  # no POSIX shell to ask — caller already checked for this
+    try:
+        result = subprocess.run(  # noqa: S603
+            [*target, "-n", "-c", rewritten],
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        # Can't tell — don't block the user's command over an inconclusive
+        # check; fail open like every other guard in this file.
+        return True
+    return result.returncode == 0
 
 
 def supports_posix_chaining() -> bool:
@@ -325,6 +386,21 @@ def main():
         marker_prefix = MARKER_PREFIX_TEMPLATE.format(uuid.uuid4().hex[:12])
         rewritten = inject_markers(chain_parts, marker_prefix)
         _log.debug("Chain rewrite: %r", rewritten)
+
+        if not rewrite_is_syntactically_valid(rewritten):
+            # hook_pretool.py's blocklist missed a shape that breaks the
+            # brace-group rewrite.  Falling through to is_chain = False would
+            # re-run all of the code below; simplest and safest is to run the
+            # user's original command exactly as given and skip compression
+            # entirely — never risk the user's command not running.
+            _log.warning(
+                "Chain rewrite failed shell syntax check, running uncompressed: %r",
+                command_str,
+            )
+            stdout, stderr, returncode = _run_command(command_str, timeout, merge_stderr=False)
+            output = stdout + ("\n" + stderr if stderr else "")
+            print(_cap_output(output), end="")
+            sys.exit(returncode)
 
         stdout, _stderr, returncode = _run_command(rewritten, timeout, merge_stderr=True)
         combined = _cap_output(stdout)

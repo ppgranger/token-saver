@@ -1057,6 +1057,37 @@ class TestChainPerSegmentCompression:
         chunks = wrap.split_output_by_markers(text, "M_")
         assert chunks == [(0, ""), (1, "body1")]
 
+    def test_split_output_marker_glued_to_unterminated_segment(self):
+        """A segment without a trailing newline (e.g. `printf 'done'`) leaves
+        the next marker glued onto the same line instead of starting one.
+        The split must still find the boundary — and must not lose the
+        second segment's content to the wrong chunk."""
+        wrap = self._import_wrap()
+        text = "doneM_1\nbody1"
+        chunks = wrap.split_output_by_markers(text, "M_")
+        assert chunks == [(0, "done"), (1, "body1")]
+
+    def test_split_output_marker_glued_with_large_second_segment(self):
+        """Regression for the collapse where an unterminated first segment
+        swallowed nearly all of a large second segment into the wrong chunk."""
+        wrap = self._import_wrap()
+        big = "\n".join(f"line{i}" for i in range(200))
+        text = f"done_no_newlineM_1\n{big}"
+        chunks = wrap.split_output_by_markers(text, "M_")
+        assert chunks[0] == (0, "done_no_newline")
+        assert chunks[1][0] == 1
+        assert chunks[1][1] == big
+        assert chunks[1][1].count("\n") == 199
+
+    def test_strip_markers_glued_to_unterminated_segment(self):
+        """The raw shell output really is `donebody1` with no separator (the
+        first segment had no trailing newline) — stripping the marker text
+        must reproduce exactly that, matching what split_output_by_markers
+        treats as the segment boundary."""
+        wrap = self._import_wrap()
+        text = "doneM_1\nbody1"
+        assert wrap.strip_markers(text, "M_") == "donebody1"
+
     def test_e2e_wrap_chain_compresses_per_segment(self):
         """Run wrap.py via subprocess on a real chain; verify both segments survive."""
         import subprocess
@@ -1074,6 +1105,27 @@ class TestChainPerSegmentCompression:
         assert result.returncode == 0, result.stderr
         # Both segments' output should appear; markers should NOT leak
         assert "segA" in result.stdout
+        assert "segB" in result.stdout
+        assert "__TS_MARK_" not in result.stdout
+
+    def test_e2e_wrap_chain_survives_segment_without_trailing_newline(self):
+        """`printf` (unlike `echo`) does not append a trailing newline, so the
+        marker for the next segment lands glued onto the same line.  Both
+        segments' output must still come through, marker-free."""
+        import subprocess
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        wrap_path = os.path.join(repo_root, "scripts", "wrap.py")
+        cmd = "printf noNewlineHere && echo segB"
+        result = subprocess.run(  # noqa: S603, PLW1510
+            [sys.executable, wrap_path, cmd],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "noNewlineHere" in result.stdout
         assert "segB" in result.stdout
         assert "__TS_MARK_" not in result.stdout
 
