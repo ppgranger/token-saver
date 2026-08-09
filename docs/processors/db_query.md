@@ -1,3 +1,9 @@
+---
+title: Database Query Processor
+description: Handles database query result output.
+permalink: /processors/db_query/
+---
+
 # Database Query Processor
 
 **File:** `src/processors/db_query.py` | **Priority:** 38 | **Name:** `db_query`

@@ -1,3 +1,9 @@
+---
+title: JQ/YQ Processor
+description: Compresses large JSON and YAML outputs from jq and yq.
+permalink: /processors/jq_yq/
+---
+
 # JQ/YQ Processor
 
 **File:** `src/processors/jq_yq.py` | **Priority:** 44 | **Name:** `jq_yq`

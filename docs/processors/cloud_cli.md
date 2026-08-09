@@ -1,3 +1,9 @@
+---
+title: Cloud CLI Processor
+description: Handles cloud provider CLI output.
+permalink: /processors/cloud_cli/
+---
+
 # Cloud CLI Processor
 
 **File:** `src/processors/cloud_cli.py` | **Priority:** 39 | **Name:** `cloud_cli`

@@ -1,3 +1,9 @@
+---
+title: Python Install Processor
+description: Dedicated processor for Python package installation output.
+permalink: /processors/python_install/
+---
+
 # Python Install Processor
 
 **File:** `src/processors/python_install.py` | **Priority:** 24 | **Name:** `python_install`

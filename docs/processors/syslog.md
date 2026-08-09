@@ -1,3 +1,9 @@
+---
+title: Syslog Processor
+description: Handles system log output from `journalctl` and `dmesg`.
+permalink: /processors/syslog/
+---
+
 # Syslog Processor
 
 **File:** `src/processors/syslog.py` | **Priority:** 42 | **Name:** `syslog`

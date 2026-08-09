@@ -1,3 +1,9 @@
+---
+title: Kubernetes Processor
+description: Handles kubectl and oc (OpenShift) commands. Supports global options (`-n`, `--namespace`, `--context`, `-A`, `--all-namespaces`, `--kubeconfig`).
+permalink: /processors/kubectl/
+---
+
 # Kubernetes Processor
 
 **File:** `src/processors/kubectl.py` | **Priority:** 32 | **Name:** `kubectl`

@@ -1,3 +1,9 @@
+---
+title: Package List Processor
+description: Handles package listing commands. Runs at high priority (15) to intercept `pip list`/`npm ls` before the build processor.
+permalink: /processors/package_list/
+---
+
 # Package List Processor
 
 **File:** `src/processors/package_list.py` | **Priority:** 15 | **Name:** `package_list`

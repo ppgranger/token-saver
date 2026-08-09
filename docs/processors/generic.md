@@ -1,3 +1,9 @@
+---
+title: Generic Processor (Fallback)
+description: Universal fallback processor. Applies to any command not recognized by specialized processors, and also serves as a second-pass cleaner after specialized processors.
+permalink: /processors/generic/
+---
+
 # Generic Processor (Fallback)
 
 **File:** `src/processors/generic.py` | **Priority:** 999 | **Name:** `generic`
