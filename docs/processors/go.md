@@ -1,3 +1,9 @@
+---
+title: Go Processor
+description: Dedicated processor for Go toolchain commands.
+permalink: /processors/go/
+---
+
 # Go Processor
 
 **File:** `src/processors/go.py` | **Priority:** 23 | **Name:** `go`

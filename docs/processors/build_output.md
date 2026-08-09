@@ -1,3 +1,9 @@
+---
+title: Build Output Processor
+description: Handles build tool output across all major ecosystems.
+permalink: /processors/build_output/
+---
+
 # Build Output Processor
 
 **File:** `src/processors/build_output.py` | **Priority:** 25 | **Name:** `build`

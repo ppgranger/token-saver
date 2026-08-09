@@ -1,3 +1,9 @@
+---
+title: Network Processor
+description: Handles HTTP client output.
+permalink: /processors/network/
+---
+
 # Network Processor
 
 **File:** `src/processors/network.py` | **Priority:** 30 | **Name:** `network`

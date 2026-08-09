@@ -1,3 +1,9 @@
+---
+title: Ansible Processor
+description: Handles `ansible-playbook` and `ansible` command output.
+permalink: /processors/ansible/
+---
+
 # Ansible Processor
 
 **File:** `src/processors/ansible.py` | **Priority:** 40 | **Name:** `ansible`

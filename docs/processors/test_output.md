@@ -1,3 +1,9 @@
+---
+title: Test Output Processor
+description: Handles test runner output across all major ecosystems.
+permalink: /processors/test_output/
+---
+
 # Test Output Processor
 
 **File:** `src/processors/test_output.py` | **Priority:** 21 | **Name:** `test`

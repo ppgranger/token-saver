@@ -1,3 +1,9 @@
+---
+title: System Info Processor
+description: Handles disk and file counting commands.
+permalink: /processors/system_info/
+---
+
 # System Info Processor
 
 **File:** `src/processors/system_info.py` | **Priority:** 36 | **Name:** `system_info`

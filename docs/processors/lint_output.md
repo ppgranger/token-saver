@@ -1,3 +1,9 @@
+---
+title: Lint Output Processor
+description: Handles linter and static analysis output.
+permalink: /processors/lint_output/
+---
+
 # Lint Output Processor
 
 **File:** `src/processors/lint_output.py` | **Priority:** 27 | **Name:** `lint`

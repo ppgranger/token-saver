@@ -1,3 +1,9 @@
+---
+title: Helm Processor
+description: Handles Helm CLI output for chart management operations.
+permalink: /processors/helm/
+---
+
 # Helm Processor
 
 **File:** `src/processors/helm.py` | **Priority:** 41 | **Name:** `helm`

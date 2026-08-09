@@ -1,3 +1,9 @@
+---
+title: SSH Processor
+description: Handles non-interactive SSH and SCP command output.
+permalink: /processors/ssh/
+---
+
 # SSH Processor
 
 **File:** `src/processors/ssh.py` | **Priority:** 43 | **Name:** `ssh`

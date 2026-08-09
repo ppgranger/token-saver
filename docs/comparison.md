@@ -1,3 +1,9 @@
+---
+title: How Token-Saver Compares
+description: Token-Saver vs cc_token_saver_mcp, token-optimizer-mcp, and Claude Context Mode — approach, latency, offline support, and whether they can run together.
+permalink: /comparison/
+---
+
 # How Token-Saver Compares
 
 Token-Saver focuses specifically on **command output compression** — it doesn't cache, delegate, or summarize via LLM. The tools below solve adjacent but different problems, and in many cases can be used alongside Token-Saver.

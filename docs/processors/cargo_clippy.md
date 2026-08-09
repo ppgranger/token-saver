@@ -1,3 +1,9 @@
+---
+title: Cargo Clippy Processor
+description: Dedicated processor for Rust clippy lint output with multi-line block awareness.
+permalink: /processors/cargo_clippy/
+---
+
 # Cargo Clippy Processor
 
 **File:** `src/processors/cargo_clippy.py` | **Priority:** 26 | **Name:** `cargo_clippy`
