@@ -8,7 +8,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scripts.hook_pretool import explain_decision, is_compressible
+from scripts.hook_pretool import explain_decision, is_compressible, is_destructive
 
 
 class TestHookPretool:
@@ -335,6 +335,64 @@ class TestHookPretool:
         assert is_compressible("https POST https://api.example.com")
 
 
+class TestDestructiveCommandGuard:
+    """GitHub issue #49 sub-claim 4: never auto-approve a destructive
+    command just because its output happens to be compressible."""
+
+    def test_force_push_flagged(self):
+        assert is_destructive("git push --force origin main")
+        assert is_destructive("git push -f origin main")
+
+    def test_force_with_lease_not_flagged(self):
+        # The safer, non-destructive form of a force push must stay usable.
+        assert not is_destructive("git push --force-with-lease origin main")
+
+    def test_plain_push_not_flagged(self):
+        assert not is_destructive("git push origin main")
+
+    def test_git_reset_hard_flagged(self):
+        assert is_destructive("git reset --hard HEAD~1")
+
+    def test_git_clean_force_flagged(self):
+        assert is_destructive("git clean -fd")
+
+    def test_kubectl_delete_flagged(self):
+        assert is_destructive("kubectl delete pod foo")
+        assert is_destructive("oc delete deployment prod-api")
+
+    def test_kubectl_get_not_flagged(self):
+        assert not is_destructive("kubectl get pods")
+
+    def test_terraform_destroy_and_apply_flagged(self):
+        assert is_destructive("terraform destroy -auto-approve")
+        assert is_destructive("terraform apply -auto-approve")
+        assert is_destructive("tofu destroy")
+
+    def test_terraform_plan_not_flagged(self):
+        assert not is_destructive("terraform plan")
+
+    def test_docker_rm_and_prune_flagged(self):
+        assert is_destructive("docker rm mycontainer")
+        assert is_destructive("docker system prune -af")
+        assert is_destructive("docker rmi myimage")
+        assert is_destructive("podman rm mycontainer")
+
+    def test_docker_ps_not_flagged(self):
+        assert not is_destructive("docker ps")
+
+    def test_rm_rf_flagged(self):
+        assert is_destructive("rm -rf /tmp/foo")
+        assert is_destructive("rm -fr /tmp/foo")
+
+    def test_plain_rm_not_flagged(self):
+        assert not is_destructive("rm file.txt")
+
+    def test_benign_commands_not_flagged(self):
+        assert not is_destructive("git status")
+        assert not is_destructive("git log --oneline")
+        assert not is_destructive("docker logs mycontainer")
+
+
 class TestHookPretoolIntegration:
     """Test the full hook script behavior via subprocess."""
 
@@ -363,6 +421,30 @@ class TestHookPretoolIntegration:
         cmd = data["hookSpecificOutput"]["updatedInput"]["command"]
         assert "wrap.py" in cmd
         assert "git status" in cmd
+
+    def test_bash_force_push_not_auto_approved(self):
+        """A destructive command must produce no rewrite at all — Claude
+        Code then applies its own allow/ask/deny rules, exactly as if
+        token-saver were not installed."""
+        stdout, code = self._run_hook(
+            {"tool_name": "Bash", "tool_input": {"command": "git push --force origin main"}}
+        )
+        assert code == 0
+        assert stdout == ""
+
+    def test_bash_kubectl_delete_not_auto_approved(self):
+        stdout, code = self._run_hook(
+            {"tool_name": "Bash", "tool_input": {"command": "kubectl delete pod foo"}}
+        )
+        assert code == 0
+        assert stdout == ""
+
+    def test_bash_terraform_destroy_not_auto_approved(self):
+        stdout, code = self._run_hook(
+            {"tool_name": "Bash", "tool_input": {"command": "terraform destroy -auto-approve"}}
+        )
+        assert code == 0
+        assert stdout == ""
 
     def test_non_bash_tool_passthrough(self):
         stdout, code = self._run_hook({"tool_name": "Read", "tool_input": {"path": "/some/file"}})
@@ -532,6 +614,26 @@ class TestChainedCommands:
         """Heredocs break naive chain splitting; reject."""
         assert not is_compressible("cat <<EOF\nhello\nEOF")
         assert not is_compressible("git status && cat <<END\ndata\nEND")
+
+    def test_newline_smuggled_sudo_rejected(self):
+        """A hidden second line bypasses every per-segment safety check the
+        chain splitter would otherwise apply; reject the whole command."""
+        assert not is_compressible("git status\nsudo rm -rf /tmp/important")
+        assert not is_compressible("git status\nvim /etc/passwd")
+
+    def test_background_ampersand_smuggled_sudo_rejected(self):
+        assert not is_compressible("git status & sudo id")
+
+    def test_escaped_quote_prefix_no_longer_bypasses_newline_rejection(self):
+        """Regression for GitHub issue #49: a `\\"` outside any quoted region
+        used to be misread as an opening quote, swallowing the newline (and
+        everything after it) as if it were quoted text — hiding a smuggled
+        `sudo` from has_unquoted_newline entirely."""
+        assert not is_compressible('git status \\"\nsudo rm -rf /tmp/important')
+        assert not is_compressible('git log --grep=\\"fix\nsudo rm -rf /tmp/x')
+
+    def test_escaped_quote_prefix_no_longer_bypasses_background_rejection(self):
+        assert not is_compressible('git status \\" & touch /tmp/probe')
 
     def test_pipe_in_non_last_segment_rejected(self):
         assert not is_compressible("git status | grep foo && git diff")
@@ -1088,6 +1190,36 @@ class TestChainPerSegmentCompression:
         text = "doneM_1\nbody1"
         assert wrap.strip_markers(text, "M_") == "donebody1"
 
+    def test_split_output_marker_glued_after_trailing_space(self):
+        """A segment ending in a space (not just non-whitespace) also glues
+        the next marker onto the same line — `(?<=\\S)` alone missed this;
+        only `(?<=[^\\n])` catches every same-line character."""
+        wrap = self._import_wrap()
+        text = "full M_1\nBBB"
+        chunks = wrap.split_output_by_markers(text, "M_")
+        assert chunks == [(0, "full "), (1, "BBB")]
+
+    def test_split_output_marker_glued_after_trailing_tab(self):
+        wrap = self._import_wrap()
+        text = "full\tM_1\nBBB"
+        chunks = wrap.split_output_by_markers(text, "M_")
+        assert chunks == [(0, "full\t"), (1, "BBB")]
+
+    def test_split_output_marker_glued_after_blank_indent_line(self):
+        """A segment whose last line is pure indentation (no non-whitespace
+        content) still glues the marker — `\\S` requires a non-blank
+        character immediately to the left, which a blank/indent-only line
+        never has."""
+        wrap = self._import_wrap()
+        text = "A\n   M_1\nBBB"
+        chunks = wrap.split_output_by_markers(text, "M_")
+        assert chunks == [(0, "A\n   "), (1, "BBB")]
+
+    def test_strip_markers_glued_after_trailing_space(self):
+        wrap = self._import_wrap()
+        text = "full M_1\nBBB"
+        assert wrap.strip_markers(text, "M_") == "full BBB"
+
     def test_e2e_wrap_chain_compresses_per_segment(self):
         """Run wrap.py via subprocess on a real chain; verify both segments survive."""
         import subprocess
@@ -1127,6 +1259,61 @@ class TestChainPerSegmentCompression:
         assert result.returncode == 0, result.stderr
         assert "noNewlineHere" in result.stdout
         assert "segB" in result.stdout
+        assert "__TS_MARK_" not in result.stdout
+
+    def test_e2e_wrap_chain_survives_segment_ending_in_trailing_space(self):
+        """A segment ending in a trailing space (e.g. `printf 'v1.2.3 '` or a
+        file written without a final newline that happens to end in
+        whitespace) must not leak the raw marker into the output either."""
+        import subprocess
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        wrap_path = os.path.join(repo_root, "scripts", "wrap.py")
+        cmd = "printf 'trailingSpace ' && echo segB"
+        result = subprocess.run(  # noqa: S603, PLW1510
+            [sys.executable, wrap_path, cmd],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "trailingSpace" in result.stdout
+        assert "segB" in result.stdout
+        assert "__TS_MARK_" not in result.stdout
+
+    def test_wrap_reimports_is_compressible_for_revalidation(self):
+        """Regression for GitHub issue #49 sub-claim 3: wrap.py must not
+        blindly trust hook_pretool.py's classification of a chain as safe —
+        it re-runs is_compressible() itself before applying the chain
+        rewrite (marker injection, per-segment splitting)."""
+        wrap = self._import_wrap()
+        assert wrap.is_compressible is is_compressible
+
+    def test_e2e_wrap_skips_chain_rewrite_for_unsafe_chain(self):
+        """If a chain the hook would have classified as unsafe reaches
+        wrap.py directly (bypassing the hook, or via a future hook gap),
+        wrap.py's own revalidation must decline the chain-rewrite path
+        rather than injecting markers into a command it does not consider
+        safe to split."""
+        import subprocess
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        wrap_path = os.path.join(repo_root, "scripts", "wrap.py")
+        # `||` is always rejected by is_compressible, so this chain is
+        # unsafe by the same check hook_pretool.py already applies.
+        cmd = "echo segA || echo segB"
+        result = subprocess.run(  # noqa: S603, PLW1510
+            [sys.executable, wrap_path, cmd],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        # Ran uncompressed, exactly as bash would run it — no marker
+        # injection, no per-segment splitting.
+        assert "segA" in result.stdout
         assert "__TS_MARK_" not in result.stdout
 
     def test_strip_markers_removes_lines(self):
