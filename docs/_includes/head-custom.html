@@ -1,0 +1,57 @@
+<!--
+  minima's own `head.html` includes this file if present — this is the
+  theme's sanctioned extension point for <head> additions, so we don't have
+  to fork the whole default layout just to inject a meta description and
+  JSON-LD. Keeping it here means theme/gem updates never conflict with this
+  file.
+-->
+
+{% if page.description %}
+<meta name="description" content="{{ page.description | strip_html | strip_newlines | escape }}">
+{% endif %}
+
+{% if page.url == "/" %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "@id": "https://github.com/ppgranger/token-saver",
+  "name": "Token-Saver",
+  "description": "{{ site.description | strip_html | strip_newlines | escape }}",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Windows, macOS, Linux",
+  "softwareVersion": "2.7.1",
+  "license": "https://github.com/ppgranger/token-saver/blob/main/LICENSE",
+  "codeRepository": "https://github.com/ppgranger/token-saver",
+  "url": "{{ site.url }}{{ site.baseurl }}/",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "author": {
+    "@type": "Person",
+    "name": "ppgranger",
+    "url": "https://github.com/ppgranger"
+  }
+}
+</script>
+{% elsif page.url contains "/processors/" or page.url == "/benchmarks/" or page.url == "/comparison/" %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "{{ page.title | strip_html | strip_newlines | escape }}",
+  "description": "{{ page.description | strip_html | strip_newlines | escape }}",
+  "url": "{{ site.url }}{{ page.url | relative_url }}",
+  "isPartOf": {
+    "@id": "https://github.com/ppgranger/token-saver"
+  },
+  "author": {
+    "@type": "Person",
+    "name": "ppgranger",
+    "url": "https://github.com/ppgranger"
+  }
+}
+</script>
+{% endif %}

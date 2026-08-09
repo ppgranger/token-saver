@@ -1,0 +1,34 @@
+theme: minima
+
+title: Token-Saver
+description: >-
+  Content-aware output compression for AI coding assistants. 36 specialized
+  processors compress verbose CLI output (git, pytest, npm, terraform,
+  kubectl, docker, and more) deterministically, saving 60-99% of tokens
+  without losing errors, diffs, or stack traces.
+url: "https://ppgranger.github.io"
+baseurl: "/token-saver"
+
+github_username: ppgranger
+repository: ppgranger/token-saver
+
+# Every page in docs/ sets its own front matter (title, description,
+# permalink) — see docs/processors/*.md for the pattern. Pages without
+# front matter are skipped by Jekyll's default collections, so nothing here
+# needs an explicit include/exclude list for the .md sources.
+
+minima:
+  skin: auto
+  social_links:
+    github: ppgranger/token-saver
+
+# Keep the build to the well-known-safe plugin whitelist GitHub Pages runs
+# without a custom Actions workflow. Anything outside this list forces a
+# switch to build-via-Actions, which is unnecessary for a static docs site.
+plugins:
+  - jekyll-relative-links
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
