@@ -1,14 +1,16 @@
 <!--
-  minima's own `head.html` includes this file if present — this is the
-  theme's sanctioned extension point for <head> additions, so we don't have
-  to fork the whole default layout just to inject a meta description and
-  JSON-LD. Keeping it here means theme/gem updates never conflict with this
-  file.
--->
+  minima's own `head.html` includes this file (named exactly
+  "custom-head.html" — that's the theme's sanctioned extension point) at the
+  end of <head>, so we don't have to fork the whole default layout just to
+  add JSON-LD. Keeping it here means theme/gem updates never conflict with
+  this file.
 
-{% if page.description %}
-<meta name="description" content="{{ page.description | strip_html | strip_newlines | escape }}">
-{% endif %}
+  No <meta name="description"> here: jekyll-seo-tag (bundled by the
+  github-pages gem and invoked via {% seo %} earlier in head.html) already
+  emits it from page.description/site.description, and jekyll-relative-links
+  is a Pages-whitelisted plugin too — duplicating the tag here would just
+  produce two conflicting <meta name="description"> elements.
+-->
 
 {% if page.url == "/" %}
 <script type="application/ld+json">
