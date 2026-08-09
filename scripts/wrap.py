@@ -28,6 +28,7 @@ import uuid
 # Ensure the extension root is importable (scripts/ -> plugin root)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from scripts.hook_pretool import is_compressible
 from src import config, core
 from src.chain_utils import extract_primary_command, split_chain_with_ops
 from src.console import use_utf8_io
@@ -104,12 +105,17 @@ def inject_markers(parts: list[tuple[str, str]], marker_prefix: str) -> str:
 # matches: the marker token leaks into the model-facing text unstripped, and
 # worse, `split_output_by_markers` can't find the boundary at all, so the
 # entire remainder of the chain collapses into the wrong segment's chunk and
-# gets compressed (or dropped) by the wrong processor.  `(?:^|(?<=\S))`
-# accepts a true line start *or* being glued onto the end of prior non-
-# whitespace content, without weakening the match enough to fire inside
-# unrelated text — the prefix embeds a random 12-hex uuid, so a false
-# positive would require that exact token appearing by chance.
-_MARKER_LEFT_BOUNDARY = r"(?:^|(?<=\S))"
+# gets compressed (or dropped) by the wrong processor.  `(?:^|(?<=[^\n]))`
+# accepts a true line start *or* being glued onto the end of any prior
+# content on the same line.  An earlier version used `(?<=\S)` (non-
+# whitespace only), which still missed the marker whenever the glued-onto
+# content ended in a space, tab, or blank/indent-only line — `printf 'done '`
+# (trailing space) reproduced the exact same leak.  `[^\n]` covers every
+# same-line character and only excludes an actual newline, without weakening
+# the match enough to fire inside unrelated text — the prefix embeds a random
+# 12-hex uuid, so a false positive would require that exact token appearing
+# by chance.
+_MARKER_LEFT_BOUNDARY = r"(?:^|(?<=[^\n]))"
 
 
 def strip_markers(output: str, marker_prefix: str) -> str:
@@ -372,6 +378,34 @@ def main():
     # The command comes as a single quoted argument from hook_pretool.py
     command_str = args[0] if len(args) == 1 else " ".join(args)
     _log.debug("Executing command: %r", command_str)
+
+    # hook_pretool.py already classified this command as safe to wrap before
+    # rewriting it into `python3 wrap.py '<command>'` — but this script must
+    # not simply trust that verdict.  By the time we get here Claude Code has
+    # already been told `permissionDecision: allow`, so re-validating cannot
+    # retroactively stop execution of the command Claude Code decided to run
+    # — this script's whole job is to execute exactly that command.  What it
+    # *can* do is refuse to apply this script's own chain-rewrite assumptions
+    # (marker injection, per-segment splitting, per-segment compression) to a
+    # command the hook misjudged as chain-safe: those assumptions rely on
+    # every segment being an independent, safely-splittable statement, and a
+    # future gap in the hook's classifier — or a caller invoking this script
+    # directly, bypassing the hook entirely — must not be able to trick this
+    # rewrite into corrupting the command or misattributing one segment's
+    # output to another's processor.  On disagreement, fall back to running
+    # the original command string exactly as given, uncompressed — the same
+    # fail-safe already used below when the chain rewrite fails its shell
+    # syntax check.
+    if not is_compressible(command_str):
+        _log.warning(
+            "Re-validation rejected a command hook_pretool.py had classified "
+            "as compressible, running uncompressed: %r",
+            command_str,
+        )
+        stdout, stderr, returncode = _run_command(command_str, config.get("wrap_timeout"), False)
+        output = stdout + ("\n" + stderr if stderr else "")
+        print(_cap_output(output), end="")
+        sys.exit(returncode)
 
     timeout = config.get("wrap_timeout")
 

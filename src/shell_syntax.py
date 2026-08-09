@@ -32,12 +32,28 @@ def iter_unquoted(command: str) -> Iterator[tuple[int, str]]:
     for double quotes), the hook checks applied them to both (wrong for
     single).
 
+    A backslash *outside* any quoted region also escapes the character that
+    follows it — POSIX treats ``\\"`` and ``\\'`` outside quotes as literal
+    quote characters, not the start of a quoted region.  Both the escaping
+    backslash and the escaped character are consumed as a pair and never
+    yielded, so callers never see them as candidate operators: this closes
+    a bypass where a bare ``\\"`` (an ordinary, well-formed shell token) was
+    previously misread as an *opening* quote, causing the scanner to swallow
+    the rest of the string — including a smuggled ``&`` or newline — as if
+    it were quoted text.  A backslash immediately before a newline is POSIX's
+    own line-continuation syntax, so consuming the pair here has the added
+    effect of correctly *not* treating that newline as a statement separator,
+    without a separate check.
+
     An unterminated quote swallows the rest of the string: the safe direction,
     since we then find no operators and decline to wrap the command.
     """
     i, n = 0, len(command)
     while i < n:
         ch = command[i]
+        if ch == "\\" and i + 1 < n:
+            i += 2
+            continue
         if ch in _QUOTES:
             quote = ch
             escapes = quote == '"'
