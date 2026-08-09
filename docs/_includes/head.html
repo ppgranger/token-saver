@@ -1,4 +1,4 @@
-<!--
+{% comment %}
   Full override of minima's _includes/head.html.
 
   minima ships a `custom-head.html` extension point, but only from some
@@ -11,10 +11,15 @@
   minima version Pages happens to be running.
 
   Everything up to the closing </head> mirrors minima 2.5.1's head.html
-  (meta tags, {% seo %}, stylesheet, feed_meta, conditional Google
-  Analytics) so nothing else regresses; the JSON-LD block is the only
-  addition.
--->
+  (meta tags, seo tag, stylesheet, feed_meta, conditional Google Analytics)
+  so nothing else regresses; the JSON-LD block is the only addition.
+
+  This has to be a Liquid {% comment %} block, not an HTML <!-- --> comment:
+  Liquid tags are evaluated wherever they appear, even inside HTML comments,
+  and {% seo %} below renders its own "<!-- End Jekyll SEO tag -->" — whose
+  "-->" would close an HTML comment early and leak the rest of this text
+  (plus a duplicate <head>) straight into the rendered page.
+{% endcomment %}
 <head>
   <meta charset="utf-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
