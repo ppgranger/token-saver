@@ -1,0 +1,73 @@
+<!--
+  Full override of minima's _includes/head.html.
+
+  minima ships a `custom-head.html` extension point, but only from some
+  release onward — the version GitHub Pages actually builds with (2.5.1, per
+  https://pages.github.com/versions/) predates it and never calls it (see
+  https://github.com/jekyll/minima/issues/472). A site-level _includes file
+  always wins over the theme gem's own copy of the same path, so overriding
+  head.html directly is the version-proof way to add JSON-LD here, instead
+  of depending on an include hook that may or may not exist in whatever
+  minima version Pages happens to be running.
+
+  Everything up to the closing </head> mirrors minima 2.5.1's head.html
+  (meta tags, {% seo %}, stylesheet, feed_meta, conditional Google
+  Analytics) so nothing else regresses; the JSON-LD block is the only
+  addition.
+-->
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {%- seo -%}
+  <link rel="stylesheet" href="{{ "/assets/main.css" | relative_url }}">
+  {%- feed_meta -%}
+  {%- if jekyll.environment == 'production' and site.google_analytics -%}
+    {%- include google-analytics.html -%}
+  {%- endif -%}
+
+  {%- if page.url == "/" -%}
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "@id": "https://github.com/ppgranger/token-saver",
+    "name": "Token-Saver",
+    "description": "{{ site.description | strip_html | strip_newlines | escape }}",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Windows, macOS, Linux",
+    "license": "https://github.com/ppgranger/token-saver/blob/main/LICENSE",
+    "codeRepository": "https://github.com/ppgranger/token-saver",
+    "url": "{{ site.url }}{{ site.baseurl }}/",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "author": {
+      "@type": "Person",
+      "name": "ppgranger",
+      "url": "https://github.com/ppgranger"
+    }
+  }
+  </script>
+  {%- elsif page.url contains "/processors/" or page.url == "/benchmarks/" or page.url == "/comparison/" -%}
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": "{{ page.title | strip_html | strip_newlines | escape }}",
+    "description": "{{ page.description | strip_html | strip_newlines | escape }}",
+    "url": "{{ site.url }}{{ page.url | relative_url }}",
+    "isPartOf": {
+      "@id": "https://github.com/ppgranger/token-saver"
+    },
+    "author": {
+      "@type": "Person",
+      "name": "ppgranger",
+      "url": "https://github.com/ppgranger"
+    }
+  }
+  </script>
+  {%- endif -%}
+</head>
