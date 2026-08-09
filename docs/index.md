@@ -36,6 +36,16 @@ makes any of them compress worse fails the build.
 
 ## Install
 
+From Anthropic's official community marketplace:
+
+```bash
+/plugin marketplace add anthropics/claude-plugins-community
+/plugin install token-saver@claude-community --scope project
+```
+
+Or from the self-hosted marketplace (this repo, always current — the
+official mirror is a periodic snapshot):
+
 ```bash
 /plugin marketplace add ppgranger/token-saver
 /plugin install token-saver
