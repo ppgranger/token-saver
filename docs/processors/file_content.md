@@ -1,3 +1,9 @@
+---
+title: File Content Processor
+description: Content-aware compression for file viewing commands. Instead of blind head/tail truncation, detects content type and applies a specialized strategy.
+permalink: /processors/file_content/
+---
+
 # File Content Processor
 
 **File:** `src/processors/file_content.py` | **Priority:** 51 | **Name:** `file_content`

@@ -1,3 +1,9 @@
+---
+title: Terraform Processor
+description: Handles Terraform and OpenTofu commands.
+permalink: /processors/terraform/
+---
+
 # Terraform Processor
 
 **File:** `src/processors/terraform.py` | **Priority:** 33 | **Name:** `terraform`

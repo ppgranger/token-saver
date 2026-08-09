@@ -1,3 +1,9 @@
+---
+title: Maven/Gradle Processor
+description: Dedicated processor for Maven and Gradle build output.
+permalink: /processors/maven_gradle/
+---
+
 # Maven/Gradle Processor
 
 **File:** `src/processors/maven_gradle.py` | **Priority:** 28 | **Name:** `maven_gradle`

@@ -84,6 +84,8 @@ Not every command compresses, and that's deliberate. `cat large_file.py`, `git s
 /plugin install token-saver
 ```
 
+(Also available on Anthropic's official community marketplace — see [Installation](#installation) for both options.)
+
 That's the whole setup. Ask Claude to run anything — *"run the tests"*, *"show me the diff"*, *"what changed in the last 10 commits"* — and the output is compressed before it reaches the model. Then:
 
 ```bash
@@ -344,7 +346,16 @@ No third-party Python packages are required — Token-Saver uses only the standa
 
 ### Method 1: Claude Code Plugin (recommended)
 
-From the self-hosted marketplace:
+Two marketplaces carry Token-Saver — pick one.
+
+**Anthropic's official community marketplace** (`claude-community`), no setup beyond adding it once:
+```
+/plugin marketplace add anthropics/claude-plugins-community
+/plugin install token-saver@claude-community --scope project
+```
+This mirror is a snapshot pinned to a specific commit, refreshed periodically rather than on every push — if you want the exact latest commit on `main`, use the self-hosted marketplace below instead.
+
+**Self-hosted marketplace** (this repo, always current):
 ```
 /plugin marketplace add ppgranger/token-saver
 /plugin install token-saver
@@ -419,7 +430,10 @@ You can also run `token-saver update` from anywhere to auto-upgrade.
 ### Avoid dual installation
 
 Do NOT install token-saver via BOTH `/plugin install` AND `python3 install.py`
-simultaneously — this could register the plugin twice. Use one method or the other.
+simultaneously — this could register the plugin twice. Use one method or the
+other. The same applies across marketplaces: install from either
+`claude-community` or the self-hosted `ppgranger/token-saver` marketplace,
+not both.
 
 To switch from manual to marketplace:
 ```bash

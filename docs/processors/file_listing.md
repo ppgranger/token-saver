@@ -1,3 +1,9 @@
+---
+title: File Listing Processor
+description: Handles directory listing commands.
+permalink: /processors/file_listing/
+---
+
 # File Listing Processor
 
 **File:** `src/processors/file_listing.py` | **Priority:** 50 | **Name:** `file_listing`

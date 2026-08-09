@@ -1,3 +1,9 @@
+---
+title: Docker Processor
+description: Handles Docker CLI and Docker Compose output. Supports global options (`--context`, `-H`, `--host`).
+permalink: /processors/docker/
+---
+
 # Docker Processor
 
 **File:** `src/processors/docker.py` | **Priority:** 31 | **Name:** `docker`

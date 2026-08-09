@@ -1,3 +1,9 @@
+---
+title: Cargo Processor
+description: Dedicated processor for Rust's cargo build system.
+permalink: /processors/cargo/
+---
+
 # Cargo Processor
 
 **File:** `src/processors/cargo.py` | **Priority:** 22 | **Name:** `cargo`

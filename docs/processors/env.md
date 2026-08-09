@@ -1,3 +1,9 @@
+---
+title: Environment Processor
+description: Handles environment variable listing commands.
+permalink: /processors/env/
+---
+
 # Environment Processor
 
 **File:** `src/processors/env.py` | **Priority:** 34 | **Name:** `env`

@@ -154,7 +154,14 @@ EXCLUDED_PATTERNS = [
     *_STREAMING_EXCLUDED_PATTERNS,
 ]
 
-COMPILED_EXCLUDED = [re.compile(p) for p in EXCLUDED_PATTERNS]
+# re.MULTILINE so `^`/`$`-anchored patterns (sudo, vim, ssh, …) match at the
+# start/end of *every* line, not just the start/end of the whole string.
+# Defense in depth: has_unquoted_newline() is what actually stops a
+# multi-line command from reaching this point at all, but a multi-line
+# string that slips past it for any other reason (a future gap in the
+# quote-aware scanner, a new caller that skips that check) must still have
+# every line's dangerous prefix checked here, not just the first.
+COMPILED_EXCLUDED = [re.compile(p, re.MULTILINE) for p in EXCLUDED_PATTERNS]
 
 # Strip leading path prefix so '/usr/bin/git status' → 'git status',
 # './node_modules/.bin/jest' → 'jest', '.venv/bin/pip' → 'pip', etc.
@@ -202,7 +209,51 @@ _SEGMENT_EXCLUDED_PATTERNS = [
     *_STREAMING_EXCLUDED_PATTERNS,
 ]
 
-_COMPILED_SEGMENT_EXCLUDED = [re.compile(p) for p in _SEGMENT_EXCLUDED_PATTERNS]
+# Same defense-in-depth rationale as COMPILED_EXCLUDED above.
+_COMPILED_SEGMENT_EXCLUDED = [re.compile(p, re.MULTILINE) for p in _SEGMENT_EXCLUDED_PATTERNS]
+
+
+# Commands whose *output* is perfectly compressible, but which must never be
+# auto-approved on the user's behalf.  Wrapping a command means emitting
+# `permissionDecision: "allow"`, which per Claude Code's hook semantics runs
+# it with no confirmation prompt and without consulting the user's configured
+# allow/ask/deny rules.  That trade is fine for `git status`; it is not fine
+# for a command that force-pushes, tears down infrastructure, or deletes data
+# — the human-in-the-loop check is the whole point there, and saving a few
+# hundred tokens does not justify removing it.  Matching commands are left
+# entirely alone (no rewrite, no compression) so Claude Code applies its
+# normal permission flow.
+#
+# Deliberately narrow: each pattern targets the destructive *flag or
+# subcommand*, not the tool, so `git push` / `kubectl get` / `terraform plan`
+# stay compressible.  This list is not exhaustive and is not a security
+# boundary — it is a "don't silently bypass the user's own guard rails on the
+# obviously irreversible cases" list.
+_DESTRUCTIVE_PATTERNS = [
+    # force-push, but not the safer --force-with-lease
+    r"\bgit\s+push\b[^\n]*\s(?:--force\b(?!-with-lease)|-f\b)",
+    r"\bgit\s+reset\b[^\n]*\s--hard\b",
+    r"\bgit\s+clean\b[^\n]*\s-[a-zA-Z]*f",
+    r"\b(?:kubectl|oc)\b[^\n]*\bdelete\b",
+    r"\b(?:terraform|tofu)\s+(?:apply|destroy)\b",
+    r"\bdocker\b[^\n]*\b(?:system\s+prune|volume\s+rm|rmi)\b",
+    r"\b(?:docker|podman)\s+rm\b",
+    r"\brm\s+[^\n]*-[a-zA-Z]*[rR][a-zA-Z]*f|\brm\s+[^\n]*-[a-zA-Z]*f[a-zA-Z]*[rR]",  # rm -rf / -fr
+]
+
+_COMPILED_DESTRUCTIVE = [re.compile(p, re.MULTILINE) for p in _DESTRUCTIVE_PATTERNS]
+
+
+def is_destructive(command: str) -> bool:
+    """Return True if the command is irreversible enough that auto-approving
+    it would defeat the user's own permission rules.
+
+    Checked separately from :func:`is_compressible`: such a command may well
+    be compressible, but must not be rewritten, because rewriting is what
+    emits ``permissionDecision: "allow"``.
+    """
+    norm = _normalize_cmd(command)
+    return any(p.search(command) or p.search(norm) for p in _COMPILED_DESTRUCTIVE)
 
 
 def _ends_with_line_continuation(segment: str) -> bool:
@@ -466,6 +517,15 @@ def main():
 
     if not command or not is_compressible(command):
         _log.debug("Not compressible: %r", command[:200])
+        sys.exit(0)
+
+    if is_destructive(command):
+        # Compressible, but irreversible enough that we must not remove the
+        # user's normal permission check by auto-approving it — see
+        # is_destructive()'s docstring.  Emit nothing so Claude Code falls
+        # through to its own allow/ask/deny rules for this command exactly
+        # as if token-saver were not installed.
+        _log.debug("Destructive, declining to auto-approve: %r", command[:200])
         sys.exit(0)
 
     # Build path to wrap.py (same directory)

@@ -1,3 +1,9 @@
+---
+title: Search Processor
+description: Handles search tool output.
+permalink: /processors/search/
+---
+
 # Search Processor
 
 **File:** `src/processors/search.py` | **Priority:** 35 | **Name:** `search`

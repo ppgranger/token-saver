@@ -1,3 +1,9 @@
+---
+title: Structured Log Processor
+description: Processor for JSON Lines log output from log tailing tools.
+permalink: /processors/structured_log/
+---
+
 # Structured Log Processor
 
 **File:** `src/processors/structured_log.py` | **Priority:** 45 | **Name:** `structured_log`

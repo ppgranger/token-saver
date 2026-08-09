@@ -1,3 +1,9 @@
+---
+title: GitHub CLI Processor
+description: Handles GitHub CLI (`gh`) output.
+permalink: /processors/gh/
+---
+
 # GitHub CLI Processor
 
 **File:** `src/processors/gh.py` | **Priority:** 37 | **Name:** `gh`
