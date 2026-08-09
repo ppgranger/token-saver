@@ -1,6 +1,11 @@
 theme: minima
 
 title: Token-Saver
+# jekyll-seo-tag builds <title> as "page.title | site.tagline" and only
+# falls back to the full site.description when tagline is unset — which is
+# what produced a <title> that was the whole paragraph below. Keep tagline
+# short; description stays long-form for <meta name="description"> and og:.
+tagline: Content-aware output compression for AI coding assistants
 description: >-
   Content-aware output compression for AI coding assistants. 36 specialized
   processors compress verbose CLI output (git, pytest, npm, terraform,
