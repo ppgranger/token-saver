@@ -260,3 +260,32 @@ python3 -m pytest tests/ -v
 ```
 
 All existing tests must continue to pass after adding a new processor.
+
+## Releasing
+
+`src/__init__.py` holds `__version__` and is the single source of truth — the
+installer stamps the manifests from it. But the copies committed in the repo are
+what users resolve against, and Claude Code keys its update cache on
+`.claude-plugin/plugin.json`: **a release that forgets to bump that file reaches
+nobody**, and `/plugin update` reports "already on the latest version".
+
+So a release commit touches all five:
+
+| File | Where |
+|------|-------|
+| `src/__init__.py` | `__version__` |
+| `.claude-plugin/plugin.json` | `version` |
+| `.claude-plugin/marketplace.json` | `plugins[0].version` |
+| `antigravity/antigravity-plugin.json` | `version` |
+| `docs/benchmarks.md` | `Version: **X.Y.Z**` header line |
+
+Plus a new `## [X.Y.Z] - YYYY-MM-DD` section in `CHANGELOG.md`.
+
+Verify before pushing — CI runs the same check and fails the PR otherwise:
+
+```bash
+python3 scripts/check_versions.py
+```
+
+Version numbers follow [semver](https://semver.org): MAJOR for breaking changes,
+MINOR for new features, PATCH for bug fixes. Tag the merge commit `vX.Y.Z`.

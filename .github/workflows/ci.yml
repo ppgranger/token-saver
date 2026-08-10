@@ -43,6 +43,23 @@ jobs:
       - name: Type check
         run: mypy src/ scripts/ --ignore-missing-imports
 
+  # The version is committed in five places.  install.py stamps them from
+  # src/__init__.py at install time, so drift never breaks an install and stays
+  # invisible locally — it surfaces as a release that /plugin update declines to
+  # fetch, because Claude Code keys its cache on .claude-plugin/plugin.json.
+  versions:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Check version strings agree
+        run: python scripts/check_versions.py
+
   test:
     name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
