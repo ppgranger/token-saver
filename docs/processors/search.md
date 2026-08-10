@@ -1,7 +1,8 @@
 ---
-title: Search Processor
+title: Search
 description: Handles search tool output.
 permalink: /processors/search/
+parent: Processors
 ---
 
 # Search Processor

@@ -1,7 +1,8 @@
 ---
-title: Token-Saver
+title: Home
 description: Content-aware output compression for AI coding assistants. 36 specialized processors cut CLI output tokens by 60-99% without losing errors, diffs, or stack traces.
 permalink: /
+nav_order: 1
 ---
 
 # Token-Saver
@@ -56,22 +57,10 @@ for manual installation, Antigravity CLI setup, and upgrading from v1.x.
 
 ## Documentation
 
+- [Processor reference](processors/) — one page per tool family: what each of the 36 processors keeps and drops.
 - [Benchmarks](benchmarks.md) — every measured scenario, methodology, and how to reproduce them.
 - [How It Compares](comparison.md) — vs `cc_token_saver_mcp`, `token-optimizer-mcp`, and Claude Context Mode.
 - [FAQ](faq.md) — privacy, precision guarantees, platform support, and common questions.
-- [Processor reference](#processors) — what each of the 36 processors keeps and drops.
-
-## Processors
-
-One page per tool family, documenting exactly what's kept, what's dropped,
-and which config knobs are available:
-
-<ul>
-{% assign processors = site.pages | where_exp: "p", "p.permalink contains '/processors/'" | sort: "title" %}
-{% for p in processors %}
-  <li><a href="{{ p.url | relative_url }}">{{ p.title }}</a> — {{ p.description }}</li>
-{% endfor %}
-</ul>
 
 ## Why It Exists
 

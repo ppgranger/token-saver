@@ -1,7 +1,8 @@
 ---
-title: Docker Processor
+title: Docker
 description: Handles Docker CLI and Docker Compose output. Supports global options (`--context`, `-H`, `--host`).
 permalink: /processors/docker/
+parent: Processors
 ---
 
 # Docker Processor

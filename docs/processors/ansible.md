@@ -1,7 +1,8 @@
 ---
-title: Ansible Processor
+title: Ansible
 description: Handles `ansible-playbook` and `ansible` command output.
 permalink: /processors/ansible/
+parent: Processors
 ---
 
 # Ansible Processor

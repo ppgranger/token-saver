@@ -1,7 +1,8 @@
 ---
-title: Test Output Processor
+title: Test Output
 description: Handles test runner output across all major ecosystems.
 permalink: /processors/test_output/
+parent: Processors
 ---
 
 # Test Output Processor

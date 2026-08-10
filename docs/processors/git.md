@@ -1,7 +1,8 @@
 ---
-title: Git Processor
+title: Git
 description: Handles all common git subcommands, including those with global options (`-C`, `--no-pager`, `-c`, `--git-dir`, `--work-tree`).
 permalink: /processors/git/
+parent: Processors
 ---
 
 # Git Processor

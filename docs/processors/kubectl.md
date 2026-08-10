@@ -1,7 +1,8 @@
 ---
-title: Kubernetes Processor
+title: Kubernetes
 description: Handles kubectl and oc (OpenShift) commands. Supports global options (`-n`, `--namespace`, `--context`, `-A`, `--all-namespaces`, `--kubeconfig`).
 permalink: /processors/kubectl/
+parent: Processors
 ---
 
 # Kubernetes Processor

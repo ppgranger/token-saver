@@ -1,7 +1,8 @@
 ---
-title: Python Install Processor
+title: Python Install
 description: Dedicated processor for Python package installation output.
 permalink: /processors/python_install/
+parent: Processors
 ---
 
 # Python Install Processor

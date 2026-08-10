@@ -1,7 +1,8 @@
 ---
-title: Environment Processor
+title: Environment
 description: Handles environment variable listing commands.
 permalink: /processors/env/
+parent: Processors
 ---
 
 # Environment Processor

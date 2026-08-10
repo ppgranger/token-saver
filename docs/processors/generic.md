@@ -1,7 +1,8 @@
 ---
-title: Generic Processor (Fallback)
+title: Generic (Fallback)
 description: Universal fallback processor. Applies to any command not recognized by specialized processors, and also serves as a second-pass cleaner after specialized processors.
 permalink: /processors/generic/
+parent: Processors
 ---
 
 # Generic Processor (Fallback)

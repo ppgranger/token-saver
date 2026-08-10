@@ -1,7 +1,8 @@
 ---
-title: File Listing Processor
+title: File Listing
 description: Handles directory listing commands.
 permalink: /processors/file_listing/
+parent: Processors
 ---
 
 # File Listing Processor

@@ -1,7 +1,8 @@
 ---
-title: JQ/YQ Processor
+title: JQ/YQ
 description: Compresses large JSON and YAML outputs from jq and yq.
 permalink: /processors/jq_yq/
+parent: Processors
 ---
 
 # JQ/YQ Processor

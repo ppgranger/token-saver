@@ -1,7 +1,8 @@
 ---
-title: Maven/Gradle Processor
+title: Maven/Gradle
 description: Dedicated processor for Maven and Gradle build output.
 permalink: /processors/maven_gradle/
+parent: Processors
 ---
 
 # Maven/Gradle Processor

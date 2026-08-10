@@ -1,7 +1,8 @@
 ---
-title: How Token-Saver Compares
+title: Comparison
 description: Token-Saver vs cc_token_saver_mcp, token-optimizer-mcp, and Claude Context Mode — approach, latency, offline support, and whether they can run together.
 permalink: /comparison/
+nav_order: 4
 ---
 
 # How Token-Saver Compares

@@ -1,7 +1,8 @@
 ---
-title: Terraform Processor
+title: Terraform
 description: Handles Terraform and OpenTofu commands.
 permalink: /processors/terraform/
+parent: Processors
 ---
 
 # Terraform Processor

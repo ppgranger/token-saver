@@ -1,7 +1,8 @@
 ---
-title: Build Output Processor
+title: Build Output
 description: Handles build tool output across all major ecosystems.
 permalink: /processors/build_output/
+parent: Processors
 ---
 
 # Build Output Processor

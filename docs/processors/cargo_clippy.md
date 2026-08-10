@@ -1,7 +1,8 @@
 ---
-title: Cargo Clippy Processor
+title: Cargo Clippy
 description: Dedicated processor for Rust clippy lint output with multi-line block awareness.
 permalink: /processors/cargo_clippy/
+parent: Processors
 ---
 
 # Cargo Clippy Processor
