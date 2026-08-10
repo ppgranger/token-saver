@@ -1,7 +1,8 @@
 ---
-title: Syslog Processor
+title: Syslog
 description: Handles system log output from `journalctl` and `dmesg`.
 permalink: /processors/syslog/
+parent: Processors
 ---
 
 # Syslog Processor

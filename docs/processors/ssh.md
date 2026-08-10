@@ -1,7 +1,8 @@
 ---
-title: SSH Processor
+title: SSH
 description: Handles non-interactive SSH and SCP command output.
 permalink: /processors/ssh/
+parent: Processors
 ---
 
 # SSH Processor

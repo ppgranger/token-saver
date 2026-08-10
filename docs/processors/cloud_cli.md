@@ -1,7 +1,8 @@
 ---
-title: Cloud CLI Processor
+title: Cloud CLI
 description: Handles cloud provider CLI output.
 permalink: /processors/cloud_cli/
+parent: Processors
 ---
 
 # Cloud CLI Processor

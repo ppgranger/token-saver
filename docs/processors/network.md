@@ -1,7 +1,8 @@
 ---
-title: Network Processor
+title: Network
 description: Handles HTTP client output.
 permalink: /processors/network/
+parent: Processors
 ---
 
 # Network Processor

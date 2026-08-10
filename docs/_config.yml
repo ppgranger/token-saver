@@ -1,4 +1,9 @@
-theme: minima
+# just-the-docs is not a GitHub Pages native theme, so it can only be used via
+# remote_theme — jekyll-remote-theme IS on the safe-mode plugin whitelist, which
+# keeps the site building natively from the branch with no Actions workflow.
+# Pinned to a tag, not a branch: an unpinned theme means upstream can break this
+# site with no commit of ours, and Pages gives no build log worth the name.
+remote_theme: just-the-docs/just-the-docs@v0.12.0
 
 title: Token-Saver
 # jekyll-seo-tag builds <title> as "page.title | site.tagline" and only
@@ -22,16 +27,83 @@ repository: ppgranger/token-saver
 # front matter are skipped by Jekyll's default collections, so nothing here
 # needs an explicit include/exclude list for the .md sources.
 
-minima:
-  skin: auto
-  social_links:
-    github: ppgranger/token-saver
+# just-the-docs only styles a page if it uses one of its layouts, and none of
+# our sources declare one. Default every page to `default` rather than adding a
+# layout line to 34 files.
+defaults:
+  - scope:
+      path: ""
+      type: "pages"
+    values:
+      layout: "default"
+
+# --- just-the-docs -----------------------------------------------------------
+
+color_scheme: token-saver
+
+search_enabled: true
+search:
+  heading_level: 2
+  previews: 2
+  preview_words_before: 3
+  preview_words_after: 8
+  tokenizer_separator: /[\s/]+/
+  rel_url: true
+  button: false
+
+heading_anchors: true
+enable_copy_code_button: true
+
+back_to_top: true
+back_to_top_text: "Back to top"
+
+aux_links:
+  "GitHub":
+    - "https://github.com/ppgranger/token-saver"
+aux_links_new_tab: true
+
+# Sidebar sorting: nav_order first, then title. The 29 processor pages carry no
+# nav_order deliberately, so they sort alphabetically and adding a processor
+# needs no renumbering. case_insensitive matches how the titles read.
+nav_sort: case_insensitive
+
+# Surfaces broken parent/ancestor references as a page on the site instead of a
+# silent build success with pages missing from the sidebar.
+nav_error_report: true
+
+gh_edit_link: true
+gh_edit_link_text: "Edit this page on GitHub"
+gh_edit_repository: "https://github.com/ppgranger/token-saver"
+gh_edit_branch: "main"
+gh_edit_source: docs
+gh_edit_view_mode: "tree"
+
+footer_content: >-
+  Token-Saver is MIT licensed. No LLM calls, no network access, fully
+  deterministic.
+
+callouts:
+  note:
+    title: Note
+    color: purple
+  warning:
+    title: Warning
+    color: red
 
 # Keep the build to the well-known-safe plugin whitelist GitHub Pages runs
 # without a custom Actions workflow. Anything outside this list forces a
 # switch to build-via-Actions, which is unnecessary for a static docs site.
+# jekyll-include-cache is not optional: just-the-docs calls include_cached in
+# seven places and the build hard-fails without it.
 plugins:
+  - jekyll-remote-theme
+  - jekyll-include-cache
+  - jekyll-seo-tag
   - jekyll-relative-links
+
+exclude:
+  - .sass-cache/
+  - .jekyll-cache/
 
 markdown: kramdown
 kramdown:

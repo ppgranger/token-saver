@@ -2,6 +2,7 @@
 title: Benchmarks
 description: 22 measured compression scenarios for Token-Saver, sorted by ratio, gated by CI so they cannot regress silently.
 permalink: /benchmarks/
+nav_order: 3
 ---
 
 # Token-Saver Compression Benchmarks

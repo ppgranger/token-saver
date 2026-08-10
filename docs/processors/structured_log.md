@@ -1,7 +1,8 @@
 ---
-title: Structured Log Processor
+title: Structured Log
 description: Processor for JSON Lines log output from log tailing tools.
 permalink: /processors/structured_log/
+parent: Processors
 ---
 
 # Structured Log Processor

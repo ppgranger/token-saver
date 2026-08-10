@@ -1,7 +1,8 @@
 ---
-title: GitHub CLI Processor
+title: GitHub CLI
 description: Handles GitHub CLI (`gh`) output.
 permalink: /processors/gh/
+parent: Processors
 ---
 
 # GitHub CLI Processor
