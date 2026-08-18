@@ -1,7 +1,8 @@
 ---
-title: Helm Processor
+title: Helm
 description: Handles Helm CLI output for chart management operations.
 permalink: /processors/helm/
+parent: Processors
 ---
 
 # Helm Processor

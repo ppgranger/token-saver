@@ -1,0 +1,71 @@
+{% comment %}
+  just-the-docs include hook: the theme's own _includes/head.html pulls this
+  file in as the last thing before the closing head element, right after it
+  invokes the seo tag. Because it is a supported extension point, nothing here
+  overrides a theme file — the theme keeps full control of its meta tags,
+  stylesheets, search and favicon assets. JSON-LD is the only addition.
+
+  This replaces a full override of minima's head.html, which was necessary only
+  because minima 2.5.1 (the version GitHub Pages builds with) never calls its
+  own custom-head hook. just-the-docs has no such gap.
+
+  Keep this a Liquid comment block, and never write Liquid tag syntax inside
+  it — not even as an example. Two separate outages came from ignoring that:
+
+  1. As an HTML comment, the seo tag named below still rendered (Liquid
+     evaluates tags anywhere, comments included). It emits its own HTML
+     end-comment marker, whose "--" + ">" closed this comment early and
+     leaked the remaining prose plus a duplicate head element into the page.
+  2. Rewritten as a Liquid comment, spelling out the opening comment tag in
+     prose opened a *nested* comment block, so the closing tag below matched
+     the inner one and the outer block was never closed. That's a hard build
+     failure: "Liquid syntax error: 'comment' tag was never closed".
+
+  Neither hazard went away with the theme switch — the theme still invokes the
+  seo tag on every page, and nested-comment parsing is pure Liquid. Refer to
+  tags by name only (seo tag, endcomment), never in brace-percent form.
+{% endcomment %}
+{%- if page.url == "/" -%}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "@id": "https://github.com/ppgranger/token-saver",
+  "name": "Token-Saver",
+  "description": "{{ site.description | strip_html | strip_newlines | escape }}",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Windows, macOS, Linux",
+  "license": "https://github.com/ppgranger/token-saver/blob/main/LICENSE",
+  "codeRepository": "https://github.com/ppgranger/token-saver",
+  "url": "{{ site.url }}{{ site.baseurl }}/",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "author": {
+    "@type": "Person",
+    "name": "ppgranger",
+    "url": "https://github.com/ppgranger"
+  }
+}
+</script>
+{%- elsif page.url contains "/processors/" or page.url == "/benchmarks/" or page.url == "/comparison/" -%}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "{{ page.title | strip_html | strip_newlines | escape }}",
+  "description": "{{ page.description | strip_html | strip_newlines | escape }}",
+  "url": "{{ site.url }}{{ page.url | relative_url }}",
+  "isPartOf": {
+    "@id": "https://github.com/ppgranger/token-saver"
+  },
+  "author": {
+    "@type": "Person",
+    "name": "ppgranger",
+    "url": "https://github.com/ppgranger"
+  }
+}
+</script>
+{%- endif -%}

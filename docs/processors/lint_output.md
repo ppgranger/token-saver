@@ -1,7 +1,8 @@
 ---
-title: Lint Output Processor
+title: Lint Output
 description: Handles linter and static analysis output.
 permalink: /processors/lint_output/
+parent: Processors
 ---
 
 # Lint Output Processor

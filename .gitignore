@@ -27,3 +27,9 @@ build/
 # Environment
 .env
 *.env.local
+
+# Jekyll (docs/)
+docs/_site/
+docs/.sass-cache/
+docs/.jekyll-cache/
+docs/.jekyll-metadata

@@ -1,7 +1,8 @@
 ---
-title: Cargo Processor
+title: Cargo
 description: Dedicated processor for Rust's cargo build system.
 permalink: /processors/cargo/
+parent: Processors
 ---
 
 # Cargo Processor

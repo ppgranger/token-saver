@@ -1,0 +1,33 @@
+// Token-Saver color scheme, selected by `color_scheme: token-saver` in
+// _config.yml. just-the-docs imports color_schemes/light first and this file
+// second, so everything here overrides the light defaults and anything left
+// unset falls through to them.
+//
+// Written for libsass 3.5 (jekyll-sass-converter 1.5.2), which is what GitHub
+// Pages' jekyll 3.10 build uses. No @use, no sass:math, no module system —
+// those are dart-sass only and would fail the Pages build while compiling
+// fine on a modern local toolchain.
+
+$color-scheme: token-saver;
+
+// Green is the compression-savings color already used by the README badge
+// (docs/assets/badge-savings.svg, fill #4c1). Reusing it ties the site to the
+// artifact people see first on GitHub instead of inventing a second identity.
+$ts-green-000: #2da44e;
+$ts-green-100: #1f7a3a;
+$ts-green-200: #17602c;
+$ts-green-300: #10441f;
+
+$link-color: $ts-green-100;
+$btn-primary-color: $ts-green-100;
+$nav-child-link-color: $grey-dk-100;
+
+$body-heading-color: $grey-dk-300;
+$body-text-color: $grey-dk-100;
+
+// A tinted sidebar separates navigation from content without a hard border.
+$sidebar-color: #f4f8f5;
+$search-background-color: $white;
+$table-background-color: $white;
+$code-background-color: #f6f8f6;
+$feedback-color: darken($sidebar-color, 3%);

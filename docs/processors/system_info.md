@@ -1,7 +1,8 @@
 ---
-title: System Info Processor
+title: System Info
 description: Handles disk and file counting commands.
 permalink: /processors/system_info/
+parent: Processors
 ---
 
 # System Info Processor

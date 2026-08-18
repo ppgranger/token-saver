@@ -1,7 +1,8 @@
 ---
-title: Database Query Processor
+title: Database Query
 description: Handles database query result output.
 permalink: /processors/db_query/
+parent: Processors
 ---
 
 # Database Query Processor

@@ -1,7 +1,8 @@
 ---
-title: File Content Processor
+title: File Content
 description: Content-aware compression for file viewing commands. Instead of blind head/tail truncation, detects content type and applies a specialized strategy.
 permalink: /processors/file_content/
+parent: Processors
 ---
 
 # File Content Processor

@@ -2,6 +2,7 @@
 title: FAQ
 description: Answers on privacy, precision guarantees, platform support, and how Token-Saver behaves when it fails.
 permalink: /faq/
+nav_order: 5
 ---
 
 # FAQ
@@ -87,7 +88,7 @@ are numeric thresholds with no code path to abuse.
 
 ## Is a specific processor's behavior documented anywhere?
 
-Yes — the [processor reference](index.md#processors) has a page per
+Yes — the [processor reference](processors/) has a page per
 processor covering what it matches, what it keeps, what it drops, and its
 config knobs.
 

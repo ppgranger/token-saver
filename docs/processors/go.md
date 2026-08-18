@@ -1,7 +1,8 @@
 ---
-title: Go Processor
+title: Go
 description: Dedicated processor for Go toolchain commands.
 permalink: /processors/go/
+parent: Processors
 ---
 
 # Go Processor
