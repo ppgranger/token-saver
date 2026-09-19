@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Deep audit of the Token-Saver compression engine.
 
 Builds realistic command outputs, runs them through the real engine, and
@@ -23,8 +35,10 @@ from typing import NamedTuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# This standalone audit imports the checkout after locating its root.
+# pylint: disable=wrong-import-position
+import src.engine
 from src import config
-from src.engine import CompressionEngine
 
 CHARS_PER_TOKEN = config.get("chars_per_token")
 
@@ -64,17 +78,23 @@ def _to_tokens(n: int) -> int:
     return max(1, round(n / CHARS_PER_TOKEN)) if n > 0 else 0
 
 
-def audit(label: str, command: str, output: str, observations: list[str] | None = None) -> None:
-    """Register a scenario.  Deliberately does no work — see module docstring."""
-    SCENARIOS.append(Scenario(label, command, output, tuple(observations or ())))
+def audit(
+    label: str, command: str, output: str, observations: list[str] | None = None
+) -> None:
+    """Register a scenario without executing it; see the module docstring."""
+    SCENARIOS.append(
+        Scenario(label, command, output, tuple(observations or ()))
+    )
 
 
 def measure(scenarios: list[Scenario] | None = None) -> list[Measurement]:
     """Run every scenario through a fresh engine and return the measurements."""
-    engine = CompressionEngine()
+    engine = src.engine.CompressionEngine()
     results = []
     for s in scenarios if scenarios is not None else SCENARIOS:
-        compressed, processor, was_compressed = engine.compress(s.command, s.output)
+        compressed, processor, was_compressed = engine.compress(
+            s.command, s.output
+        )
         orig_len, comp_len = len(s.output), len(compressed)
         ratio = (orig_len - comp_len) / orig_len * 100 if orig_len else 0.0
         results.append(
@@ -166,9 +186,18 @@ audit(
     "git status",
     git_status_output,
     [
-        "QUESTION: Are hint lines ('use git restore...') being dropped? They should be.",
-        "QUESTION: Is the 'Your branch is ahead...' line preserved? It SHOULD be.",
-        "CHECK: Directory grouping threshold (>8) -- is 8 optimal or should it be lower?",
+        (
+            "QUESTION: Are hint lines ('use git restore...') "
+            "being dropped? They should be."
+        ),
+        (
+            "QUESTION: Is the 'Your branch is ahead...' line "
+            "preserved? It SHOULD be."
+        ),
+        (
+            "CHECK: Directory grouping threshold (>8) -- is 8"
+            " optimal or should it be lower?"
+        ),
     ],
 )
 
@@ -182,11 +211,15 @@ for i in range(5):
     diff_lines.append(f"index abc{i}def..123{i}456 100644")
     diff_lines.append(f"--- a/{fname_a}")
     diff_lines.append(f"+++ b/{fname_b}")
-    diff_lines.append(f"@@ -{10 + i * 100},{30} +{10 + i * 100},{32} @@ def some_function_{i}():")
+    diff_lines.append(
+        f"@@ -{10 + i * 100},{30} +{10 + i * 100},{32} @@ "
+        f"def some_function_{i}():"
+    )
     # 10 context lines before the change
     for j in range(10):
         diff_lines.append(
-            f"     # This is context line {j} that hasn't changed and takes up tokens"
+            f"     # This is context line {j} "
+            "that hasn't changed and takes up tokens"
         )
     # Actual changes
     diff_lines.append(f"-    old_value = compute_something({i})")
@@ -199,7 +232,8 @@ for i in range(5):
     # 10 context lines after the change
     for j in range(10):
         diff_lines.append(
-            f"     # This is trailing context line {j} that is unchanged and wastes tokens"
+            f"     # This is trailing context line {j} "
+            "that is unchanged and wastes tokens"
         )
 
 diff_output = "\n".join(diff_lines)
@@ -209,11 +243,28 @@ audit(
     "git diff",
     diff_output,
     [
-        "ISSUE: Context lines (prefixed with ' ') are kept verbatim -- these are UNCHANGED lines.",
-        "OPPORTUNITY: Could reduce to 3 context lines (like -U3) since the AI can infer the rest.",
-        "ISSUE: 'index abc0def..1230456 100644' lines are NEVER useful to the AI model.",
-        "ISSUE: '--- a/file' and '+++ b/file' lines are redundant when 'diff --git a/... b/...' is present.",
-        "RECOMMENDATION: Strip index lines, strip ---/+++ lines, reduce context to 3 lines = ~60% more savings.",
+        (
+            "ISSUE: Context lines (prefixed with ' ') are kep"
+            "t verbatim -- these are UNCHANGED lines."
+        ),
+        (
+            "OPPORTUNITY: Could reduce to 3 context lines (li"
+            "ke -U3) since the AI can infer the rest."
+        ),
+        (
+            "ISSUE: 'index abc0def..1230456 100644' lines are"
+            " NEVER useful to the AI model."
+        ),
+        (
+            "ISSUE: '--- a/file' and '+++ b/file' lines are r"
+            "edundant when 'diff --git a/... b/...' is presen"
+            "t."
+        ),
+        (
+            "RECOMMENDATION: Strip index lines, strip ---/+++"
+            " lines, reduce context to 3 lines = ~60% more sa"
+            "vings."
+        ),
     ],
 )
 
@@ -243,9 +294,18 @@ audit(
     "git log --oneline",
     log_oneline_output,
     [
-        "CHECK: max_log_entries=20 truncates to 20 -- is that too aggressive for --oneline?",
-        "OBSERVATION: --oneline format is already extremely compact. Each line is ~50 chars.",
-        "SUGGESTION: For --oneline, could increase max_entries to 30 since the format is cheap.",
+        (
+            "CHECK: max_log_entries=20 truncates to 20 -- is "
+            "that too aggressive for --oneline?"
+        ),
+        (
+            "OBSERVATION: --oneline format is already extreme"
+            "ly compact. Each line is ~50 chars."
+        ),
+        (
+            "SUGGESTION: For --oneline, could increase max_en"
+            "tries to 30 since the format is cheap."
+        ),
     ],
 )
 
@@ -267,9 +327,19 @@ audit(
     "git diff --stat",
     diff_stat_output,
     [
-        "ISSUE: diff --stat is already a SUMMARY format -- further compression may lose info.",
-        "CHECK: Does the git processor handle --stat specifically? It probably goes through _process_diff.",
-        "OBSERVATION: The visual bars (++++---) are not useful to the AI. Could be stripped.",
+        (
+            "ISSUE: diff --stat is already a SUMMARY format -"
+            "- further compression may lose info."
+        ),
+        (
+            "CHECK: Does the git processor handle --stat spec"
+            "ifically? It probably goes through _process_diff"
+            "."
+        ),
+        (
+            "OBSERVATION: The visual bars (++++---) are not u"
+            "seful to the AI. Could be stripped."
+        ),
     ],
 )
 
@@ -277,7 +347,16 @@ audit(
 # 1e. git status -s (short format) with 40+ files
 git_status_short_lines = []
 statuses = ["M ", " M", "A ", "??", "MM", "D ", " D", "AM", "R "]
-dirs = ["src/", "src/processors/", "tests/", "docs/", "scripts/", "lib/", "config/", ""]
+dirs = [
+    "src/",
+    "src/processors/",
+    "tests/",
+    "docs/",
+    "scripts/",
+    "lib/",
+    "config/",
+    "",
+]
 for i in range(45):
     status = statuses[i % len(statuses)]
     d = dirs[i % len(dirs)]
@@ -291,9 +370,20 @@ audit(
     "git status -s",
     git_status_short_output,
     [
-        "CHECK: Short format is already compact -- does the processor handle 'XY filename' format correctly?",
-        "OBSERVATION: Short format has no hint lines to strip, so savings come purely from grouping.",
-        "QUESTION: Is directory-based grouping for short format helpful or does it obscure the status codes?",
+        (
+            "CHECK: Short format is already compact -- does t"
+            "he processor handle 'XY filename' format correct"
+            "ly?"
+        ),
+        (
+            "OBSERVATION: Short format has no hint lines to s"
+            "trip, so savings come purely from grouping."
+        ),
+        (
+            "QUESTION: Is directory-based grouping for short "
+            "format helpful or does it obscure the status cod"
+            "es?"
+        ),
     ],
 )
 
@@ -304,7 +394,10 @@ audit(
 
 # 2a. pytest with 500+ passing tests and 2 failures
 pytest_lines = [
-    "============================= test session starts ==============================",
+    (
+        "============================= test session start"
+        "s =============================="
+    ),
     "platform darwin -- Python 3.12.0, pytest-8.0.0, pluggy-1.4.0",
     "rootdir: /Users/dev/project",
     "configfile: pyproject.toml",
@@ -322,8 +415,14 @@ for i in range(500):
 pytest_lines.extend(
     [
         "",
-        "=================================== FAILURES ===================================",
-        "__________________________ test_compression_ratio ______________________________",
+        (
+            "=================================== FAILURES ==="
+            "================================"
+        ),
+        (
+            "__________________________ test_compression_rati"
+            "o ______________________________"
+        ),
         "",
         "    def test_compression_ratio():",
         "        engine = CompressionEngine()",
@@ -334,7 +433,10 @@ pytest_lines.extend(
         "E        +  and   1000 = 2000 * 0.5",
         "",
         "/Users/dev/project/tests/test_engine.py:45: AssertionError",
-        "__________________________ test_diff_context_trim _______________________________",
+        (
+            "__________________________ test_diff_context_tri"
+            "m _______________________________"
+        ),
         "",
         "    def test_diff_context_trim():",
         "        processor = GitProcessor()",
@@ -343,10 +445,22 @@ pytest_lines.extend(
         "E       AssertionError: assert 42 < 10",
         "",
         "/Users/dev/project/tests/test_processors.py:89: AssertionError",
-        "=========================== short test summary info ============================",
-        "FAILED tests/test_engine.py::test_compression_ratio - AssertionError: assert 1500 < 1000",
-        "FAILED tests/test_processors.py::test_diff_context_trim - AssertionError: assert 42 < 10",
-        "========================= 2 failed, 510 passed ================================",
+        (
+            "=========================== short test summary i"
+            "nfo ============================"
+        ),
+        (
+            "FAILED tests/test_engine.py::test_compression_ra"
+            "tio - AssertionError: assert 1500 < 1000"
+        ),
+        (
+            "FAILED tests/test_processors.py::test_diff_conte"
+            "xt_trim - AssertionError: assert 42 < 10"
+        ),
+        (
+            "========================= 2 failed, 510 passed ="
+            "==============================="
+        ),
     ]
 )
 
@@ -357,9 +471,15 @@ audit(
     "pytest",
     pytest_output,
     [
-        "KEY CHECK: Are all 500 'PASSED' lines being collapsed to a single count?",
+        (
+            "KEY CHECK: Are all 500 'PASSED' lines being coll"
+            "apsed to a single count?"
+        ),
         "CHECK: Is the failure traceback fully preserved?",
-        "ISSUE: Platform, rootdir, plugins lines are noise -- are they stripped?",
+        (
+            "ISSUE: Platform, rootdir, plugins lines are nois"
+            "e -- are they stripped?"
+        ),
         "ISSUE: The 'collected 512 items' line is noise.",
         "OBSERVATION: The failure block is the ONLY useful content here.",
     ],
@@ -368,27 +488,37 @@ audit(
 
 # 2b. pytest with only warnings (no failures)
 pytest_warn_lines = [
-    "============================= test session starts ==============================",
+    (
+        "============================= test session start"
+        "s =============================="
+    ),
     "platform darwin -- Python 3.12.0, pytest-8.0.0",
     "rootdir: /Users/dev/project",
     "collected 200 items",
     "",
 ]
 for i in range(200):
-    pytest_warn_lines.append(f"tests/test_mod_{i // 10:02d}.py::test_{i:03d} PASSED")
+    pytest_warn_lines.append(
+        f"tests/test_mod_{i // 10:02d}.py::test_{i:03d} PASSED"
+    )
 
 pytest_warn_lines.extend(
     [
         "",
-        "============================= warnings summary ================================",
+        (
+            "============================= warnings summary ="
+            "==============================="
+        ),
     ]
 )
 # 30 deprecation warnings
 for i in range(30):
     pytest_warn_lines.extend(
         [
-            f"  /usr/lib/python3.12/site-packages/somepackage/module{i % 5}.py:{100 + i}: DeprecationWarning: "
-            f"function deprecated_func_{i % 8}() is deprecated and will be removed in v{3 + i % 3}.0. "
+            "  /usr/lib/python3.12/site-packages/somepackage/"
+            f"module{i % 5}.py:{100 + i}: DeprecationWarning: "
+            f"function deprecated_func_{i % 8}() is deprecated "
+            f"and will be removed in v{3 + i % 3}.0. "
             f"Use new_func_{i % 8}() instead.",
             f"    deprecated_func_{i % 8}()",
         ]
@@ -398,7 +528,10 @@ pytest_warn_lines.extend(
     [
         "",
         "-- Docs: https://docs.pytest.org/en/stable/warnings.html",
-        "========================= 200 passed, 30 warnings =============================",
+        (
+            "========================= 200 passed, 30 warning"
+            "s ============================="
+        ),
     ]
 )
 
@@ -409,10 +542,22 @@ audit(
     "pytest tests/",
     pytest_warn_output,
     [
-        "ISSUE: 30 deprecation warnings are mostly IDENTICAL pattern -- should be collapsed.",
-        "OBSERVATION: When ALL tests pass, the only useful info is '200 passed, 30 warnings'.",
-        "QUESTION: Are the warning details useful? For most cases, just the count suffices.",
-        "SUGGESTION: Collapse identical warning types: 'DeprecationWarning (x30): function X deprecated'.",
+        (
+            "ISSUE: 30 deprecation warnings are mostly IDENTI"
+            "CAL pattern -- should be collapsed."
+        ),
+        (
+            "OBSERVATION: When ALL tests pass, the only usefu"
+            "l info is '200 passed, 30 warnings'."
+        ),
+        (
+            "QUESTION: Are the warning details useful? For mo"
+            "st cases, just the count suffices."
+        ),
+        (
+            "SUGGESTION: Collapse identical warning types: 'D"
+            "eprecationWarning (x30): function X deprecated'."
+        ),
     ],
 )
 
@@ -443,7 +588,10 @@ audit(
     [
         "CHECK: Are all 50 ' PASS  ...' lines collapsed into a count?",
         "OBSERVATION: Final summary has all the info the AI needs.",
-        "SUGGESTION: Could collapse to '[50 suites passed, 312 tests] + summary lines'.",
+        (
+            "SUGGESTION: Could collapse to '[50 suites passed"
+            ", 312 tests] + summary lines'."
+        ),
     ],
 )
 
@@ -457,10 +605,15 @@ npm_lines = []
 for i in range(220):
     pkg = f"@scope/package-{i:03d}"
     ver = f"{i % 5}.{i % 10}.{i % 3}"
-    npm_lines.append(f"npm WARN deprecated {pkg}@{ver}: Use something else" if i % 20 == 0 else "")
+    npm_lines.append(
+        f"npm WARN deprecated {pkg}@{ver}: Use something else"
+        if i % 20 == 0
+        else ""
+    )
     if i % 3 == 0:
         npm_lines.append(
-            f"npm http fetch GET 200 https://registry.npmjs.org/{pkg}/-/{pkg}-{ver}.tgz"
+            f"npm http fetch GET 200 https://registry.npmjs.org/"
+            f"{pkg}/-/{pkg}-{ver}.tgz"
         )
     npm_lines.append(f"added {pkg}@{ver}")
 
@@ -491,7 +644,10 @@ audit(
         "CHECK: Are 'npm http fetch' lines being stripped?",
         "CHECK: Are 'added package@version' lines being stripped?",
         "OBSERVATION: Only the final summary matters.",
-        "ISSUE: 'npm WARN deprecated' lines may be useful but should be counted, not listed.",
+        (
+            "ISSUE: 'npm WARN deprecated' lines may be useful"
+            " but should be counted, not listed."
+        ),
     ],
 )
 
@@ -531,22 +687,52 @@ files_with_errors = [
         "src/components/App.tsx",
         [
             (15, "Type 'string' is not assignable to type 'number'."),
-            (42, "Property 'onClick' does not exist on type 'IntrinsicAttributes'."),
-            (67, "Argument of type 'null' is not assignable to parameter of type 'string'."),
+            (
+                42,
+                (
+                    "Property 'onClick' does not exist on type 'Intri"
+                    "nsicAttributes'."
+                ),
+            ),
+            (
+                67,
+                (
+                    "Argument of type 'null' is not assignable to par"
+                    "ameter of type 'string'."
+                ),
+            ),
         ],
     ),
     (
         "src/utils/api.ts",
         [
-            (8, "Cannot find module '@/types' or its corresponding type declarations."),
-            (23, "Type 'Promise<void>' is not assignable to type 'Promise<Response>'."),
+            (
+                8,
+                (
+                    "Cannot find module '@/types' or its correspondin"
+                    "g type declarations."
+                ),
+            ),
+            (
+                23,
+                (
+                    "Type 'Promise<void>' is not assignable to type '"
+                    "Promise<Response>'."
+                ),
+            ),
         ],
     ),
     (
         "src/hooks/useAuth.ts",
         [
             (31, "Object is possibly 'undefined'."),
-            (45, "Type '{}' is missing the following properties from type 'User': id, name, email"),
+            (
+                45,
+                (
+                    "Type '{}' is missing the following properties fr"
+                    "om type 'User': id, name, email"
+                ),
+            ),
         ],
     ),
 ]
@@ -565,7 +751,10 @@ audit(
     tsc_output,
     [
         "OBSERVATION: tsc output is already compact and each error is unique.",
-        "QUESTION: Does the build processor handle tsc errors? It should match on 'tsc'.",
+        (
+            "QUESTION: Does the build processor handle tsc er"
+            "rors? It should match on 'tsc'."
+        ),
         "NOTE: tsc errors are each unique, so no dedup opportunity.",
     ],
 )
@@ -609,7 +798,8 @@ for pkg in packages:
     pip_lines.append(f"Collecting {pkg}>=1.0")
     pip_lines.append(f"  Downloading {pkg}-2.1.0-py3-none-any.whl (150 kB)")
     pip_lines.append(
-        "     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 150.0/150.0 kB 5.2 MB/s eta 0:00:00"
+        "     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 15"
+        "0.0/150.0 kB 5.2 MB/s eta 0:00:00"
     )
     pip_lines.append(f"Installing collected packages: {pkg}")
     pip_lines.append(f"Successfully installed {pkg}-2.1.0")
@@ -619,7 +809,11 @@ pip_lines.extend(
         "",
         f"Successfully installed {len(packages)} packages",
         "",
-        "WARNING: pip's dependency resolver does not currently take into account all the packages that are installed.",
+        (
+            "WARNING: pip's dependency resolver does not curr"
+            "ently take into account all the packages that ar"
+            "e installed."
+        ),
     ]
 )
 
@@ -654,7 +848,8 @@ file_count = 0
 for rule, msg in ruff_rules.items():
     count = {"E501": 45, "F401": 30, "W291": 20, "I001": 15}[rule]
     for i in range(count):
-        fpath = f"src/{'module' if i < count // 2 else 'utils'}/{rule.lower()}_{i:02d}.py"
+        directory = "module" if i < count // 2 else "utils"
+        fpath = f"src/{directory}/{rule.lower()}_{i:02d}.py"
         ruff_lines.append(f"{fpath}:{10 + i}:{5 + i % 10}: {rule} {msg}")
         file_count += 1
 
@@ -669,8 +864,14 @@ audit(
     [
         "CHECK: Are violations grouped by rule?",
         "CHECK: How many examples per rule are shown (lint_example_count=2)?",
-        "QUESTION: Is 2 examples enough? The AI needs to see the pattern to fix all occurrences.",
-        "SUGGESTION: For auto-fixable rules (E501, W291), 1 example suffices. For import issues, 2-3.",
+        (
+            "QUESTION: Is 2 examples enough? The AI needs to "
+            "see the pattern to fix all occurrences."
+        ),
+        (
+            "SUGGESTION: For auto-fixable rules (E501, W291),"
+            " 1 example suffices. For import issues, 2-3."
+        ),
     ],
 )
 
@@ -682,9 +883,10 @@ for i in range(55):
     rule = eslint_rules[i % 2]
     fpath = f"src/components/Component{i:02d}.tsx"
     eslint_lines.append(
-        f"{fpath}:{10 + i}:{1}: '{f'var{i}'}' is defined but never used. ({rule})"
+        f"{fpath}:{10 + i}:{1}: 'var{i}' is defined but never used. ({rule})"
         if rule == "no-unused-vars"
-        else f"{fpath}:{10 + i}:{1}: 'propName' is missing in props validation ({rule})"
+        else f"{fpath}:{10 + i}:{1}: 'propName' "
+        f"is missing in props validation ({rule})"
     )
 
 eslint_lines.extend(
@@ -702,27 +904,49 @@ audit(
     eslint_output,
     [
         "CHECK: Violations grouped by rule?",
-        "OBSERVATION: 55 violations with only 2 rules -- heavy grouping should apply.",
+        (
+            "OBSERVATION: 55 violations with only 2 rules -- "
+            "heavy grouping should apply."
+        ),
         "KEY: The file paths ARE useful for the AI to know WHICH files to fix.",
-        "SUGGESTION: Show rule + count + list of affected files (not full violation lines).",
+        (
+            "SUGGESTION: Show rule + count + list of affected"
+            " files (not full violation lines)."
+        ),
     ],
 )
 
 
 # 4c. mypy with 30 errors
 mypy_lines = []
-mypy_rules = ["arg-type", "return-value", "assignment", "name-defined", "attr-defined"]
+mypy_rules = [
+    "arg-type",
+    "return-value",
+    "assignment",
+    "name-defined",
+    "attr-defined",
+]
 for i in range(30):
     rule = mypy_rules[i % len(mypy_rules)]
     fpath = f"src/{'core' if i < 15 else 'api'}/module_{i:02d}.py"
     mypy_messages = {
-        "arg-type": 'Argument 1 to "process" has incompatible type "str"; expected "int"',
-        "return-value": 'Incompatible return value type (got "None", expected "str")',
-        "assignment": 'Incompatible types in assignment (expression has type "float", variable has type "int")',
+        "arg-type": (
+            'Argument 1 to "process" has incompatible type "s'
+            'tr"; expected "int"'
+        ),
+        "return-value": (
+            'Incompatible return value type (got "None", expected "str")'
+        ),
+        "assignment": (
+            "Incompatible types in assignment (expression has"
+            ' type "float", variable has type "int")'
+        ),
         "name-defined": f'Name "undefined_var_{i}" is not defined',
         "attr-defined": f'"MyClass" has no attribute "nonexistent_{i}"',
     }
-    mypy_lines.append(f"{fpath}:{10 + i * 3}: error: {mypy_messages[rule]}  [{rule}]")
+    mypy_lines.append(
+        f"{fpath}:{10 + i * 3}: error: {mypy_messages[rule]}  [{rule}]"
+    )
 
 mypy_lines.extend(
     [
@@ -738,9 +962,18 @@ audit(
     mypy_output,
     [
         "CHECK: Are mypy errors grouped by error code?",
-        "OBSERVATION: mypy errors are often unique (different messages per file).",
-        "ISSUE: For 'name-defined' and 'attr-defined', the specific name IS important.",
-        "SUGGESTION: Group by rule, but keep more examples for unique-message rules.",
+        (
+            "OBSERVATION: mypy errors are often unique (diffe"
+            "rent messages per file)."
+        ),
+        (
+            "ISSUE: For 'name-defined' and 'attr-defined', th"
+            "e specific name IS important."
+        ),
+        (
+            "SUGGESTION: Group by rule, but keep more example"
+            "s for unique-message rules."
+        ),
     ],
 )
 
@@ -754,7 +987,9 @@ ls_items = []
 for ext in ["py", "ts", "js", "md", "json", "yaml", "toml", "cfg", "txt", "sh"]:
     for i in range(12):
         ls_items.append(f"file_{i:02d}.{ext}")
-ls_items.extend(["node_modules/", "dist/", "build/", ".git/", "__pycache__/", "venv/"])
+ls_items.extend(
+    ["node_modules/", "dist/", "build/", ".git/", "__pycache__/", "venv/"]
+)
 
 ls_output = "\n".join(ls_items)
 
@@ -764,8 +999,14 @@ audit(
     ls_output,
     [
         "CHECK: Files grouped by extension?",
-        "OBSERVATION: ls output is already relatively compact (just filenames).",
-        "QUESTION: Is extension grouping the best strategy or should we just truncate?",
+        (
+            "OBSERVATION: ls output is already relatively com"
+            "pact (just filenames)."
+        ),
+        (
+            "QUESTION: Is extension grouping the best strateg"
+            "y or should we just truncate?"
+        ),
     ],
 )
 
@@ -798,8 +1039,14 @@ audit(
     find_output,
     [
         "CHECK: Results grouped by directory?",
-        "OBSERVATION: All files have same extension, so extension grouping is useless here.",
-        "SUGGESTION: For find with -name '*.ext', just show dir + count since ext is known.",
+        (
+            "OBSERVATION: All files have same extension, so e"
+            "xtension grouping is useless here."
+        ),
+        (
+            "SUGGESTION: For find with -name '*.ext', just sh"
+            "ow dir + count since ext is known."
+        ),
     ],
 )
 
@@ -808,7 +1055,13 @@ audit(
 tree_lines = ["."]
 indent_chars = ["├── ", "│   ", "└── ", "    "]
 dirs_tree = {
-    "src": ["engine.py", "config.py", "tracker.py", "platforms.py", "__init__.py"],
+    "src": [
+        "engine.py",
+        "config.py",
+        "tracker.py",
+        "platforms.py",
+        "__init__.py",
+    ],
     "src/processors": [
         "git.py",
         "test_output.py",
@@ -827,7 +1080,7 @@ dirs_tree = {
 for d, files in dirs_tree.items():
     depth = d.count("/")
     prefix = "│   " * depth
-    tree_lines.append(f"{prefix}├── {d.split('/')[-1]}/")
+    tree_lines.append(f"{prefix}├── {d.rsplit('/', maxsplit=1)[-1]}/")
     for j, f in enumerate(files):
         connector = "└── " if j == len(files) - 1 else "├── "
         tree_lines.append(f"{prefix}│   {connector}{f}")
@@ -846,8 +1099,14 @@ audit(
     tree_output,
     [
         "CHECK: Is tree output truncated in the middle?",
-        "OBSERVATION: tree output structure IS useful -- truncation loses the structure.",
-        "SUGGESTION: Could convert tree to a compact format like find's directory grouping.",
+        (
+            "OBSERVATION: tree output structure IS useful -- "
+            "truncation loses the structure."
+        ),
+        (
+            "SUGGESTION: Could convert tree to a compact form"
+            "at like find's directory grouping."
+        ),
     ],
 )
 
@@ -875,7 +1134,9 @@ for i in range(990):
         cat_lines.append(f'    """Class number {i // 50}."""')
         cat_lines.append("")
     elif i % 10 == 0:
-        cat_lines.append(f"    def method_{i}(self, arg: str) -> Optional[str]:")
+        cat_lines.append(
+            f"    def method_{i}(self, arg: str) -> Optional[str]:"
+        )
         cat_lines.append(f'        """Method {i} docstring."""')
         cat_lines.append("        if not arg:")
         cat_lines.append("            return None")
@@ -892,9 +1153,18 @@ audit(
     cat_output,
     [
         "CHECK: Is the file truncated with head/tail preservation?",
-        "OBSERVATION: For cat, the AI usually needs to see the WHOLE file or a specific section.",
-        "ISSUE: max_file_lines=300 with head=150, tail=50 drops 800 lines of context.",
-        "QUESTION: Is head=150, tail=50 a good split? Maybe 100/100 is better for symmetry.",
+        (
+            "OBSERVATION: For cat, the AI usually needs to se"
+            "e the WHOLE file or a specific section."
+        ),
+        (
+            "ISSUE: max_file_lines=300 with head=150, tail=50"
+            " drops 800 lines of context."
+        ),
+        (
+            "QUESTION: Is head=150, tail=50 a good split? May"
+            "be 100/100 is better for symmetry."
+        ),
     ],
 )
 
@@ -906,9 +1176,10 @@ audit(
 # 7a. Docker build with 20 steps
 docker_lines = ["Sending build context to Docker daemon  45.2MB", ""]
 for i in range(1, 21):
-    docker_lines.append(
-        f"Step {i}/20 : {'FROM python:3.12-slim' if i == 1 else f'RUN pip install package{i}'}"
+    instruction = (
+        "FROM python:3.12-slim" if i == 1 else f"RUN pip install package{i}"
     )
+    docker_lines.append(f"Step {i}/20 : {instruction}")
     docker_lines.append(f" ---> Running in abc{i:04d}def")
     if i < 20:
         docker_lines.append(f"Removing intermediate container abc{i:04d}def")
@@ -932,24 +1203,40 @@ audit(
     docker_output,
     [
         "CHECK: Does generic processor handle docker build?",
-        "OBSERVATION: 'Running in', 'Removing intermediate container', sha256 lines are noise.",
+        (
+            "OBSERVATION: 'Running in', 'Removing intermediat"
+            "e container', sha256 lines are noise."
+        ),
         "OBSERVATION: Download/install progress within steps is noise.",
-        "SUGGESTION: A dedicated docker processor could keep only Step lines and final result.",
+        (
+            "SUGGESTION: A dedicated docker processor could k"
+            "eep only Step lines and final result."
+        ),
     ],
 )
 
 
 # 7b. curl/wget download output
 curl_lines = [
-    "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current",
-    "                                 Dload  Upload   Total   Spent    Left  Speed",
+    (
+        "  % Total    % Received % Xferd  Average Speed  "
+        " Time    Time     Time  Current"
+    ),
+    (
+        "                                 Dload  Upload  "
+        " Total   Spent    Left  Speed"
+    ),
 ]
 for pct in range(0, 101, 1):
     curl_lines.append(
-        f"  {pct}  1024M    {pct}  {pct * 10}M    0     0  52.3M      0  0:00:19  0:00:{pct // 5:02d}  0:00:{19 - pct // 5:02d} 52.3M"
+        f"  {pct}  1024M    {pct}  {pct * 10}M    0     0  52.3M      0  "
+        f"0:00:19  0:00:{pct // 5:02d}  0:00:{19 - pct // 5:02d} 52.3M"
     )
 
-curl_lines.append("100 1024M  100 1024M    0     0  52.3M      0  0:00:19  0:00:19 --:--:-- 55.1M")
+curl_lines.append(
+    "100 1024M  100 1024M    0     0  52.3M      0  0"
+    ":00:19  0:00:19 --:--:-- 55.1M"
+)
 
 curl_output = "\n".join(curl_lines)
 
@@ -975,7 +1262,8 @@ for i in range(15):
             "",
             f"{'package-' + str(i)}  <2.{i}.0",
             f"Severity: {severity}",
-            f"{'Description of vulnerability ' + str(i)} - https://github.com/advisories/GHSA-xxxx-{i:04d}",
+            f"Description of vulnerability {i} - "
+            f"https://github.com/advisories/GHSA-xxxx-{i:04d}",
             "fix available via `npm audit fix --force`",
             f"Will install package-{i}@2.{i}.0, which is a breaking change",
             f"node_modules/package-{i}",
@@ -1003,7 +1291,10 @@ audit(
     [
         "CHECK: Does generic processor group the repeated audit blocks?",
         "OBSERVATION: Each vulnerability block has the SAME structure.",
-        "SUGGESTION: A dedicated processor could group by severity and show counts.",
+        (
+            "SUGGESTION: A dedicated processor could group by"
+            " severity and show counts."
+        ),
         "KEY: Vulnerability details ARE important for the AI to suggest fixes.",
     ],
 )
@@ -1052,8 +1343,13 @@ def _print_summary(results: list[Measurement]) -> None:
 
     total_orig = sum(r.original_tokens for r in results)
     total_comp = sum(r.compressed_tokens for r in results)
-    overall = (total_orig - total_comp) / total_orig * 100 if total_orig else 0.0
-    print(f"\n{len(results)} scenarios | {total_orig:,} -> {total_comp:,} tokens ({overall:.1f}%)")
+    overall = (
+        (total_orig - total_comp) / total_orig * 100 if total_orig else 0.0
+    )
+    print(
+        f"\n{len(results)} scenarios | {total_orig:,} -> {total_comp:,} "
+        f"tokens ({overall:.1f}%)"
+    )
 
     print("\nWeakest scenarios (lowest ratio first):")
     for r in sorted(results, key=lambda r: r.ratio)[:8]:
@@ -1068,7 +1364,10 @@ def _print_summary(results: list[Measurement]) -> None:
 
     fell_back = [r for r in results if r.processor == "generic"]
     if fell_back:
-        print(f"\n{len(fell_back)} scenario(s) fell back to the generic processor:")
+        print(
+            f"\n{len(fell_back)} scenario(s) "
+            "fell back to the generic processor:"
+        )
         for r in fell_back:
             print(f"    {r.label}")
 
@@ -1079,15 +1378,24 @@ def run() -> list[Measurement]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the fixture audit or emit its JSON measurements for automation."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--json", action="store_true", help="emit {label: ratio} instead of the report"
+        "--json",
+        action="store_true",
+        help="emit {label: ratio} instead of the report",
     )
     args = parser.parse_args(argv)
 
     results = run()
     if args.json:
-        print(json.dumps({r.label: round(r.ratio, 1) for r in results}, indent=2, sort_keys=True))
+        print(
+            json.dumps(
+                {r.label: round(r.ratio, 1) for r in results},
+                indent=2,
+                sort_keys=True,
+            )
+        )
         return 0
     _print_report(results)
     _print_summary(results)

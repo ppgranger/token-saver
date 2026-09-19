@@ -1,11 +1,25 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Ansible output processor: ansible-playbook, ansible."""
 
 import re
 
-from .base import Processor
+from src.processors import base
 
 
-class AnsibleProcessor(Processor):
+class AnsibleProcessor(base.Processor):
+    """Summarize Ansible tasks while retaining changes and failure recaps."""
+
     priority = 40
     handles_failure = True
     hook_patterns = [
@@ -14,12 +28,30 @@ class AnsibleProcessor(Processor):
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "ansible"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         return bool(re.search(r"\b(ansible-playbook|ansible)\b", command))
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 

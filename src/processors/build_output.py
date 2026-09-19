@@ -1,8 +1,20 @@
-"""Build output processor: npm, cargo, make, webpack, tsc, pip, docker, npm audit."""
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Summarize build-tool output, compiler failures, and package audits."""
 
 import re
 
-from .base import Processor
+from src.processors import base
 
 # Case-sensitive on purpose: 'error'/'Error'/'ERROR' as literal tokens.
 # IGNORECASE would fold this into the same trap CRITICAL_RE's global
@@ -26,10 +38,14 @@ def _is_error_line(stripped: str) -> bool:
     """True if ``stripped`` (already .strip()-ed) reports a build failure."""
     if _ZERO_ERRORS_RE.search(stripped):
         return False
-    return bool(_ERROR_RE.search(stripped) or _BUILD_FAILURE_RE.search(stripped))
+    return bool(
+        _ERROR_RE.search(stripped) or _BUILD_FAILURE_RE.search(stripped)
+    )
 
 
-class BuildOutputProcessor(Processor):
+class BuildOutputProcessor(base.Processor):
+    """Remove build progress while retaining errors and result summaries."""
+
     priority = 25
     handles_failure = True
     # The text-based checks above cover most failure shapes, but a build can
@@ -39,26 +55,52 @@ class BuildOutputProcessor(Processor):
     # that actually failed.
     wants_exit_code = True
     hook_patterns = [
-        r"^(npm\s+(run|install|build|ci|audit)|yarn\s+(run|install|build|add|audit)|pnpm\s+(run|install|build|add|audit))\b",
+        (
+            r"^(npm\s+(run|install|build|ci|audit)|yarn\s+(run|install|build|"
+            r"add|audit)|pnpm\s+(run|install|build|add|audit))\b"
+        ),
         r"^(make|cmake|ant)\b",
-        r"^(tsc|webpack|vite(\s+build)?|esbuild|rollup|next\s+build|nuxt\s+build)\b",
-        r"^(turbo\s+run|turbo\s+build|nx\s+(run|build)|bazel\s+build|sbt\b|mix\s+compile)\b",
+        (
+            r"^(tsc|webpack|vite(\s+build)?|esbuild|rollup|next\s+build|"
+            r"nuxt\s+build)\b"
+        ),
+        (
+            r"^(turbo\s+run|turbo\s+build|nx\s+(run|build)|bazel\s+build|sbt\b|"
+            r"mix\s+compile)\b"
+        ),
         r"^docker\s+(build|compose\s+build)\b",
         r"^bun\s+(install|build|run)\b",
-        r"^npx\s+(webpack|vite|esbuild|tsc|next\s+build|nuxt\s+build|turbo\s+run)\b",
+        (
+            r"^npx\s+(webpack|vite|esbuild|tsc|next\s+build|nuxt\s+build|"
+            r"turbo\s+run)\b"
+        ),
     ]
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "build"
 
     def can_handle(self, command: str) -> bool:
         # Exclude package listing commands (handled by PackageListProcessor)
-        if re.search(r"\b(pip3?\s+(list|freeze)|npm\s+(ls|list)|conda\s+list)\b", command):
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
+        if re.search(
+            r"\b(pip3?\s+(list|freeze)|npm\s+(ls|list)|conda\s+list)\b", command
+        ):
             return False
         # Exclude Python install (handled by PythonInstallProcessor)
         if re.search(
-            r"\b(pip3?\s+install|poetry\s+(install|update|add)|uv\s+(pip\s+install|sync))\b",
+            (
+                r"\b(pip3?\s+install|poetry\s+(install|update|add)|"
+                r"uv\s+(pip\s+install|sync))\b"
+            ),
             command,
         ):
             return False
@@ -67,22 +109,40 @@ class BuildOutputProcessor(Processor):
             return False
         return bool(
             re.search(
-                r"\b(npm\s+(run|install|ci|build|audit)|yarn\s+(run|install|build|add|audit)|pnpm\s+(run|install|build|add|audit)|"
+                r"\b(npm\s+(run|install|ci|build|audit)|yarn\s+(run|install|"
+                r"build|add|audit)|pnpm\s+(run|install|build|add|audit)|"
                 r"make\b|cmake\b|ant\b|"
-                r"tsc\b|webpack\b|vite(\s+build)?|esbuild\b|rollup\b|next\s+build|nuxt\s+build|"
+                r"tsc\b|webpack\b|vite(\s+build)?|esbuild\b|rollup\b|"
+                r"next\s+build|nuxt\s+build|"
                 r"docker\s+(build|compose\s+build)|"
-                r"turbo\s+(run|build)|nx\s+(run|build)|bazel\s+build|sbt\b|mix\s+compile|"
+                r"turbo\s+(run|build)|nx\s+(run|build)|bazel\s+build|sbt\b|"
+                r"mix\s+compile|"
                 r"bun\s+(install|build|run)|"
-                r"npx\s+(webpack|vite|esbuild|tsc|next\s+build|nuxt\s+build|turbo\s+run))\b",
+                r"npx\s+(webpack|vite|esbuild|tsc|next\s+build|nuxt\s+build|"
+                r"turbo\s+run))\b",
                 command,
             )
         )
 
-    def process(self, command: str, output: str, *, exit_code: int | None = None) -> str:
+    def process(
+        self, command: str, output: str, *, exit_code: int | None = None
+    ) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+            exit_code: Process exit status, or None when unavailable. A known
+                failure prevents a success summary based only on output text.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
-        # tsc --noEmit is a type-check (lint), not a build — group errors by code
+        # tsc --noEmit is a type-check (lint), not a build — group errors by
+        # code
         if re.search(r"\btsc\b.*--noEmit", command):
             return self._process_tsc_typecheck(output)
 
@@ -99,7 +159,8 @@ class BuildOutputProcessor(Processor):
         lines = output.splitlines()
 
         has_error = any(
-            _is_error_line(line) and not self._is_progress_line(line.strip()) for line in lines
+            _is_error_line(line) and not self._is_progress_line(line.strip())
+            for line in lines
         )
 
         # The text-based check above misses failure shapes with no
@@ -109,14 +170,23 @@ class BuildOutputProcessor(Processor):
         failed_by_exit_code = exit_code is not None and exit_code != 0
 
         if has_error or failed_by_exit_code:
-            return self._extract_errors(lines, forced=failed_by_exit_code and not has_error)
+            return self._extract_errors(
+                lines, forced=failed_by_exit_code and not has_error
+            )
         return self._summarize_success(lines)
 
     def _extract_errors(self, lines: list[str], forced: bool = False) -> str:
-        """Pull out error blocks. ``forced`` means the caller knows the run
-        failed (non-zero exit) even though no line matched the error
-        vocabulary — in that case fall back to the last lines rather than
-        risk returning an empty ``result`` that reads as success."""
+        """Extract error blocks or retain a known failure's final output.
+
+        Args:
+            lines: Build output split into lines without their line endings.
+            forced: Whether a nonzero exit proves failure even when the output
+                has no recognized error marker.
+
+        Returns:
+            Error blocks with context. If forced and no block is recognized,
+            the final output lines with an explicit failure notice.
+        """
         result = []
         in_error_block = False
         blank_count = 0
@@ -137,7 +207,8 @@ class BuildOutputProcessor(Processor):
             if in_error_block:
                 if not stripped:
                     blank_count += 1
-                    # For TypeScript/multi-file errors: tolerate single blank lines,
+                    # For TypeScript/multi-file errors: tolerate single blank
+                    # lines,
                     # end block only after 2+ consecutive blanks
                     if blank_count >= 2:
                         in_error_block = False
@@ -147,12 +218,16 @@ class BuildOutputProcessor(Processor):
                 blank_count = 0
                 # Context lines (stack trace, code pointers, etc.)
                 if (
-                    stripped.startswith(("at ", "-->", "  |", "   |", ">", "~~", "^^"))
+                    stripped.startswith(
+                        ("at ", "-->", "  |", "   |", ">", "~~", "^^")
+                    )
                     or re.match(r"^\d+\s*\|", stripped)
                     or re.match(r"^\s+\d+:\d+", stripped)
                 ):
                     result.append(line)
-                elif re.search(r"\b(warning|Warning|note|Note|help|Help)\b", stripped):
+                elif re.search(
+                    r"\b(warning|Warning|note|Note|help|Help)\b", stripped
+                ):
                     result.append(line)
                     in_error_block = False
                 else:
@@ -160,7 +235,9 @@ class BuildOutputProcessor(Processor):
                 continue
 
             # Keep summary lines
-            if re.search(r"\d+\s+(errors?|warnings?|problems?)", stripped.lower()):
+            if re.search(
+                r"\d+\s+(errors?|warnings?|problems?)", stripped.lower()
+            ):
                 result.append(line)
 
         if not result:
@@ -170,11 +247,15 @@ class BuildOutputProcessor(Processor):
                 # the only evidence of failure.  Say so explicitly rather
                 # than silently falling back to the raw tail, which could
                 # otherwise still read as an unremarkable, successful build.
-                return f"[token-saver] command exited non-zero; no error markers recognized\n{tail}"
+                return (
+                    f"[token-saver] command exited non-zero; no error markers "
+                    f"recognized\n{tail}"
+                )
             return tail
         return "\n".join(result)
 
     def _summarize_success(self, lines: list[str]) -> str:
+        """Retain build result details and summarize routine progress."""
         result = []
         warning_count = 0
         warning_samples: list[str] = []
@@ -260,10 +341,16 @@ class BuildOutputProcessor(Processor):
                 result.append(stripped)
                 continue
 
-            # Skip noise: intermediate containers, sha256 hashes, RUN output details
-            if re.match(r"^(Running in |Removing intermediate| ---> |sha256:)", stripped):
+            # Skip noise: intermediate containers, sha256 hashes, RUN output
+            # details
+            if re.match(
+                r"^(Running in |Removing intermediate| ---> |sha256:)", stripped
+            ):
                 continue
-            if re.match(r"^(Sending build context|Downloading|Extracting|Pulling)", stripped):
+            if re.match(
+                r"^(Sending build context|Downloading|Extracting|Pulling)",
+                stripped,
+            ):
                 continue
             if re.search(r"\d+(\.\d+)?%", stripped):
                 continue
@@ -284,7 +371,9 @@ class BuildOutputProcessor(Processor):
             stripped = line.strip()
 
             # Severity detection
-            sev_match = re.search(r"\b(critical|high|moderate|low)\b", stripped, re.IGNORECASE)
+            sev_match = re.search(
+                r"\b(critical|high|moderate|low)\b", stripped, re.IGNORECASE
+            )
 
             # Package name in vulnerability blocks
             pkg_match = re.match(r"^(\S+)\s+[<>=]", stripped)
@@ -303,11 +392,17 @@ class BuildOutputProcessor(Processor):
                         packages[sev].append(current_package)
 
             # Keep summary/total lines
-            if re.search(r"\d+\s+(vulnerabilit|package)", stripped, re.IGNORECASE):
+            if re.search(
+                r"\d+\s+(vulnerabilit|package)", stripped, re.IGNORECASE
+            ):
                 summary_lines.append(stripped)
 
             # Keep fix recommendation lines
-            if re.search(r"(npm audit fix|run .* to fix|breaking change)", stripped, re.IGNORECASE):
+            if re.search(
+                r"(npm audit fix|run .* to fix|breaking change)",
+                stripped,
+                re.IGNORECASE,
+            ):
                 summary_lines.append(stripped)
 
         if not severities:
@@ -343,10 +438,14 @@ class BuildOutputProcessor(Processor):
         for line in lines:
             stripped = line.strip()
             # TS error format: src/file.ts(10,5): error TS2322: message
-            m = re.match(r"^(.+?)\(\d+,\d+\):\s+error\s+(TS\d+):\s+(.+)$", stripped)
+            m = re.match(
+                r"^(.+?)\(\d+,\d+\):\s+error\s+(TS\d+):\s+(.+)$", stripped
+            )
             if not m:
                 # Also match: src/file.ts:10:5 - error TS2322: message
-                m = re.match(r"^(.+?):\d+:\d+\s+-\s+error\s+(TS\d+):\s+(.+)$", stripped)
+                m = re.match(
+                    r"^(.+?):\d+:\d+\s+-\s+error\s+(TS\d+):\s+(.+)$", stripped
+                )
             if m:
                 code = m.group(2)
                 by_code.setdefault(code, []).append(stripped)
@@ -360,7 +459,9 @@ class BuildOutputProcessor(Processor):
 
         total = sum(len(v) for v in by_code.values())
         result = [f"{total} type errors across {len(by_code)} codes:"]
-        for code, violations in sorted(by_code.items(), key=lambda x: -len(x[1])):
+        for code, violations in sorted(
+            by_code.items(), key=lambda x: -len(x[1])
+        ):
             count = len(violations)
             if count > 3:
                 result.append(f"  {code}: {count} occurrences")
@@ -376,10 +477,14 @@ class BuildOutputProcessor(Processor):
         return "\n".join(result)
 
     def _is_progress_line(self, line: str) -> bool:
+        """Return whether the line is routine build progress or decoration."""
         if not line:
             return False
         patterns = [
-            r"^\s*(Downloading|Installing|Fetching|Resolving|Unpacking|Linking|Extracting)",
+            (
+                r"^\s*(Downloading|Installing|Fetching|Resolving|Unpacking|"
+                r"Linking|Extracting)"
+            ),
             r"^\s*added \d+ packages?",
             r"^\s*\d+ packages? are looking",
             r"^\s*(GET|fetch)\s+http",
@@ -392,8 +497,11 @@ class BuildOutputProcessor(Processor):
             r"^\s*Using\s+(cached|version)\b",
             r"^\s*Collecting\s+\S+",  # pip
             r"^\s*━",  # pip progress bar
-            r"^\s*\u27a4?\s*YN\d+:.*\b(Resolution|Fetch|Link)\s+step\b",  # yarn berry v2+
-            r"^\s*Progress:\s+resolved\s+\d+",  # pnpm resolved/reused/downloaded stats
-            r"^\s*[Pp]ackages?\s+(are|is)\s+hard linked",  # pnpm content-addressable store
+            # Yarn Berry v2+.
+            r"^\s*\u27a4?\s*YN\d+:.*\b(Resolution|Fetch|Link)\s+step\b",
+            # pnpm resolved/reused/downloaded statistics.
+            r"^\s*Progress:\s+resolved\s+\d+",
+            # pnpm content-addressable store.
+            r"^\s*[Pp]ackages?\s+(are|is)\s+hard linked",
         ]
         return any(re.match(p, line) for p in patterns)

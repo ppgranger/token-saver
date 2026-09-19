@@ -1,3 +1,15 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Realistic *failing* command output, one case per processor.
 
 These exist to enforce the project's central promise — "never lose critical
@@ -29,7 +41,9 @@ def _pad(line_template: str, count: int, start: int = 0) -> list[str]:
     return [line_template.format(i=i) for i in range(start, start + count)]
 
 
-def _build(head: list[str], filler: list[str], reason: list[str], tail: list[str]) -> str:
+def _build(
+    head: list[str], filler: list[str], reason: list[str], tail: list[str]
+) -> str:
     """Assemble an output with the failure reason buried in the middle."""
     return "\n".join([*head, *filler, *reason, *filler, *tail])
 
@@ -41,7 +55,12 @@ CASES: list[FailureCase] = [
         _build(
             ["Package    Version", "---------- -------"],
             _pad("pkg{i}      1.0.{i}", 40),
-            ["ERROR: pip's dependency resolver does not currently take into account"],
+            [
+                (
+                    "ERROR: pip's dependency resolver does not curren"
+                    "tly take into account"
+                )
+            ],
             ["urllib3    2.2.1"],
         ),
         ("ERROR: pip's dependency resolver",),
@@ -63,7 +82,10 @@ CASES: list[FailureCase] = [
         _build(
             ["[build/build] 🚀  Start image=catthehacker/ubuntu:act-latest"],
             _pad("[build/build]   ✅  Success - step {i}", 30),
-            ["[build/build]   ❌  Failure - Main Run tests", "Error: exit with `FAILURE`: 1"],
+            [
+                "[build/build]   ❌  Failure - Main Run tests",
+                "Error: exit with `FAILURE`: 1",
+            ],
             ["[build/build] 🏁  Job failed"],
         ),
         ("Failure - Main Run tests", "exit with `FAILURE`"),
@@ -74,26 +96,62 @@ CASES: list[FailureCase] = [
         _build(
             ["Auto-merging src/app.py"],
             _pad("Auto-merging src/mod{i}.py", 40),
-            ["CONFLICT (content): Merge conflict in src/core.py", "error: could not apply 3f2a1b9"],
-            ["Automatic merge failed; fix conflicts and then commit the result."],
+            [
+                "CONFLICT (content): Merge conflict in src/core.py",
+                "error: could not apply 3f2a1b9",
+            ],
+            [
+                (
+                    "Automatic merge failed; fix conflicts and then c"
+                    "ommit the result."
+                )
+            ],
         ),
-        ("CONFLICT (content): Merge conflict in src/core.py", "error: could not apply"),
+        (
+            "CONFLICT (content): Merge conflict in src/core.py",
+            "error: could not apply",
+        ),
     ),
     FailureCase(
         "test",
         "pytest tests/",
         _build(
-            ["============================= test session starts ============================="],
-            _pad("tests/test_mod{i}.py .................                             [ {i}%]", 40),
             [
-                "================================== FAILURES ===================================",
-                "_______________________________ test_migration ________________________________",
+                (
+                    "============================= test session start"
+                    "s ============================="
+                )
+            ],
+            _pad(
+                (
+                    "tests/test_mod{i}.py .................          "
+                    "                   [ {i}%]"
+                ),
+                40,
+            ),
+            [
+                (
+                    "================================== FAILURES ===="
+                    "==============================="
+                ),
+                (
+                    "_______________________________ test_migration _"
+                    "_______________________________"
+                ),
                 "E       MigrationError: migration failed at step 3",
                 "tests/test_db.py:87: MigrationError",
-                "=========================== short test summary info ===========================",
+                (
+                    "=========================== short test summary i"
+                    "nfo ==========================="
+                ),
                 "FAILED tests/test_db.py::test_migration - MigrationError",
             ],
-            ["=========================== 1 failed, 402 passed ==========================="],
+            [
+                (
+                    "=========================== 1 failed, 402 passed"
+                    " ==========================="
+                )
+            ],
         ),
         ("MigrationError: migration failed at step 3",),
     ),
@@ -110,7 +168,12 @@ CASES: list[FailureCase] = [
                 '42 |     let x: u32 = "hello";',
                 "   |            ---   ^^^^^^^ expected `u32`, found `&str`",
             ],
-            ['error: could not compile `myapp` (bin "myapp") due to 1 previous error'],
+            [
+                (
+                    'error: could not compile `myapp` (bin "myapp") d'
+                    "ue to 1 previous error"
+                )
+            ],
         ),
         ("error[E0308]: mismatched types", "could not compile `myapp`"),
     ),
@@ -132,7 +195,10 @@ CASES: list[FailureCase] = [
             ["Collecting flask"],
             _pad("Collecting dep{i}", 40),
             [
-                "ERROR: Could not find a version that satisfies the requirement torch==9.9.9",
+                (
+                    "ERROR: Could not find a version that satisfies t"
+                    "he requirement torch==9.9.9"
+                ),
                 "ERROR: No matching distribution found for torch==9.9.9",
             ],
             ["[notice] A new release of pip is available"],
@@ -156,7 +222,8 @@ CASES: list[FailureCase] = [
     FailureCase(
         # jest's failure marker is a bare "FAIL" — no literal "error" anywhere
         # in a failing run.  Regression for the false "Build succeeded."
-        # this processor used to print on it (see build_output._BUILD_FAILURE_RE).
+        # this processor used to print on it (see
+        # build_output._BUILD_FAILURE_RE).
         "build",
         "npm run test",
         _build(
@@ -192,7 +259,9 @@ CASES: list[FailureCase] = [
         "eslint src/",
         _build(
             ["/src/a.js"],
-            _pad("  {i}:1  warning  Unexpected console statement  no-console", 40),
+            _pad(
+                "  {i}:1  warning  Unexpected console statement  no-console", 40
+            ),
             ["  87:3  error  'fetchUser' is not defined  no-undef"],
             ["✖ 41 problems (1 error, 40 warnings)"],
         ),
@@ -244,7 +313,12 @@ CASES: list[FailureCase] = [
         _build(
             ["latest: Pulling from acme/app"],
             _pad("a1b2c3d{i}: Pulling fs layer", 40),
-            ["error pulling image configuration: unauthorized: authentication required"],
+            [
+                (
+                    "error pulling image configuration: unauthorized:"
+                    " authentication required"
+                )
+            ],
             ["ERROR: failed to pull image acme/app:latest"],
         ),
         ("unauthorized: authentication required",),
@@ -267,7 +341,12 @@ CASES: list[FailureCase] = [
         "terraform",
         "terraform apply",
         _build(
-            ["Terraform used the selected providers to generate the following execution plan."],
+            [
+                (
+                    "Terraform used the selected providers to generat"
+                    "e the following execution plan."
+                )
+            ],
             _pad("  # aws_instance.node{i} will be created", 40),
             [
                 "Error: creating EC2 Instance: InvalidParameterValue: "
@@ -342,8 +421,10 @@ CASES: list[FailureCase] = [
             ["2024-01-01 10:00:00  1024 file0.txt"],
             _pad("2024-01-01 10:00:00  10{i} file{i}.txt", 40),
             [
-                "An error occurred (AccessDenied) when calling the ListObjectsV2 operation: "
-                "Access Denied"
+                (
+                    "An error occurred (AccessDenied) when calling th"
+                    "e ListObjectsV2 operation: Access Denied"
+                )
             ],
             ["2024-06-01 10:00:00  2048 last.txt"],
         ),
@@ -353,13 +434,23 @@ CASES: list[FailureCase] = [
         "ansible",
         "ansible-playbook site.yml",
         _build(
-            ["PLAY [webservers] **************************************************"],
+            [
+                (
+                    "PLAY [webservers] ******************************"
+                    "********************"
+                )
+            ],
             _pad("ok: [host{i}]", 40),
             [
                 'fatal: [web03]: FAILED! => {"changed": false, '
                 '"msg": "Unable to start service nginx: job failed"}'
             ],
-            ["PLAY RECAP *********************************************************"],
+            [
+                (
+                    "PLAY RECAP *************************************"
+                    "********************"
+                )
+            ],
         ),
         ("Unable to start service nginx",),
     ),
@@ -369,7 +460,12 @@ CASES: list[FailureCase] = [
         _build(
             ['Release "api" has been upgraded. Happy Helming!'],
             _pad("NOTES line {i}", 40),
-            ['Error: UPGRADE FAILED: cannot patch "api" with kind Deployment: field is immutable'],
+            [
+                (
+                    'Error: UPGRADE FAILED: cannot patch "api" with k'
+                    "ind Deployment: field is immutable"
+                )
+            ],
             ["REVISION: 12"],
         ),
         ("UPGRADE FAILED",),
@@ -380,8 +476,18 @@ CASES: list[FailureCase] = [
         _build(
             ["-- Journal begins at Mon 2024-01-01 --"],
             _pad("Jan 01 10:00:{i} host api[123]: request handled", 40),
-            ["Jan 01 10:05:00 host api[123]: FATAL: could not bind to port 8080"],
-            ["Jan 01 10:06:00 host systemd[1]: api.service: Main process exited"],
+            [
+                (
+                    "Jan 01 10:05:00 host api[123]: FATAL: could not "
+                    "bind to port 8080"
+                )
+            ],
+            [
+                (
+                    "Jan 01 10:06:00 host systemd[1]: api.service: Ma"
+                    "in process exited"
+                )
+            ],
         ),
         ("could not bind to port 8080",),
     ),
@@ -413,7 +519,12 @@ CASES: list[FailureCase] = [
         _build(
             ['{"level":"info","msg":"started"}'],
             _pad('{{"level":"info","msg":"handled request {i}"}}', 40),
-            ['{"level":"error","msg":"payment gateway unreachable","code":502}'],
+            [
+                (
+                    '{"level":"error","msg":"payment gateway unreacha'
+                    'ble","code":502}'
+                )
+            ],
             ['{"level":"info","msg":"shutting down"}'],
         ),
         ("payment gateway unreachable",),
@@ -424,7 +535,10 @@ CASES: list[FailureCase] = [
         _build(
             ["Previewing update (dev)"],
             _pad("    + aws:s3:Bucket b{i} created", 40),
-            ["error: 1 error occurred:", "    * creating bucket: BucketAlreadyExists"],
+            [
+                "error: 1 error occurred:",
+                "    * creating bucket: BucketAlreadyExists",
+            ],
             ["Resources: 40 created"],
         ),
         ("BucketAlreadyExists",),
@@ -447,7 +561,10 @@ CASES: list[FailureCase] = [
             ["these 3 derivations will be built:"],
             _pad("  /nix/store/hash{i}-dep{i}.drv", 40),
             [
-                "error: builder for '/nix/store/xyz-app.drv' failed with exit code 1",
+                (
+                    "error: builder for '/nix/store/xyz-app.drv' fail"
+                    "ed with exit code 1"
+                ),
                 "       last 1 log lines: > gcc: fatal error: no input files",
             ],
             ["error: build of '/nix/store/xyz-app.drv' failed"],
@@ -482,7 +599,12 @@ CASES: list[FailureCase] = [
         _build(
             ["2024-01-01 10:00:00 INFO starting"],
             _pad("2024-01-01 10:00:{i} INFO request handled", 40),
-            ["2024-01-01 10:05:00 ERROR unhandled exception: NullPointerException in Worker"],
+            [
+                (
+                    "2024-01-01 10:05:00 ERROR unhandled exception: N"
+                    "ullPointerException in Worker"
+                )
+            ],
             ["2024-01-01 10:06:00 INFO stopped"],
         ),
         ("NullPointerException",),

@@ -1,11 +1,23 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """GitHub CLI output processor: gh pr, gh issue, gh run, gh repo."""
 
 import json
 import re
 
-from .. import config
-from .base import Processor
-from .utils import compress_diff
+from src import config
+from src.processors import base
+from src.processors import utils
 
 _GH_CMD_RE = re.compile(
     r"\bgh\s+(?:(pr|issue|run|repo|release|workflow)\s+"
@@ -27,22 +39,37 @@ _STATUS_INDICATOR_RE = re.compile(
 _PENDING_RE = re.compile(r"\bpending\b|\bqueued\b|\bin_progress\b", re.I)
 
 
-class GhProcessor(Processor):
+class GhProcessor(base.Processor):
+    """Summarize GitHub CLI lists, pull requests, issues, and API output."""
+
     priority = 37
     hook_patterns = [
-        r"^gh\s+(pr|issue|run|repo|release|workflow)\s+(list|view|status|diff|checks|ls)\b",
+        (
+            r"^gh\s+(pr|issue|run|repo|release|workflow)\s+(list|view|status|"
+            r"diff|checks|ls)\b"
+        ),
         r"^gh\s+api\s+\S+",
     ]
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "gh"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         return bool(_GH_CMD_RE.search(command))
 
     def _get_subcmd(self, command: str) -> tuple[str, str] | None:
         # Detect gh api first
+        """Extract the command family and subcommand used for output routing."""
         if re.search(r"\bgh\s+api\s+", command):
             return ("api", "api")
         m = _GH_CMD_RE.search(command)
@@ -51,6 +78,15 @@ class GhProcessor(Processor):
         return None
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
@@ -101,6 +137,7 @@ class GhProcessor(Processor):
 
     def _process_view(self, output: str, resource: str) -> str:
         """Compress gh view output: keep key fields, compress body."""
+        del resource  # Pull requests and issues share the same output layout.
         lines = output.splitlines()
         if len(lines) <= 30:
             return output
@@ -142,6 +179,7 @@ class GhProcessor(Processor):
 
     def _process_status(self, output: str, resource: str) -> str:
         """Compress gh status: keep failing/action-needed items."""
+        del resource  # Status markers apply to both issues and pull requests.
         lines = output.splitlines()
         if len(lines) <= 20:
             return output
@@ -169,7 +207,7 @@ class GhProcessor(Processor):
 
         max_hunk = config.get("max_diff_hunk_lines")
         max_context = config.get("max_diff_context_lines")
-        result = compress_diff(lines, max_hunk, max_context)
+        result = utils.compress_diff(lines, max_hunk, max_context)
         return "\n".join(result)
 
     def _process_api(self, output: str) -> str:
@@ -209,7 +247,9 @@ class GhProcessor(Processor):
             if len(val) == 0:
                 return "[]"
             if len(val) <= 3:
-                inner = [self._summarize_json(v, depth + 1, max_depth) for v in val]
+                inner = [
+                    self._summarize_json(v, depth + 1, max_depth) for v in val
+                ]
                 return "[" + ", ".join(inner) + "]"
             first = self._summarize_json(val[0], depth + 1, max_depth)
             return f"[{first}, ... ({len(val)} items total)]"
@@ -238,7 +278,9 @@ class GhProcessor(Processor):
             if re.search(r"\bpass\b", stripped, re.I) or "\u2713" in stripped:
                 passed += 1
             elif (
-                re.search(r"\bfail\b", stripped, re.I) or "\u2717" in stripped or "\xd7" in stripped
+                re.search(r"\bfail\b", stripped, re.I)
+                or "\u2717" in stripped
+                or "\xd7" in stripped
             ):
                 failed.append(stripped)
             elif _PENDING_RE.search(stripped) or "\u25cb" in stripped:

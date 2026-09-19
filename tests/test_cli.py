@@ -1,13 +1,28 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Tests for the token-saver CLI subcommands."""
 
+import argparse
 import json
 import os
+import pathlib
+import shutil
 import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src import __version__
+import src
 
 IS_WINDOWS = os.name == "nt"
 
@@ -15,7 +30,7 @@ REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _run_cli(*args, stdin=None):
-    """Run src/cli.py as a subprocess and return (returncode, stdout, stderr)."""
+    """Run the CLI and return its status, stdout, and stderr."""
     result = subprocess.run(  # noqa: S603
         [sys.executable, "-m", "src.cli", *args],
         capture_output=True,
@@ -32,7 +47,7 @@ class TestVersionCommand:
     def test_prints_version(self):
         rc, stdout, _ = _run_cli("version")
         assert rc == 0
-        assert f"token-saver v{__version__}" in stdout
+        assert f"token-saver v{src.__version__}" in stdout
 
     def test_version_format(self):
         rc, stdout, _ = _run_cli("version")
@@ -48,17 +63,39 @@ class TestVersionCommand:
 
 
 class TestStatsCommand:
-    def test_stats_human_readable(self):
+    def test_stats_human_readable(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TOKEN_SAVER_DB_DIR", str(tmp_path))
         rc, stdout, _ = _run_cli("stats")
         assert rc == 0
         assert "Token-Saver Savings" in stdout
 
-    def test_stats_json(self):
+    def test_stats_json(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TOKEN_SAVER_DB_DIR", str(tmp_path))
         rc, stdout, _ = _run_cli("stats", "--json")
         assert rc == 0
         data = json.loads(stdout)
         assert "session" in data
         assert "lifetime" in data
+
+    def test_stats_callback_preserves_host_arguments_during_render(
+        self, monkeypatch
+    ):
+        from src import cli
+        from src import stats
+
+        original_argv = ["host-app", "--unrelated-option"]
+        monkeypatch.setattr(sys, "argv", original_argv)
+        received = []
+
+        def render(arguments):
+            assert sys.argv is original_argv
+            received.append(arguments)
+
+        monkeypatch.setattr(stats, "main", render)
+        cli.cmd_stats(argparse.Namespace(json=True))
+        cli.cmd_stats(argparse.Namespace(json=False))
+        assert received == [["--json"], []]
+        assert original_argv == ["host-app", "--unrelated-option"]
 
 
 class TestNoCommand:
@@ -76,7 +113,9 @@ class TestBenchmarkCommand:
         assert "git" in stdout
 
     def test_benchmark_dry_run_json(self):
-        rc, stdout, _ = _run_cli("benchmark", "git diff HEAD", "--dry-run", "--format", "json")
+        rc, stdout, _ = _run_cli(
+            "benchmark", "git diff HEAD", "--dry-run", "--format", "json"
+        )
         assert rc == 0
         data = json.loads(stdout)
         assert data["dry_run"] is True
@@ -100,14 +139,20 @@ class TestBenchmarkCommand:
         assert "savings_percent" in data
 
     def test_benchmark_show_removed_text(self):
-        rc, stdout, _ = _run_cli("benchmark", "git log --oneline -50", "--show-removed")
+        rc, stdout, _ = _run_cli(
+            "benchmark", "git log --oneline -50", "--show-removed"
+        )
         assert rc == 0
         assert "Removed breakdown:" in stdout
         assert "Lines:" in stdout
 
     def test_benchmark_show_removed_json(self):
         rc, stdout, _ = _run_cli(
-            "benchmark", "git log --oneline -50", "--show-removed", "--format", "json"
+            "benchmark",
+            "git log --oneline -50",
+            "--show-removed",
+            "--format",
+            "json",
         )
         assert rc == 0
         data = json.loads(stdout)
@@ -122,9 +167,16 @@ class TestBenchmarkCommand:
         assert "removed" not in data
 
     def test_benchmark_stdin_compresses_piped_output(self):
-        piped = "\n".join(f"{i:07x} commit message {i}" for i in range(50)) + "\n"
+        piped = (
+            "\n".join(f"{i:07x} commit message {i}" for i in range(50)) + "\n"
+        )
         rc, stdout, _ = _run_cli(
-            "benchmark", "git log --oneline", "--stdin", "--format", "json", stdin=piped
+            "benchmark",
+            "git log --oneline",
+            "--stdin",
+            "--format",
+            "json",
+            stdin=piped,
         )
         assert rc == 0
         data = json.loads(stdout)
@@ -149,11 +201,11 @@ class TestBenchmarkCommand:
 
 class TestDiffstat:
     def test_summarize_removed_lines(self):
-        from src.diffstat import summarize
+        import src.diffstat
 
         original = "a\nb\nc\nd\ne\n"
         compressed = "a\ne\n"
-        s = summarize(original, compressed)
+        s = src.diffstat.summarize(original, compressed)
         assert s["original_lines"] == 5
         assert s["compressed_lines"] == 2
         assert s["lines_removed"] == 3
@@ -161,26 +213,28 @@ class TestDiffstat:
         assert "b" in s["removed_samples"]
 
     def test_summarize_added_summary_line(self):
-        from src.diffstat import summarize
+        import src.diffstat
 
         original = "x\ny\nz\n"
         compressed = "x\n... (2 more)\n"
-        s = summarize(original, compressed)
+        s = src.diffstat.summarize(original, compressed)
         assert s["lines_added"] >= 1
         assert any("more" in a for a in s["added_samples"])
 
     def test_summarize_no_change(self):
-        from src.diffstat import summarize
+        import src.diffstat
 
-        s = summarize("same\n", "same\n")
+        s = src.diffstat.summarize("same\n", "same\n")
         assert s["lines_removed"] == 0
         assert s["lines_added"] == 0
         assert s["chars_removed"] == 0
 
     def test_format_summary_contains_sections(self):
-        from src.diffstat import format_summary, summarize
+        import src.diffstat
 
-        text = format_summary(summarize("a\nb\nc\n", "a\n"))
+        text = src.diffstat.format_summary(
+            src.diffstat.summarize("a\nb\nc\n", "a\n")
+        )
         assert "Removed breakdown:" in text
         assert "Lines:" in text
         assert "Chars:" in text
@@ -188,7 +242,7 @@ class TestDiffstat:
 
 class TestMarketplaceDetection:
     def test_cache_path_is_marketplace_managed(self):
-        from src.cli import _is_marketplace_managed
+        import src.cli
 
         path = os.path.join(
             os.path.expanduser("~"),
@@ -198,19 +252,27 @@ class TestMarketplaceDetection:
             "token-saver-marketplace",
             "token-saver",
         )
-        assert _is_marketplace_managed(path) is True
+        assert src.cli._is_marketplace_managed(path) is True
 
     def test_regular_repo_not_marketplace_managed(self):
-        from src.cli import _is_marketplace_managed
+        import src.cli
 
-        assert _is_marketplace_managed("/Users/someone/Desktop/token-saver") is False
+        assert (
+            src.cli._is_marketplace_managed(
+                "/Users/someone/Desktop/token-saver"
+            )
+            is False
+        )
 
     def test_old_plugin_dir_not_marketplace_managed(self):
-        from src.cli import _is_marketplace_managed
+        import src.cli
 
-        # Pre-marketplace layout (~/.claude/plugins/token-saver) is self-updatable.
-        path = os.path.join(os.path.expanduser("~"), ".claude", "plugins", "token-saver")
-        assert _is_marketplace_managed(path) is False
+        # Pre-marketplace layout (~/.claude/plugins/token-saver) is
+        # self-updatable.
+        path = os.path.join(
+            os.path.expanduser("~"), ".claude", "plugins", "token-saver"
+        )
+        assert src.cli._is_marketplace_managed(path) is False
 
 
 class TestBinScript:
@@ -246,4 +308,54 @@ class TestBinScript:
             check=False,
         )
         assert result.returncode == 0, result.stderr
-        assert f"token-saver v{__version__}" in result.stdout
+        assert f"token-saver v{src.__version__}" in result.stdout
+
+
+def test_explain_and_core_work_without_host_adapter_package(tmp_path):
+    runtime = tmp_path / "runtime"
+    shutil.copytree(
+        pathlib.Path(REPO_DIR) / "src",
+        runtime / "src",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    environment = dict(os.environ)
+    for name in tuple(environment):
+        if name.startswith("TOKEN_SAVER_"):
+            environment.pop(name)
+    environment.update(
+        HOME=str(profile),
+        USERPROFILE=str(profile),
+        APPDATA=str(profile),
+        TOKEN_SAVER_DB_DIR=str(profile),
+    )
+    program = """
+import argparse
+import pathlib
+import sys
+sys.path.insert(0, sys.argv[1])
+from src import cli
+from src import core
+loaded_root = pathlib.Path(cli.__file__).resolve().parent.parent
+assert loaded_root == pathlib.Path(sys.argv[1]).resolve()
+assert core.should_compress("git status")
+assert not core.should_compress("sudo git status")
+cli.cmd_explain(argparse.Namespace(command_str="git status", format="json"))
+assert "scripts.hook_pretool" not in sys.modules
+"""
+    result = subprocess.run(  # noqa: S603 — fixed isolated runtime probe.
+        [sys.executable, "-I", "-c", program, str(runtime)],
+        cwd=profile,
+        env=environment,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    decision = json.loads(result.stdout)
+    assert decision["compressible"] is True
+    assert decision["processor"] == "git"
+    assert list(profile.iterdir()) == []

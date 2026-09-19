@@ -1,10 +1,24 @@
-"""Python install processor: pip install, poetry install/update/add, uv pip install/sync."""
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Summarize pip, Poetry, and uv installation output."""
 
 import re
 
-from .base import PYTHON_CMD, Processor
+from src.processors import base
 
-_PIP_INSTALL_RE = re.compile(rf"\bpip3?\s+install\b|{PYTHON_CMD}\s+-m\s+pip\s+install\b")
+_PIP_INSTALL_RE = re.compile(
+    rf"\bpip3?\s+install\b|{base.PYTHON_CMD}\s+-m\s+pip\s+install\b"
+)
 _POETRY_RE = re.compile(r"\bpoetry\s+(install|update|add)\b")
 _UV_RE = re.compile(r"\buv\s+(pip\s+install|sync)\b")
 
@@ -14,10 +28,16 @@ _PROGRESS_RE = re.compile(r"^\s*━|^\s*\[.*\]\s+\d+%|^\s*\d+\.\d+\s*(kB|MB|GB)"
 _ALREADY_RE = re.compile(r"^\s*Requirement already satisfied")
 _INSTALLING_RE = re.compile(r"^\s*Installing collected packages:")
 _SUCCESS_RE = re.compile(r"^\s*Successfully installed\s+(.+)")
-_RESOLVING_RE = re.compile(r"^\s*(Resolving dependencies|Updating dependencies)")
-_POETRY_INSTALL_RE = re.compile(r"^\s*(Installing|Updating|Removing)\s+(\S+)\s+\((.+?)\)")
+_RESOLVING_RE = re.compile(
+    r"^\s*(Resolving dependencies|Updating dependencies)"
+)
+_POETRY_INSTALL_RE = re.compile(
+    r"^\s*(Installing|Updating|Removing)\s+(\S+)\s+\((.+?)\)"
+)
 _UV_RESOLVED_RE = re.compile(r"^\s*Resolved\s+(\d+)\s+packages?")
-_UV_INSTALLED_RE = re.compile(r"^\s*(Installed|Uninstalled)\s+(\d+)\s+packages?")
+_UV_INSTALLED_RE = re.compile(
+    r"^\s*(Installed|Uninstalled)\s+(\d+)\s+packages?"
+)
 _ERROR_RE = re.compile(
     r"\b(error|Error|ERROR|exception|Exception|"
     r"Could not|cannot|Cannot|FAILED|failed|"
@@ -26,26 +46,51 @@ _ERROR_RE = re.compile(
 _WARNING_RE = re.compile(r"\b(warning|Warning|WARNING|DEPRECATION)\b")
 
 
-class PythonInstallProcessor(Processor):
+class PythonInstallProcessor(base.Processor):
+    """Summarize pip, Poetry, and uv dependency installation output."""
+
     priority = 24
     handles_failure = True
     hook_patterns = [
-        r"^(pip3?\s+install|poetry\s+(install|update|add)|uv\s+(pip\s+install|sync))\b",
-        rf"^{PYTHON_CMD}\s+-m\s+pip\s+install\b",
+        (
+            r"^(pip3?\s+install|poetry\s+(install|update|add)|"
+            r"uv\s+(pip\s+install|sync))\b"
+        ),
+        rf"^{base.PYTHON_CMD}\s+-m\s+pip\s+install\b",
     ]
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "python_install"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         if re.search(r"\bpip3?\s+(list|freeze)\b", command):
             return False
         return bool(
-            _PIP_INSTALL_RE.search(command) or _POETRY_RE.search(command) or _UV_RE.search(command)
+            _PIP_INSTALL_RE.search(command)
+            or _POETRY_RE.search(command)
+            or _UV_RE.search(command)
         )
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
@@ -56,6 +101,7 @@ class PythonInstallProcessor(Processor):
         return self._process_pip(output)
 
     def _process_pip(self, output: str) -> str:
+        """Group installed packages and retain pip diagnostics and status."""
         lines = output.splitlines()
         result: list[str] = []
         collecting_count = 0
@@ -72,7 +118,9 @@ class PythonInstallProcessor(Processor):
 
             if _COLLECTING_RE.match(stripped):
                 collecting_count += 1
-            elif _DOWNLOADING_RE.match(stripped) or _PROGRESS_RE.match(stripped):
+            elif _DOWNLOADING_RE.match(stripped) or _PROGRESS_RE.match(
+                stripped
+            ):
                 downloading_count += 1
             elif _ALREADY_RE.match(stripped):
                 already_count += 1
@@ -102,7 +150,9 @@ class PythonInstallProcessor(Processor):
                 result.append(f"... ({len(warnings) - 5} more warnings)")
 
         if installed_packages:
-            result.append(f"Successfully installed {len(installed_packages)} packages:")
+            result.append(
+                f"Successfully installed {len(installed_packages)} packages:"
+            )
             # Show first 10 packages, summarize rest
             for pkg in installed_packages[:10]:
                 result.append(f"  {pkg}")
@@ -112,6 +162,7 @@ class PythonInstallProcessor(Processor):
         return "\n".join(result) if result else output
 
     def _process_poetry(self, output: str) -> str:
+        """Count Poetry operations and retain warnings and failure details."""
         lines = output.splitlines()
         result: list[str] = []
         installed: list[str] = []
@@ -169,6 +220,7 @@ class PythonInstallProcessor(Processor):
         return "\n".join(result) if result else output
 
     def _process_uv(self, output: str) -> str:
+        """Summarize uv changes while retaining dependency diagnostics."""
         lines = output.splitlines()
         result: list[str] = []
         errors: list[str] = []

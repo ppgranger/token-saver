@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Verify that every committed version string agrees with ``src/__init__.py``.
 
 ``installers/common.py:stamp_version()`` rewrites the manifests at *install*
@@ -24,7 +36,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 sys.path.insert(0, ROOT)
 
-from installers.common import _read_version  # noqa: E402
+# Direct execution needs the repository root before local imports.
+# pylint: disable=wrong-import-position
+import installers.common  # noqa: E402
 
 SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
 
@@ -41,7 +55,10 @@ MARKETPLACE = ".claude-plugin/marketplace.json"
 
 # Prose that quotes the version, and the pattern that pins it.
 PROSE_FILES = (
-    ("docs/benchmarks.md", re.compile(r"^Version: \*\*(?P<version>[^*]+)\*\*", re.MULTILINE)),
+    (
+        "docs/benchmarks.md",
+        re.compile(r"^Version: \*\*(?P<version>[^*]+)\*\*", re.MULTILINE),
+    ),
 )
 
 CHANGELOG = "CHANGELOG.md"
@@ -59,39 +76,54 @@ def _collect(expected: str) -> list[str]:
     for rel_path in JSON_MANIFESTS:
         found = json.loads(_read(rel_path)).get("version")
         if found != expected:
-            errors.append(f"{rel_path}: version is {found!r}, expected {expected!r}")
+            errors.append(
+                f"{rel_path}: version is {found!r}, expected {expected!r}"
+            )
 
     for entry in json.loads(_read(MARKETPLACE)).get("plugins", []):
         found = entry.get("version")
         if found != expected:
             name = entry.get("name", "?")
             errors.append(
-                f"{MARKETPLACE}: plugins[{name}].version is {found!r}, expected {expected!r}",
+                f"{MARKETPLACE}: plugins[{name}].version is {found!r}, "
+                f"expected {expected!r}",
             )
 
     for rel_path, pattern in PROSE_FILES:
         match = pattern.search(_read(rel_path))
         if match is None:
-            errors.append(f"{rel_path}: no version line matching {pattern.pattern!r}")
+            errors.append(
+                f"{rel_path}: no version line matching {pattern.pattern!r}"
+            )
         elif match.group("version") != expected:
             found = match.group("version")
-            errors.append(f"{rel_path}: version is {found!r}, expected {expected!r}")
+            errors.append(
+                f"{rel_path}: version is {found!r}, expected {expected!r}"
+            )
 
     # The plugin pins an explicit version, so users only receive a release once
     # it is written down.  A missing entry means the release is undocumented.
     if not os.path.exists(os.path.join(ROOT, CHANGELOG)):
         errors.append(f"{CHANGELOG}: missing")
     elif f"## [{expected}]" not in _read(CHANGELOG):
-        errors.append(f"{CHANGELOG}: no '## [{expected}]' section for the current version")
+        errors.append(
+            f"{CHANGELOG}: no '## [{expected}]' section for the current version"
+        )
 
     return errors
 
 
 def main() -> int:
-    expected = _read_version()
+    """Report version mismatches and return a failing status if any."""
+    # Reuse the installer's file parser without importing application code.
+    # pylint: disable-next=protected-access
+    expected = installers.common._read_version()
 
     if not SEMVER.match(expected):
-        print(f"FAIL src/__init__.py: __version__ {expected!r} is not semver MAJOR.MINOR.PATCH")
+        print(
+            f"FAIL src/__init__.py: __version__ {expected!r} "
+            "is not semver MAJOR.MINOR.PATCH"
+        )
         return 1
 
     errors = _collect(expected)
@@ -99,7 +131,11 @@ def main() -> int:
         print(f"FAIL version drift (src/__init__.py declares {expected}):")
         for error in errors:
             print(f"  - {error}")
-        print("\nsrc/__init__.py is the source of truth; update the files above to match.")
+        print(
+            "\n"
+            "src/__init__.py is the source of truth; "
+            "update the files above to match."
+        )
         return 1
 
     print(f"OK all version strings agree on {expected}")

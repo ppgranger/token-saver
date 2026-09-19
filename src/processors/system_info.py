@@ -1,11 +1,27 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """System info processor: du, wc, df."""
 
 import re
 
-from .base import Processor
+from src.processors import base
+
+_TEMP_MOUNT_PATH = "/tmp"  # noqa: S108
 
 
-class SystemInfoProcessor(Processor):
+class SystemInfoProcessor(base.Processor):
+    """Summarize disk usage, file counts, and filesystem statistics."""
+
     priority = 36
     hook_patterns = [
         r"^(wc|du|df)(\s|$)",
@@ -13,12 +29,30 @@ class SystemInfoProcessor(Processor):
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "system_info"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         return bool(re.match(r"\s*(?:\S*/)?(du|wc|df)\b", command))
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
@@ -63,6 +97,7 @@ class SystemInfoProcessor(Processor):
 
         # Sort by size (parse numeric value for sorting)
         def parse_size(size_str: str) -> float:
+            """Convert a human-readable disk size to a comparable byte count."""
             s = size_str.strip()
             multipliers = {"K": 1e3, "M": 1e6, "G": 1e9, "T": 1e12, "P": 1e15}
             m = re.match(r"^([\d.]+)\s*([KMGTP])?", s)
@@ -145,7 +180,9 @@ class SystemInfoProcessor(Processor):
         col_end = m.start()
         if col_end == 0:
             return lines
-        return [line[col_end:] if len(line) > col_end else line for line in lines]
+        return [
+            line[col_end:] if len(line) > col_end else line for line in lines
+        ]
 
     def _process_df(self, output: str) -> str:
         """Compress df: strip snap/loop/tmpfs mounts and Filesystem column."""
@@ -159,7 +196,10 @@ class SystemInfoProcessor(Processor):
             if re.search(r"\b(snap|loop\d*|squashfs)\b", stripped):
                 continue
             # Skip tmpfs unless it's /tmp
-            if re.match(r"^tmpfs\b", stripped) and "/tmp" not in stripped:  # noqa: S108
+            if (
+                re.match(r"^tmpfs\b", stripped)
+                and _TEMP_MOUNT_PATH not in stripped
+            ):
                 filtered_count += 1
                 continue
             # Skip devtmpfs

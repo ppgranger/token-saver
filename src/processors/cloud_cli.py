@@ -1,10 +1,22 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Cloud CLI output processor: aws, gcloud, az."""
 
 import json
 import re
 
-from .base import Processor
-from .utils import compress_json_value
+from src.processors import base
+from src.processors import utils
 
 _CLOUD_CMD_RE = re.compile(r"\b(aws|gcloud|az)\s+")
 
@@ -14,7 +26,9 @@ _IMPORTANT_KEY_RE = re.compile(
 )
 
 
-class CloudCliProcessor(Processor):
+class CloudCliProcessor(base.Processor):
+    """Summarize JSON, table, and text responses from cloud CLIs."""
+
     priority = 39
     hook_patterns = [
         r"^(aws|gcloud|az)\s+\S+",
@@ -22,12 +36,30 @@ class CloudCliProcessor(Processor):
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "cloud_cli"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         return bool(_CLOUD_CMD_RE.search(command))
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
@@ -50,6 +82,7 @@ class CloudCliProcessor(Processor):
 
     def _process_json(self, output: str, command: str) -> str:
         """Compress deeply nested JSON from describe/list commands."""
+        del command  # JSON summaries depend on content, not the cloud provider.
         try:
             data = json.loads(output)
         except (json.JSONDecodeError, ValueError):
@@ -58,7 +91,7 @@ class CloudCliProcessor(Processor):
                 return output
             return self._truncate_text(lines)
 
-        compressed = compress_json_value(
+        compressed = utils.compress_json_value(
             data,
             max_depth=4,
             important_key_re=_IMPORTANT_KEY_RE,
@@ -69,7 +102,9 @@ class CloudCliProcessor(Processor):
         orig_lines = output.count("\n")
         new_lines = result.count("\n")
         if orig_lines > new_lines + 10:
-            result += f"\n\n({orig_lines + 1} lines compressed to {new_lines + 1})"
+            result += (
+                f"\n\n({orig_lines + 1} lines compressed to {new_lines + 1})"
+            )
 
         return result
 
@@ -98,7 +133,9 @@ class CloudCliProcessor(Processor):
 
         sep_re = re.compile(r"^[+\-|─┼]+$")
         data_lines = [
-            row for row in lines[header_end:] if not sep_re.match(row.strip()) and row.strip()
+            row
+            for row in lines[header_end:]
+            if not sep_re.match(row.strip()) and row.strip()
         ]
 
         if len(data_lines) <= 20:

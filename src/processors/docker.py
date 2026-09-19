@@ -1,11 +1,23 @@
-"""Docker output processor: ps, images, logs, pull, push, inspect, stats, compose."""
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Summarize Docker resources, logs, transfers, and Compose operations."""
 
 import json
 import re
 
-from .. import config
-from .base import Processor
-from .utils import compress_log_lines
+from src import config
+from src.processors import base
+from src.processors import utils
 
 # Optional docker global options that may appear before the subcommand.
 # Covers: --context <ctx>, -H <host>, --host <host>
@@ -21,7 +33,9 @@ _DOCKER_CMD_RE = re.compile(
 )
 
 
-class DockerProcessor(Processor):
+class DockerProcessor(base.Processor):
+    """Summarize Docker resources, logs, transfers, and Compose operations."""
+
     priority = 31
     handles_failure = True
     hook_patterns = [
@@ -31,9 +45,18 @@ class DockerProcessor(Processor):
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "docker"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         return bool(_DOCKER_CMD_RE.search(command))
 
     def _get_subcmd(self, command: str) -> str | None:
@@ -42,6 +65,15 @@ class DockerProcessor(Processor):
         return m.group(1) if m else None
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
@@ -112,8 +144,14 @@ class DockerProcessor(Processor):
 
         # Group by status
         running = [e for e in result_entries if "Up " in e]
-        stopped = [e for e in result_entries if re.search(r"\b(Exited|Created|Dead)\b", e)]
-        other = [e for e in result_entries if e not in running and e not in stopped]
+        stopped = [
+            e
+            for e in result_entries
+            if re.search(r"\b(Exited|Created|Dead)\b", e)
+        ]
+        other = [
+            e for e in result_entries if e not in running and e not in stopped
+        ]
 
         result = [f"{len(entries)} containers:"]
         if running:
@@ -122,7 +160,10 @@ class DockerProcessor(Processor):
         if stopped:
             if len(stopped) > 10:
                 names = ", ".join(s.strip().split()[0] for s in stopped[:5])
-                result.append(f"Stopped ({len(stopped)}): {names} ... +{len(stopped) - 5} more")
+                result.append(
+                    f"Stopped ({len(stopped)}): {names} ... "
+                    f"+{len(stopped) - 5} more"
+                )
             else:
                 result.append(f"Stopped ({len(stopped)}):")
                 result.extend(stopped)
@@ -173,7 +214,7 @@ class DockerProcessor(Processor):
         return "\n".join(result)
 
     def _process_logs(self, output: str) -> str:
-        """Compress docker logs: keep errors, first/last lines, collapse repetitions."""
+        """Keep Docker log boundaries and errors while collapsing repetition."""
         lines = output.splitlines()
         keep_head = config.get("docker_log_keep_head")
         keep_tail = config.get("docker_log_keep_tail")
@@ -188,15 +229,17 @@ class DockerProcessor(Processor):
         if is_compose:
             return self._process_compose_logs(lines, compose_re)
 
-        return compress_log_lines(
+        return utils.compress_log_lines(
             lines,
             keep_head=keep_head,
             keep_tail=keep_tail,
             context_lines=2,
         )
 
-    def _process_compose_logs(self, lines: list[str], compose_re: re.Pattern) -> str:
-        """Compress docker compose logs: group by service, keep errors + tail per service."""
+    def _process_compose_logs(
+        self, lines: list[str], compose_re: re.Pattern
+    ) -> str:
+        """Group Compose logs by service and keep errors and recent entries."""
         service_lines: dict[str, list[str]] = {}
         for line in lines:
             m = compose_re.match(line)
@@ -206,7 +249,9 @@ class DockerProcessor(Processor):
             else:
                 service_lines.setdefault("_other", []).append(line)
 
-        result = [f"{len(lines)} log lines across {len(service_lines)} services:"]
+        result = [
+            f"{len(lines)} log lines across {len(service_lines)} services:"
+        ]
 
         for service, svc_lines in sorted(service_lines.items()):
             if service == "_other":
@@ -214,14 +259,21 @@ class DockerProcessor(Processor):
             error_count = sum(
                 1
                 for ln in svc_lines
-                if re.search(r"\b(error|ERROR|exception|fatal|FATAL|panic)\b", ln, re.I)
+                if re.search(
+                    r"\b(error|ERROR|exception|fatal|FATAL|panic)\b", ln, re.I
+                )
             )
-            result.append(f"\n--- {service} ({len(svc_lines)} lines, {error_count} errors) ---")
+            result.append(
+                f"\n--- {service} ({len(svc_lines)} lines, {error_count} "
+                f"errors) ---"
+            )
 
             # Show errors with context + last 3 lines
             errors_shown: list[str] = []
             for i, line in enumerate(svc_lines):
-                if re.search(r"\b(error|ERROR|exception|fatal|FATAL|panic)\b", line, re.I):
+                if re.search(
+                    r"\b(error|ERROR|exception|fatal|FATAL|panic)\b", line, re.I
+                ):
                     start = max(0, i - 1)
                     end = min(len(svc_lines), i + 2)
                     for el in svc_lines[start:end]:
@@ -238,7 +290,7 @@ class DockerProcessor(Processor):
         return "\n".join(result)
 
     def _process_pull(self, output: str) -> str:
-        """Compress docker pull/push: strip layer progress, keep digest and status."""
+        """Keep transfer digests and status while removing layer progress."""
         lines = output.splitlines()
         result = []
 
@@ -252,7 +304,9 @@ class DockerProcessor(Processor):
             ):
                 continue
             # Skip progress bars
-            if re.search(r"\d+(\.\d+)?%", stripped) and re.search(r"\[=*>?\s*\]", stripped):
+            if re.search(r"\d+(\.\d+)?%", stripped) and re.search(
+                r"\[=*>?\s*\]", stripped
+            ):
                 continue
             result.append(stripped)
 
@@ -268,7 +322,10 @@ class DockerProcessor(Processor):
         except (json.JSONDecodeError, ValueError):
             # Not valid JSON -- truncate
             if len(lines) > 50:
-                return "\n".join(lines[:40]) + f"\n... ({len(lines) - 40} more lines)"
+                return (
+                    "\n".join(lines[:40])
+                    + f"\n... ({len(lines) - 40} more lines)"
+                )
             return output
 
         if isinstance(data, list) and len(data) == 1:
@@ -276,7 +333,10 @@ class DockerProcessor(Processor):
 
         if not isinstance(data, dict):
             if len(lines) > 50:
-                return "\n".join(lines[:40]) + f"\n... ({len(lines) - 40} more lines)"
+                return (
+                    "\n".join(lines[:40])
+                    + f"\n... ({len(lines) - 40} more lines)"
+                )
             return output
 
         result = []
@@ -366,7 +426,9 @@ class DockerProcessor(Processor):
         # docker stats (streaming) produces repeated blocks
         # Keep only the last block
         header_indices = [
-            i for i, line in enumerate(lines) if "CONTAINER" in line and "CPU" in line
+            i
+            for i, line in enumerate(lines)
+            if "CONTAINER" in line and "CPU" in line
         ]
         if header_indices:
             last_header = header_indices[-1]
@@ -384,8 +446,14 @@ class DockerProcessor(Processor):
         for line in lines:
             stripped = line.strip()
             if (
-                re.search(r"(Created|Started|Running|Healthy|Error|error|failed)", stripped, re.I)
-                or re.search(r"(Network|Volume)\s+\S+\s+(Created|Found)", stripped)
+                re.search(
+                    r"(Created|Started|Running|Healthy|Error|error|failed)",
+                    stripped,
+                    re.I,
+                )
+                or re.search(
+                    r"(Network|Volume)\s+\S+\s+(Created|Found)", stripped
+                )
                 or (
                     re.search(r"(Pulling|Building|Creating|Starting)", stripped)
                     and not re.search(r"\d+%", stripped)
@@ -406,7 +474,9 @@ class DockerProcessor(Processor):
         result = []
         for line in lines:
             stripped = line.strip()
-            if re.search(r"(Stopped|Removed|Removing|removed)", stripped, re.I) or re.search(
+            if re.search(
+                r"(Stopped|Removed|Removing|removed)", stripped, re.I
+            ) or re.search(
                 r"(Network|Volume)\s+\S+\s+(Removed|removed)", stripped
             ):
                 result.append(stripped)
@@ -428,7 +498,11 @@ class DockerProcessor(Processor):
                 re.match(r"^\S+\s+(Building|building)", stripped)
                 or re.match(r"^(Step \d+/\d+|#\d+\s|\[\d+/\d+\])", stripped)
                 or re.search(r"\b(error|Error|ERROR|failed|FAILED)\b", stripped)
-                or re.search(r"(Successfully|naming to |writing image|DONE)", stripped, re.I)
+                or re.search(
+                    r"(Successfully|naming to |writing image|DONE)",
+                    stripped,
+                    re.I,
+                )
             ):
                 result.append(stripped)
 
@@ -444,7 +518,9 @@ class DockerProcessor(Processor):
             columns[col_name] = m.start()
         return columns
 
-    def _extract_fields(self, line: str, col_positions: dict[str, int]) -> dict[str, str]:
+    def _extract_fields(
+        self, line: str, col_positions: dict[str, int]
+    ) -> dict[str, str]:
         """Extract field values based on column positions."""
         fields = {}
         sorted_cols = sorted(col_positions.items(), key=lambda x: x[1])

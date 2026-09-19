@@ -1,16 +1,28 @@
-"""Make stdout/stderr UTF-8 regardless of the console's codepage.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-The decoding side of this problem is handled at each call site (``encoding=``
-on every ``open``/``subprocess``).  This module is the *encoding* side, and it
-has to live at the entry points instead: ``print()`` encodes with whatever
-``sys.stdout`` was built with, which on Windows is the console codepage —
-cp1252 on the GitHub runner.
+r"""Make stdout/stderr UTF-8 regardless of the console's codepage.
+
+The decoding side of this problem is handled at each call site (``encoding=`` on
+every ``open``/``subprocess``).  This module is the *encoding* side, and it has
+to live at the entry points instead: ``print()`` encodes with whatever
+``sys.stdout`` was built with, which on Windows is the console codepage — cp1252
+on the GitHub runner.
 
 That is not hypothetical.  Both of these crashed on the first Windows CI run:
 
 * ``src/stats.py`` prints a ``═`` rule, and cp1252 has no such character;
 * ``scripts/wrap.py`` prints the compressed command output, which contains
-  whatever the wrapped command emitted — including the ``\\ufffd`` that our own
+  whatever the wrapped command emitted — including the ``\ufffd`` that our own
   ``errors="replace"`` decoding introduces for undecodable bytes.
 
 ``errors="replace"`` mirrors the decode side for the same reason: a mangled
@@ -27,9 +39,9 @@ def use_utf8_io() -> None:
     """Reconfigure stdin/stdout/stderr to UTF-8.  Safe to call more than once.
 
     ``stdin`` is included because the hooks receive the command as a JSON
-    payload on it: Claude Code sends UTF-8, cp1252 cannot decode much of it,
-    and ``git commit -m "café"`` would take the hook down before it ever
-    reached a processor.
+    payload on it: Claude Code sends UTF-8, cp1252 cannot decode much of it, and
+    ``git commit -m "café"`` would take the hook down before it ever reached a
+    processor.
 
     Silently does nothing when the streams cannot be reconfigured — under
     pytest's ``capsys`` they are substituted with objects that have no

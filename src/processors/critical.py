@@ -1,3 +1,15 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """The one definition of "a line that must never be silently dropped".
 
 Individual processors each grew their own ``_ERROR_RE`` (a dozen of them, all
@@ -64,11 +76,13 @@ def is_critical(line: str) -> bool:
 
 def critical_lines(text: str) -> list[str]:
     """Return the stripped, non-empty lines of ``text`` that look critical."""
-    return [ln.strip() for ln in text.splitlines() if ln.strip() and is_critical(ln)]
+    return [
+        ln.strip() for ln in text.splitlines() if ln.strip() and is_critical(ln)
+    ]
 
 
 def missing_critical(original: str, compressed: str) -> list[str]:
-    """Return critical lines present in ``original`` but absent from ``compressed``.
+    """Return critical lines omitted from the compressed text.
 
     Substring containment (not equality) is deliberate: processors legitimately
     re-indent, prefix, or merge lines, and that should not count as a loss.

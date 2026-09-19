@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Wrapper CLI: executes a command and compresses its output.
 
 Usage: python3 wrap.py '<command string>'
@@ -28,24 +40,31 @@ import uuid
 # Ensure the extension root is importable (scripts/ -> plugin root)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scripts.hook_pretool import is_compressible
-from src import config, core
-from src.chain_utils import extract_primary_command, split_chain_with_ops
-from src.console import use_utf8_io
-from src.diffstat import format_summary, summarize
-from src.engine import CompressionEngine
+# Installed scripts locate their sibling packages before importing them.
+# pylint: disable=wrong-import-position
+import src.chain_utils
+import src.console
+import src.diffstat
+import src.engine
+from src import command_policy
+from src import config
+from src import core
+from src import delta
 
-# --- Debug logging (writes to data_dir/hook.log when TOKEN_SAVER_DEBUG=true) ---
+# --- Debug logging (writes to data_dir/hook.log when TOKEN_SAVER_DEBUG=true)
+# ---
 _log = logging.getLogger("token-saver.wrap")
 _log.setLevel(logging.DEBUG)
 _debug = os.environ.get("TOKEN_SAVER_DEBUG", "").lower() in ("1", "true", "yes")
 if _debug:
-    from src import data_dir as _data_dir
+    import src
 
-    _log_dir = _data_dir()
+    _log_dir = src.data_dir()
     os.makedirs(_log_dir, exist_ok=True)
     _handler = logging.FileHandler(os.path.join(_log_dir, "hook.log"))
-    _handler.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s"))
+    _handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+    )
     _log.addHandler(_handler)
 else:
     _log.addHandler(logging.NullHandler())
@@ -59,8 +78,9 @@ MARKER_PREFIX_TEMPLATE = "__TS_MARK_{}_"
 
 
 def inject_markers(parts: list[tuple[str, str]], marker_prefix: str) -> str:
-    """Build a rewritten command that emits `<marker_prefix><idx>` before each
-    non-first segment.  Each marker+segment is wrapped in a brace group so the
+    """Insert markers before non-first segments while preserving shell state.
+
+    Each marker+segment is wrapped in a brace group so the
     surrounding shell operator (`&&` / `;`) still applies to the user's segment.
 
     Every segment — including the first — goes on its own line, and the group
@@ -84,13 +104,21 @@ def inject_markers(parts: list[tuple[str, str]], marker_prefix: str) -> str:
         } ; { echo 'M_2'
         c
         }
+
+    Args:
+        parts: Safely split shell segments paired with following operators.
+        marker_prefix: Unique shell-safe prefix for output boundary markers.
+
+    Returns:
+        One shell command with each segment wrapped in a brace group.
     """
     pieces: list[str] = []
     for i, (seg, op) in enumerate(parts):
         if i == 0:
             group = f"{{ {seg}\n}}"
         else:
-            # Single-quote the marker; markers contain only [A-Za-z0-9_] so safe.
+            # Single-quote the marker; markers contain only [A-Za-z0-9_] so
+            # safe.
             group = f"{{ echo '{marker_prefix}{i}'\n{seg}\n}}"
         pieces.append(f"{group} {op}" if op else group)
     return " ".join(pieces)
@@ -121,21 +149,32 @@ _MARKER_LEFT_BOUNDARY = r"(?:^|(?<=[^\n]))"
 def strip_markers(output: str, marker_prefix: str) -> str:
     """Remove marker lines from output (used for dry-run display)."""
     pattern = re.compile(
-        _MARKER_LEFT_BOUNDARY + re.escape(marker_prefix) + r"\d+\s*\n?", re.MULTILINE
+        _MARKER_LEFT_BOUNDARY + re.escape(marker_prefix) + r"\d+\s*\n?",
+        re.MULTILINE,
     )
     return pattern.sub("", output)
 
 
-def split_output_by_markers(output: str, marker_prefix: str) -> list[tuple[int, str]]:
+def split_output_by_markers(
+    output: str, marker_prefix: str
+) -> list[tuple[int, str]]:
     """Split combined output into (segment_index, segment_output) chunks.
 
     The first chunk (before any marker) is always segment 0.  Subsequent
     chunks are indexed by the number embedded in their preceding marker.
     Markers may be missing if an `&&` short-circuited mid-chain; the
     embedded indices keep the mapping correct.
+
+    Args:
+        output: Combined subprocess output containing injected markers.
+        marker_prefix: Exact prefix used when rewriting the command.
+
+    Returns:
+        Pairs of original segment indices and their captured output.
     """
     pattern = re.compile(
-        _MARKER_LEFT_BOUNDARY + re.escape(marker_prefix) + r"(\d+)\s*$", re.MULTILINE
+        _MARKER_LEFT_BOUNDARY + re.escape(marker_prefix) + r"(\d+)\s*$",
+        re.MULTILINE,
     )
     matches = list(pattern.finditer(output))
     if not matches:
@@ -195,12 +234,13 @@ def posix_shell() -> str | None:
     found = shutil.which("bash")
     if found:
         return found
-    return next((c for c in _WINDOWS_BASH_CANDIDATES if os.path.isfile(c)), None)
+    return next(
+        (c for c in _WINDOWS_BASH_CANDIDATES if os.path.isfile(c)), None
+    )
 
 
 def _shell_for_syntax_check() -> str | list[str]:
-    """Return the ``Popen`` target used to run the actual command, so the
-    syntax check below validates against the exact same interpreter."""
+    """Return the actual command's interpreter for matching syntax checks."""
     bash = posix_shell()
     return [bash] if bash else ["/bin/sh"] if not IS_WINDOWS else []
 
@@ -256,12 +296,13 @@ def _run_command(
 ) -> tuple[str, str, int]:
     """Run command via shell, return (stdout, stderr, returncode).
 
-    If merge_stderr is True, stderr is redirected into stdout (stderr returns "").
+    If merge_stderr is True, stderr goes into stdout and returns as "".
     Forwards SIGINT/SIGTERM to the child.
     """
     child_proc: subprocess.Popen | None = None
 
-    def signal_handler(signum, _frame):
+    def signal_handler(signum, frame):
+        del frame  # Required by signal.signal's callback signature.
         # The child runs in its own session (start_new_session below), so the
         # terminal delivers Ctrl-C only to us, not to the child.  Forwarding
         # here is therefore the child's *only* signal — no double-delivery.
@@ -276,10 +317,13 @@ def _run_command(
     # On Windows, hand the command to bash explicitly rather than letting
     # shell=True route it to cmd.exe.  See posix_shell().
     bash = posix_shell()
-    popen_target: str | list[str] = [bash, "-c", command_str] if bash else command_str
+    popen_target: str | list[str] = (
+        [bash, "-c", command_str] if bash else command_str
+    )
 
     try:
-        # S603: running the user's own command *is* this script's purpose — it is
+        # S603: running the user's own command *is* this script's purpose — it
+        # is
         # the command Claude Code was about to run anyway.
         child_proc = subprocess.Popen(  # noqa: S603
             popen_target,
@@ -309,7 +353,10 @@ def _run_command(
                 partial_out, partial_err = child_proc.communicate(timeout=5)
             except (subprocess.TimeoutExpired, ValueError, OSError):
                 partial_out, partial_err = "", ""
-        note = f"[token-saver] Command timed out after {timeout}s (partial output shown)"
+        note = (
+            f"[token-saver] Command timed out after {timeout}s "
+            "(partial output shown)"
+        )
         print(note, file=sys.stderr)
         partial_out = (partial_out or "") + f"\n{note}\n"
         return partial_out, partial_err or "", 124
@@ -337,7 +384,10 @@ def _cap_output(output: str) -> str:
     cap = config.get("max_output_bytes")
     if not cap or cap <= 0 or len(output) <= cap:
         return output
-    note = f"\n[token-saver] Output truncated at {cap:,} chars (was {len(output):,})\n"
+    note = (
+        f"\n[token-saver] Output truncated at {cap:,} chars "
+        f"(was {len(output):,})\n"
+    )
     return output[:cap] + note
 
 
@@ -351,8 +401,14 @@ def _print_dry_run(
     saved = original_len - compressed_len
     ratio = (saved / original_len * 100) if original_len > 0 else 0
     chars_per_token = config.get("chars_per_token")
-    orig_tokens = max(1, round(original_len / chars_per_token)) if original_len > 0 else 0
-    comp_tokens = max(1, round(compressed_len / chars_per_token)) if compressed_len > 0 else 0
+    orig_tokens = (
+        max(1, round(original_len / chars_per_token)) if original_len > 0 else 0
+    )
+    comp_tokens = (
+        max(1, round(compressed_len / chars_per_token))
+        if compressed_len > 0
+        else 0
+    )
     saved_tokens = orig_tokens - comp_tokens
     print(
         f"[token-saver dry-run] processor={processor_name} "
@@ -361,12 +417,13 @@ def _print_dry_run(
         file=sys.stderr,
     )
     if diff_summary is not None:
-        print(format_summary(diff_summary), file=sys.stderr)
+        print(src.diffstat.format_summary(diff_summary), file=sys.stderr)
     print(output, end="")
 
 
 def main():
-    use_utf8_io()
+    """Execute the wrapped command, compress output, and preserve its status."""
+    src.console.use_utf8_io()
     dry_run = "--dry-run" in sys.argv
     show_removed = "--show-removed" in sys.argv
     args = [a for a in sys.argv[1:] if a not in ("--dry-run", "--show-removed")]
@@ -396,25 +453,27 @@ def main():
     # the original command string exactly as given, uncompressed — the same
     # fail-safe already used below when the chain rewrite fails its shell
     # syntax check.
-    if not is_compressible(command_str):
+    if not command_policy.is_compressible(command_str):
         _log.warning(
             "Re-validation rejected a command hook_pretool.py had classified "
             "as compressible, running uncompressed: %r",
             command_str,
         )
-        stdout, stderr, returncode = _run_command(command_str, config.get("wrap_timeout"), False)
+        stdout, stderr, returncode = _run_command(
+            command_str, config.get("wrap_timeout"), False
+        )
         output = stdout + ("\n" + stderr if stderr else "")
         print(_cap_output(output), end="")
         sys.exit(returncode)
 
     timeout = config.get("wrap_timeout")
 
-    chain_parts = split_chain_with_ops(command_str)
+    chain_parts = src.chain_utils.split_chain_with_ops(command_str)
     # Without a POSIX shell the marker rewrite cannot be executed, so treat
     # the chain as one opaque command instead of corrupting it.
     is_chain = len(chain_parts) > 1 and supports_posix_chaining()
 
-    engine = CompressionEngine()
+    engine = src.engine.CompressionEngine()
 
     if is_chain:
         marker_prefix = MARKER_PREFIX_TEMPLATE.format(uuid.uuid4().hex[:12])
@@ -428,15 +487,22 @@ def main():
             # user's original command exactly as given and skip compression
             # entirely — never risk the user's command not running.
             _log.warning(
-                "Chain rewrite failed shell syntax check, running uncompressed: %r",
+                (
+                    "Chain rewrite failed shell syntax check, running"
+                    " uncompressed: %r"
+                ),
                 command_str,
             )
-            stdout, stderr, returncode = _run_command(command_str, timeout, merge_stderr=False)
+            stdout, stderr, returncode = _run_command(
+                command_str, timeout, merge_stderr=False
+            )
             output = stdout + ("\n" + stderr if stderr else "")
             print(_cap_output(output), end="")
             sys.exit(returncode)
 
-        stdout, _stderr, returncode = _run_command(rewritten, timeout, merge_stderr=True)
+        stdout, _, returncode = _run_command(
+            rewritten, timeout, merge_stderr=True
+        )
         combined = _cap_output(stdout)
 
         if not combined.strip():
@@ -466,13 +532,22 @@ def main():
                 # segment to generic.  With `&&`, every segment before the last
                 # one that ran did succeed.
                 seg_exit = returncode if seg_idx == chunks[-1][0] else 0
-                c_out, proc_name, _was = engine.compress(seg_cmd, chunk_out, exit_code=seg_exit)
+                c_out, proc_name, _ = engine.compress(
+                    seg_cmd, chunk_out, exit_code=seg_exit
+                )
                 if engine.last_event.get("is_mismatch"):
                     mismatches.append(
-                        (seg_cmd, engine.last_event["attempted_processor"], len(chunk_out))
+                        (
+                            seg_cmd,
+                            engine.last_event["attempted_processor"],
+                            len(chunk_out),
+                        )
                     )
-            except Exception:
-                _log.exception("Compression failed for segment %r — passing through", seg_cmd)
+            except Exception:  # pylint: disable=broad-exception-caught
+                # Isolate arbitrary plugin failures; preserve this segment.
+                _log.warning(
+                    "Compression failed for a segment — passing through"
+                )
                 c_out, proc_name = chunk_out, "passthrough"
             compressed_parts.append(c_out)
             used_processors.append(proc_name)
@@ -482,17 +557,31 @@ def main():
         compressed = "\n".join(compressed_parts)
 
         # Summary processor label, e.g. "chain[git,git,git]"
-        proc_label = "chain[" + ",".join(used_processors) + "]" if used_processors else "chain"
+        proc_label = (
+            "chain[" + ",".join(used_processors) + "]"
+            if used_processors
+            else "chain"
+        )
 
         if dry_run:
             display_output = strip_markers(combined, marker_prefix)
-            diff_summary = summarize(display_output, compressed) if show_removed else None
+            diff_summary = (
+                src.diffstat.summarize(display_output, compressed)
+                if show_removed
+                else None
+            )
             _print_dry_run(
-                proc_label, total_original, total_compressed, display_output, diff_summary
+                proc_label,
+                total_original,
+                total_compressed,
+                display_output,
+                diff_summary,
             )
             sys.exit(returncode)
 
-        core.audit_log(command_str, proc_label, total_original, total_compressed)
+        core.audit_log(
+            command_str, proc_label, total_original, total_compressed
+        )
         core.record_mismatches(mismatches, _PLATFORM)
 
         if total_compressed < total_original:
@@ -502,15 +591,24 @@ def main():
                 total_original,
                 total_compressed,
             )
-            core.record_saving(command_str, proc_label, total_original, total_compressed, _PLATFORM)
+            core.record_saving(
+                command_str,
+                proc_label,
+                total_original,
+                total_compressed,
+                _PLATFORM,
+            )
         else:
             _log.debug("Chain not compressed: len=%d", total_original)
 
         print(compressed, end="")
         sys.exit(returncode)
 
-    # --- Single-command path (unchanged behavior) ---
-    stdout, stderr, returncode = _run_command(command_str, timeout, merge_stderr=False)
+    # Delta is limited to this path: chained segments have a shared shell
+    # environment and may not have individually reliable exit statuses.
+    stdout, stderr, returncode = _run_command(
+        command_str, timeout, merge_stderr=False
+    )
     output = stdout
     if stderr:
         output = (output + "\n" + stderr) if output else stderr
@@ -519,20 +617,47 @@ def main():
     if not output.strip():
         sys.exit(returncode)
 
-    primary_cmd = extract_primary_command(command_str)
-    result = core.compress(primary_cmd, output, engine=engine, exit_code=returncode)
+    primary_cmd = src.chain_utils.extract_primary_command(command_str)
+    result = core.compress(
+        primary_cmd, output, engine=engine, exit_code=returncode
+    )
 
     if dry_run:
-        diff_summary = summarize(output, result.compressed) if show_removed else None
-        _print_dry_run(result.processor, len(output), len(result.compressed), output, diff_summary)
+        diff_summary = (
+            src.diffstat.summarize(output, result.compressed)
+            if show_removed
+            else None
+        )
+        _print_dry_run(
+            result.processor,
+            len(output),
+            len(result.compressed),
+            output,
+            diff_summary,
+        )
         sys.exit(returncode)
+
+    result = delta.apply(
+        command_str,
+        output,
+        result,
+        engine=engine,
+        exit_code=returncode,
+        session_id=os.environ.get("TOKEN_SAVER_SESSION", ""),
+    )
 
     # Savings are attributed to the full command string (not just the primary)
     # so stats group by what the user actually typed.
-    core.audit_log(primary_cmd, result.processor, result.original_len, result.compressed_len)
+    core.audit_log(
+        primary_cmd,
+        result.processor,
+        result.original_len,
+        result.compressed_len,
+    )
     if result.is_mismatch:
         core.record_mismatches(
-            [(primary_cmd, result.attempted_processor, result.original_len)], _PLATFORM
+            [(primary_cmd, result.attempted_processor, result.original_len)],
+            _PLATFORM,
         )
     if result.was_compressed:
         _log.debug(
@@ -542,10 +667,18 @@ def main():
             result.compressed_len,
         )
         core.record_saving(
-            command_str, result.processor, result.original_len, result.compressed_len, _PLATFORM
+            command_str,
+            result.processor,
+            result.original_len,
+            result.compressed_len,
+            _PLATFORM,
         )
     else:
-        _log.debug("Not compressed: processor=%s len=%d", result.processor, result.original_len)
+        _log.debug(
+            "Not compressed: processor=%s len=%d",
+            result.processor,
+            result.original_len,
+        )
 
     print(result.compressed, end="")
     sys.exit(returncode)

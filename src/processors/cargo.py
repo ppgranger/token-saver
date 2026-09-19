@@ -1,18 +1,23 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Cargo processor: cargo build, check, doc, update, bench."""
 
+import collections
 import re
-from collections import defaultdict
 
-from .. import config
-from .base import Processor
-from .utils import (
-    RUST_COMPILING_RE,
-    RUST_ERROR_START_RE,
-    RUST_FINISHED_RE,
-    RUST_SPAN_LINE_RE,
-    RUST_WARNING_START_RE,
-    RUST_WARNING_SUMMARY_RE,
-)
+from src import config
+from src.processors import base
+from src.processors import utils
 
 _CARGO_CMD_RE = re.compile(r"\bcargo\s+(build|check|doc|update|bench)\b")
 _DOWNLOADING_RE = re.compile(r"^\s*Downloading\s+\S+\s+v")
@@ -23,7 +28,9 @@ _UPDATE_LINE_RE = re.compile(
 )
 
 
-class CargoProcessor(Processor):
+class CargoProcessor(base.Processor):
+    """Summarize Cargo compilation, documentation, updates, and benchmarks."""
+
     priority = 22
     handles_failure = True
     hook_patterns = [
@@ -32,14 +39,32 @@ class CargoProcessor(Processor):
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "cargo"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         if re.search(r"\bcargo\s+(test|clippy)\b", command):
             return False
         return bool(_CARGO_CMD_RE.search(command))
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
@@ -59,6 +84,7 @@ class CargoProcessor(Processor):
         return output
 
     def _categorize_warning(self, msg: str) -> str:
+        """Return a stable category for a Rust compiler warning message."""
         if "unused variable" in msg:
             return "unused_variable"
         if "unused import" in msg:
@@ -75,12 +101,15 @@ class CargoProcessor(Processor):
         return m.group(1) if m else "other"
 
     def _process_cargo_build(self, output: str) -> str:
+        """Group compiler warnings and preserve complete compiler errors."""
         lines = output.splitlines()
         result: list[str] = []
         compiling_count = 0
         downloading_count = 0
 
-        warnings_by_type: dict[str, list[list[str]]] = defaultdict(list)
+        warnings_by_type: dict[str, list[list[str]]] = collections.defaultdict(
+            list
+        )
         current_block: list[str] = []
         current_type: str | None = None
         in_error = False
@@ -92,7 +121,7 @@ class CargoProcessor(Processor):
         for line in lines:
             stripped = line.strip()
 
-            if RUST_COMPILING_RE.match(stripped):
+            if utils.RUST_COMPILING_RE.match(stripped):
                 compiling_count += 1
                 continue
             if _DOWNLOADING_RE.match(stripped):
@@ -100,7 +129,7 @@ class CargoProcessor(Processor):
                 continue
 
             # Error start
-            if RUST_ERROR_START_RE.match(stripped):
+            if utils.RUST_ERROR_START_RE.match(stripped):
                 # Flush current warning block
                 if current_type and current_block:
                     warnings_by_type[current_type].append(current_block)
@@ -114,8 +143,8 @@ class CargoProcessor(Processor):
                 continue
 
             # Warning start
-            wm = RUST_WARNING_START_RE.match(stripped)
-            if wm and not RUST_WARNING_SUMMARY_RE.match(stripped):
+            wm = utils.RUST_WARNING_START_RE.match(stripped)
+            if wm and not utils.RUST_WARNING_SUMMARY_RE.match(stripped):
                 # Flush previous
                 if in_error and current_error:
                     error_blocks.append(current_error)
@@ -130,7 +159,7 @@ class CargoProcessor(Processor):
                 current_block = [line]
                 continue
 
-            if RUST_WARNING_SUMMARY_RE.match(stripped):
+            if utils.RUST_WARNING_SUMMARY_RE.match(stripped):
                 if current_type and current_block:
                     warnings_by_type[current_type].append(current_block)
                     current_block = []
@@ -142,7 +171,7 @@ class CargoProcessor(Processor):
                 warning_summary_lines.append(line)
                 continue
 
-            if RUST_FINISHED_RE.match(stripped):
+            if utils.RUST_FINISHED_RE.match(stripped):
                 if current_type and current_block:
                     warnings_by_type[current_type].append(current_block)
                     current_block = []
@@ -179,7 +208,9 @@ class CargoProcessor(Processor):
         # Grouped warnings
         example_count = config.get("cargo_warning_example_count")
         group_threshold = config.get("cargo_warning_group_threshold")
-        for wtype, blocks in sorted(warnings_by_type.items(), key=lambda x: -len(x[1])):
+        for wtype, blocks in sorted(
+            warnings_by_type.items(), key=lambda x: -len(x[1])
+        ):
             count = len(blocks)
             if count >= group_threshold:
                 result.append(f"warning: {wtype} ({count} occurrences)")
@@ -197,6 +228,7 @@ class CargoProcessor(Processor):
         return "\n".join(result) if result else output
 
     def _process_cargo_doc(self, output: str) -> str:
+        """Count documented crates while retaining warnings and result lines."""
         lines = output.splitlines()
         result: list[str] = []
         compiling_count = 0
@@ -204,16 +236,16 @@ class CargoProcessor(Processor):
 
         for line in lines:
             stripped = line.strip()
-            if RUST_COMPILING_RE.match(stripped):
+            if utils.RUST_COMPILING_RE.match(stripped):
                 compiling_count += 1
             elif _DOCUMENTING_RE.match(stripped):
                 documenting_count += 1
             elif (
-                RUST_FINISHED_RE.match(stripped)
+                utils.RUST_FINISHED_RE.match(stripped)
                 or re.match(r"^\s*Generated\s+", stripped)
                 or re.search(r"\bwarning\b", stripped)
-                or RUST_ERROR_START_RE.match(stripped)
-                or (RUST_SPAN_LINE_RE.match(stripped) and result)
+                or utils.RUST_ERROR_START_RE.match(stripped)
+                or (utils.RUST_SPAN_LINE_RE.match(stripped) and result)
             ):
                 result.append(line)
 
@@ -228,6 +260,7 @@ class CargoProcessor(Processor):
         return "\n".join(result) if result else output
 
     def _process_cargo_update(self, output: str) -> str:
+        """Group dependency version changes and retain update diagnostics."""
         lines = output.splitlines()
         updates: list[str] = []
         major_bumps: list[str] = []
@@ -246,7 +279,9 @@ class CargoProcessor(Processor):
                     old_major = old_ver.split(".")[0]
                     new_major = new_ver.split(".")[0]
                     if old_major != new_major:
-                        major_bumps.append(f"  {pkg}: v{old_ver} -> v{new_ver} (MAJOR)")
+                        major_bumps.append(
+                            f"  {pkg}: v{old_ver} -> v{new_ver} (MAJOR)"
+                        )
                     else:
                         updates.append(pkg)
 
@@ -271,21 +306,22 @@ class CargoProcessor(Processor):
         return "\n".join(result) if result else output
 
     def _process_cargo_bench(self, output: str) -> str:
+        """Retain benchmark measurements and summarize compilation noise."""
         lines = output.splitlines()
         result: list[str] = []
         compiling_count = 0
 
         for line in lines:
             stripped = line.strip()
-            if RUST_COMPILING_RE.match(stripped):
+            if utils.RUST_COMPILING_RE.match(stripped):
                 compiling_count += 1
             elif _RUNNING_RE.match(stripped):
                 continue
             elif (
                 re.match(r"^test\s+.+\s+bench:", stripped)
                 or re.match(r"^test result:", stripped)
-                or RUST_FINISHED_RE.match(stripped)
-                or RUST_ERROR_START_RE.match(stripped)
+                or utils.RUST_FINISHED_RE.match(stripped)
+                or utils.RUST_ERROR_START_RE.match(stripped)
             ):
                 result.append(line)
 

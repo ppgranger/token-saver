@@ -1,3 +1,15 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Tests for the compression engine."""
 
 import os
@@ -5,27 +17,33 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.engine import CompressionEngine
-from src.processors import collect_hook_patterns, discover_processors
+import src.engine
+import src.processors
 
 
 class TestCompressionEngine:
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_short_output_not_compressed(self):
         output = "short output"
-        compressed, _processor, was_compressed = self.engine.compress("git status", output)
+        compressed, _processor, was_compressed = self.engine.compress(
+            "git status", output
+        )
         assert not was_compressed
         assert compressed == output
 
     def test_empty_output(self):
-        compressed, _processor, was_compressed = self.engine.compress("git status", "")
+        compressed, _processor, was_compressed = self.engine.compress(
+            "git status", ""
+        )
         assert not was_compressed
         assert compressed == ""
 
     def test_whitespace_only_output(self):
-        compressed, _processor, _was_compressed = self.engine.compress("git status", "   \n\n  ")
+        compressed, _processor, _was_compressed = self.engine.compress(
+            "git status", "   \n\n  "
+        )
         # With aggressive settings, whitespace is stripped (compressed to empty)
         assert compressed.strip() == ""
 
@@ -47,19 +65,25 @@ class TestCompressionEngine:
             + [f" ?? new_file{i}.txt" for i in range(20)]
         )
 
-        compressed, processor, was_compressed = self.engine.compress("git status", output)
+        compressed, processor, was_compressed = self.engine.compress(
+            "git status", output
+        )
         assert was_compressed
         assert processor == "git"
         assert len(compressed) < len(output)
 
     def test_generic_fallback(self):
         output = "line\n" * 100 + "unique line\n" + "another\n" * 100
-        _compressed, processor, _was_compressed = self.engine.compress("some_command", output)
+        _compressed, processor, _was_compressed = self.engine.compress(
+            "some_command", output
+        )
         assert processor in ("generic", "none")
 
     def test_repeated_lines_compressed(self):
         output = "Building module...\n" * 50 + "Done.\n"
-        compressed, _processor, was_compressed = self.engine.compress("some_build_cmd", output)
+        compressed, _processor, was_compressed = self.engine.compress(
+            "some_build_cmd", output
+        )
         if was_compressed:
             assert "x50" in compressed
             assert len(compressed) < len(output)
@@ -71,7 +95,9 @@ class TestCompressionEngine:
         lines.append("=" * 60 + " 50 passed in 2.34s " + "=" * 60)
         output = "\n".join(lines)
 
-        compressed, processor, was_compressed = self.engine.compress("pytest", output)
+        compressed, processor, was_compressed = self.engine.compress(
+            "pytest", output
+        )
         assert was_compressed
         assert processor == "test"
         assert "50 tests passed" in compressed
@@ -84,7 +110,9 @@ class TestCompressionEngine:
         lines.append("Build completed in 12.3s")
         output = "\n".join(lines)
 
-        compressed, processor, was_compressed = self.engine.compress("npm run build", output)
+        compressed, processor, was_compressed = self.engine.compress(
+            "npm run build", output
+        )
         assert was_compressed
         assert processor == "build"
         assert "Build succeeded" in compressed
@@ -92,12 +120,16 @@ class TestCompressionEngine:
     def test_lint_grouped(self):
         lines = []
         for i in range(20):
-            lines.append(f"src/file{i}.py:10:1: E501 line too long (120 > 79 characters)")
+            lines.append(
+                f"src/file{i}.py:10:1: E501 line too long (120 > 79 characters)"
+            )
         for i in range(10):
             lines.append(f"src/file{i}.py:5:1: W291 trailing whitespace")
         output = "\n".join(lines)
 
-        compressed, processor, was_compressed = self.engine.compress("ruff check .", output)
+        compressed, processor, was_compressed = self.engine.compress(
+            "ruff check .", output
+        )
         assert was_compressed
         assert processor == "lint"
         assert "E501" in compressed
@@ -119,11 +151,13 @@ class TestCompressionEngine:
         assert "60 files found" in compressed
 
     def test_cat_source_code_never_compressed(self):
-        """Source code files pass through unchanged — model needs exact content."""
+        """Return exact source code without compression."""
         lines = [f"line {i}: some code here" for i in range(500)]
         output = "\n".join(lines)
 
-        compressed, _processor, was_compressed = self.engine.compress("cat big_file.py", output)
+        compressed, _processor, was_compressed = self.engine.compress(
+            "cat big_file.py", output
+        )
         assert not was_compressed
         assert compressed == output
 
@@ -131,34 +165,42 @@ class TestCompressionEngine:
         lines = [f"line {i}: some data here" for i in range(500)]
         output = "\n".join(lines)
 
-        compressed, processor, was_compressed = self.engine.compress("cat big_file.xyz", output)
+        compressed, processor, was_compressed = self.engine.compress(
+            "cat big_file.xyz", output
+        )
         assert was_compressed
         assert processor == "file_content"
         assert "truncated" in compressed
         assert len(compressed) < len(output)
 
     def test_min_compression_ratio(self):
-        """Incompressible input must be returned untouched, not almost-untouched.
+        """Return incompressible input byte-for-byte unchanged.
 
         This used to assert the ratio only `if was_compressed:` — so an engine
-        that stopped compressing entirely passed the test.  The real contract
-        is a dichotomy: either the engine declined (and returned the input
-        byte-for-byte), or it compressed and the result is genuinely smaller.
+        that stopped compressing entirely passed the test.  The real contract is
+        a dichotomy: either the engine declined (and returned the input byte-
+        for-byte), or it compressed and the result is genuinely smaller.
         """
         # Unique lines — generic won't compress much
-        output = "\n".join(f"unique_line_content_{i}_{'x' * 50}" for i in range(15))
-        compressed, _processor, was_compressed = self.engine.compress("unknown_cmd", output)
+        output = "\n".join(
+            f"unique_line_content_{i}_{'x' * 50}" for i in range(15)
+        )
+        compressed, _processor, was_compressed = self.engine.compress(
+            "unknown_cmd", output
+        )
         if was_compressed:
             assert len(compressed) <= len(output) * 0.9
         else:
             assert compressed == output
 
     def test_ansi_cleanup_after_specialized_processor(self):
-        """Engine should strip ANSI codes even after a specialized processor runs."""
+        """Strip ANSI codes after specialized compression."""
         lines = [f"\x1b[32m M src/file{i}.py\x1b[0m" for i in range(30)]
         output = "On branch main\n\n" + "\n".join(lines)
 
-        compressed, _processor, was_compressed = self.engine.compress("git status", output)
+        compressed, _processor, was_compressed = self.engine.compress(
+            "git status", output
+        )
         if was_compressed:
             assert "\x1b[" not in compressed
 
@@ -174,7 +216,9 @@ class TestCompressionEngine:
             lines.append(f"+new line {i}")
         output = "\n".join(lines)
 
-        compressed, _processor, was_compressed = self.engine.compress("git diff", output)
+        compressed, _processor, was_compressed = self.engine.compress(
+            "git diff", output
+        )
         assert was_compressed
         assert "truncated" in compressed
 
@@ -188,7 +232,9 @@ class TestCompressionEngine:
             + [f" M file{i}.py" for i in range(30)]
         )
 
-        _, processor, was_compressed = self.engine.compress("git status", output)
+        _, processor, was_compressed = self.engine.compress(
+            "git status", output
+        )
         if was_compressed:
             assert processor == "git"
 
@@ -202,13 +248,18 @@ class TestCompressionEngine:
         # Should not crash or leak state
 
     def test_generic_fallback_when_specialized_fails(self):
-        """When specialized processor doesn't compress enough, generic should try."""
-        # Create output that a specialized processor handles but barely compresses:
-        # git status with very few files (small output, specialized won't compress much)
+        """Try generic compression after insufficient specialized reduction."""
+        # Create output that a specialized processor handles but barely
+        # compresses:
+        # git status with very few files (small output, specialized won't
+        # compress much)
         # but enough repeated lines for generic to compress.
-        # Instead, use a command where the specialized processor returns ~same size.
+        # Instead, use a command where the specialized processor returns ~same
+        # size.
         output = "repeated_line\n" * 200 + "unique_end"
-        compressed, processor, was_compressed = self.engine.compress("some_unknown_cmd", output)
+        compressed, processor, was_compressed = self.engine.compress(
+            "some_unknown_cmd", output
+        )
         if was_compressed:
             # Should be compressed via generic (repeated lines)
             assert processor in ("generic", "none")
@@ -220,36 +271,36 @@ class TestProcessorRegistry:
 
     def test_discover_processors_finds_all(self):
         """Auto-discovery should find all 36 processors."""
-        processors = discover_processors()
+        processors = src.processors.discover_processors()
         assert len(processors) == 36
 
     def test_discover_processors_sorted_by_priority(self):
         """Processors must be returned in ascending priority order."""
-        processors = discover_processors()
+        processors = src.processors.discover_processors()
         priorities = [p.priority for p in processors]
         assert priorities == sorted(priorities)
 
     def test_generic_processor_is_last(self):
         """GenericProcessor (priority 999) must always be the last processor."""
-        processors = discover_processors()
+        processors = src.processors.discover_processors()
         assert processors[-1].name == "generic"
         assert processors[-1].priority == 999
 
     def test_no_duplicate_priorities(self):
         """Each processor should have a unique priority."""
-        processors = discover_processors()
+        processors = src.processors.discover_processors()
         priorities = [p.priority for p in processors]
         assert len(priorities) == len(set(priorities))
 
     def test_all_processors_have_names(self):
         """Every processor must define a non-empty name."""
-        processors = discover_processors()
+        processors = src.processors.discover_processors()
         for p in processors:
             assert p.name, f"Processor {p.__class__.__name__} has no name"
 
     def test_expected_priority_order(self):
         """Verify the expected processor priority assignments."""
-        processors = discover_processors()
+        processors = src.processors.discover_processors()
         name_to_priority = {p.name: p.priority for p in processors}
         assert name_to_priority["package_list"] == 15
         assert name_to_priority["just"] == 18
@@ -289,8 +340,8 @@ class TestProcessorRegistry:
         assert name_to_priority["generic"] == 999
 
     def test_collect_hook_patterns_returns_patterns(self):
-        """collect_hook_patterns should return a non-empty list of regex strings."""
-        patterns = collect_hook_patterns()
+        """Collect a nonempty list of interception regexes."""
+        patterns = src.processors.collect_hook_patterns()
         assert len(patterns) > 0
         assert all(isinstance(p, str) for p in patterns)
 
@@ -298,15 +349,15 @@ class TestProcessorRegistry:
         """All collected hook patterns must be valid regex."""
         import re
 
-        patterns = collect_hook_patterns()
+        patterns = src.processors.collect_hook_patterns()
         for p in patterns:
             re.compile(p)  # Should not raise
 
     def test_collect_hook_patterns_covers_key_commands(self):
-        """Collected patterns should match the same commands as the old hardcoded list."""
+        """Keep interception coverage of the previous command patterns."""
         import re
 
-        patterns = collect_hook_patterns()
+        patterns = src.processors.collect_hook_patterns()
         compiled = [re.compile(p) for p in patterns]
 
         test_commands = [
@@ -464,8 +515,8 @@ class TestProcessorRegistry:
 
     def test_engine_uses_discovered_processors(self):
         """CompressionEngine should use auto-discovered processors."""
-        engine = CompressionEngine()
-        discovered = discover_processors()
+        engine = src.engine.CompressionEngine()
+        discovered = src.processors.discover_processors()
         assert len(engine.processors) == len(discovered)
         for ep, dp in zip(engine.processors, discovered, strict=False):
             assert ep.name == dp.name
@@ -476,7 +527,7 @@ class TestRouting:
     """Regression tests for first-match processor selection."""
 
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def _selected(self, command: str) -> str:
         """Return the name of the first processor whose can_handle matches."""
@@ -503,9 +554,9 @@ class TestProcessorMismatchEvent:
     """O3: engine.last_event flags weak specialized processors."""
 
     def _weak_engine(self):
-        from src.processors.base import Processor
+        import src.processors.base
 
-        class WeakProc(Processor):
+        class WeakProc(src.processors.base.Processor):
             priority = 1
             hook_patterns = []
 
@@ -521,7 +572,7 @@ class TestProcessorMismatchEvent:
                 # not enough for generic to rescue either.
                 return output[:-1]
 
-        engine = CompressionEngine()
+        engine = src.engine.CompressionEngine()
         engine.processors.insert(0, WeakProc())
         engine._by_name["weak_proc"] = engine.processors[0]
         return engine
@@ -542,7 +593,7 @@ class TestProcessorMismatchEvent:
             config.reload()
 
     def test_successful_compression_not_mismatch(self):
-        engine = CompressionEngine()
+        engine = src.engine.CompressionEngine()
         # git status output that compresses well.
         output = "\n".join(["On branch main", "Changes not staged for commit:"])
         output += "\n" + "\n".join(f"\tmodified: file{i}.py" for i in range(60))
@@ -550,7 +601,7 @@ class TestProcessorMismatchEvent:
         assert engine.last_event.get("is_mismatch") is False
 
     def test_explicit_noop_not_mismatch(self):
-        engine = CompressionEngine()
+        engine = src.engine.CompressionEngine()
         # A short file read the processor deliberately leaves unchanged.
         out = "def f():\n    return 1\n"
         engine.compress("cat foo.py", out)
@@ -565,7 +616,7 @@ class TestDisabledProcessors:
         from src import config
 
         config.reload()
-        engine = CompressionEngine()
+        engine = src.engine.CompressionEngine()
         names = [p.name for p in engine.processors]
         assert "git" not in names
         assert "build" in names  # Other processors still present
@@ -578,7 +629,7 @@ class TestDisabledProcessors:
         from src import config
 
         config.reload()
-        engine = CompressionEngine()
+        engine = src.engine.CompressionEngine()
         names = [p.name for p in engine.processors]
         assert "generic" in names
         monkeypatch.delenv("TOKEN_SAVER_DISABLED_PROCESSORS")
@@ -589,7 +640,7 @@ class TestDisabledProcessors:
         from src import config
 
         config.reload()
-        engine = CompressionEngine()
+        engine = src.engine.CompressionEngine()
         names = [p.name for p in engine.processors]
         assert "git" not in names
         assert "docker" not in names
@@ -599,15 +650,16 @@ class TestDisabledProcessors:
         config.reload()
 
     def test_disabled_processors_string_in_json_ignored(self, monkeypatch):
-        """If disabled_processors is a string (wrong type from JSON), treat as empty."""
+        """Ignore malformed disabled_processors strings from JSON."""
         from src import config
 
         # Simulate a JSON config with wrong type: "lint" instead of ["lint"]
         cfg = {**config._load_config(), "disabled_processors": "lint"}
         monkeypatch.setattr(config, "_config", cfg)
-        engine = CompressionEngine()
+        engine = src.engine.CompressionEngine()
         names = [p.name for p in engine.processors]
-        # "lint" as string should NOT disable any processor (would be {"l","i","n","t"} otherwise)
+        # "lint" as string should NOT disable any processor (would be
+        # {"l","i","n","t"} otherwise)
         assert "lint" in names
         config.reload()
 
@@ -619,7 +671,7 @@ class TestDisabledProcessors:
         from src import config
 
         config.reload()
-        patterns = collect_hook_patterns()
+        patterns = src.processors.collect_hook_patterns()
         compiled = [re.compile(p) for p in patterns]
         # git status should NOT match any pattern
         assert not any(p.search("git status") for p in compiled)
@@ -633,7 +685,7 @@ class TestProcessorChaining:
     """Tests for multi-processor chaining infrastructure."""
 
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_chain_to_attribute_default_none(self):
         for p in self.engine.processors:
@@ -656,9 +708,9 @@ class TestProcessorChaining:
 
     def test_chain_to_string_backward_compat(self):
         """String chain_to should work (normalized to single-element list)."""
-        from src.processors.base import Processor
+        import src.processors.base
 
-        class FakeA(Processor):
+        class FakeA(src.processors.base.Processor):
             priority = 1
             hook_patterns = []
             chain_to = "generic"
@@ -685,9 +737,9 @@ class TestProcessorChaining:
 
     def test_chain_to_list(self):
         """List chain_to should apply processors in sequence."""
-        from src.processors.base import Processor
+        import src.processors.base
 
-        class ProcA(Processor):
+        class ProcA(src.processors.base.Processor):
             priority = 1
             hook_patterns = []
             chain_to = ["proc_b"]
@@ -702,7 +754,7 @@ class TestProcessorChaining:
             def process(self, command, output):
                 return output.replace("STEP1", "STEP2")
 
-        class ProcB(Processor):
+        class ProcB(src.processors.base.Processor):
             priority = 2
             hook_patterns = []
 
@@ -730,9 +782,9 @@ class TestProcessorChaining:
 
     def test_chain_cycle_detection(self):
         """Cycle in chain_to should not cause infinite loop."""
-        from src.processors.base import Processor
+        import src.processors.base
 
-        class CycleA(Processor):
+        class CycleA(src.processors.base.Processor):
             priority = 1
             hook_patterns = []
             chain_to = ["cycle_b"]
@@ -747,7 +799,7 @@ class TestProcessorChaining:
             def process(self, command, output):
                 return output + "\nA"
 
-        class CycleB(Processor):
+        class CycleB(src.processors.base.Processor):
             priority = 2
             hook_patterns = []
             chain_to = ["cycle_a"]
@@ -776,9 +828,9 @@ class TestProcessorChaining:
 
     def test_chain_unknown_name_skipped(self):
         """Unknown processor name in chain_to should be silently skipped."""
-        from src.processors.base import Processor
+        import src.processors.base
 
-        class UnknownChain(Processor):
+        class UnknownChain(src.processors.base.Processor):
             priority = 1
             hook_patterns = []
             chain_to = ["nonexistent_processor"]
@@ -805,13 +857,13 @@ class TestProcessorChaining:
 
     def test_chain_max_depth(self, monkeypatch):
         """max_chain_depth config should limit chaining."""
+        import src.processors.base
         from src import config
-        from src.processors.base import Processor
 
         monkeypatch.setenv("TOKEN_SAVER_MAX_CHAIN_DEPTH", "1")
         config.reload()
 
-        class DepthA(Processor):
+        class DepthA(src.processors.base.Processor):
             priority = 1
             hook_patterns = []
             chain_to = ["depth_b", "depth_c"]
@@ -826,7 +878,7 @@ class TestProcessorChaining:
             def process(self, command, output):
                 return output.replace("D0", "D1")
 
-        class DepthB(Processor):
+        class DepthB(src.processors.base.Processor):
             priority = 2
             hook_patterns = []
 
@@ -840,7 +892,7 @@ class TestProcessorChaining:
             def process(self, command, output):
                 return output.replace("D1", "D2")
 
-        class DepthC(Processor):
+        class DepthC(src.processors.base.Processor):
             priority = 3
             hook_patterns = []
 
@@ -854,7 +906,7 @@ class TestProcessorChaining:
             def process(self, command, output):
                 return output.replace("D2", "D3")
 
-        engine = CompressionEngine()
+        engine = src.engine.CompressionEngine()
         a, b, c = DepthA(), DepthB(), DepthC()
         engine.processors.insert(0, a)
         engine.processors.insert(1, b)

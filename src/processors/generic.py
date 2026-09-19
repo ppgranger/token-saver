@@ -1,10 +1,22 @@
-"""Generic fallback processor: ANSI strip, dedup, whitespace collapse, truncation."""
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Reduce terminal noise, repetition, whitespace, and long output."""
 
 import re
 
-from .. import config
-from .base import Processor
-from .critical import is_critical
+from src import config
+from src.processors import base
+from src.processors import critical
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07")
 
@@ -15,10 +27,12 @@ _PROGRESS_BLOCK_RE = re.compile(r"[━█▓░▒■□●○]{3,}")
 # ASCII runs (####, ====, ---->) are only progress bars in progress context;
 # on their own they are usually separators / rules that must be preserved.
 _ASCII_BAR_RE = re.compile(r"[#=\->]{5,}")
-_PROGRESS_CONTEXT_RE = re.compile(r"[%\[\]]|\b\d+/\d+\b|ETA|eta|\d+(\.\d+)?\s*[KMGT]?i?B/s")
+_PROGRESS_CONTEXT_RE = re.compile(
+    r"[%\[\]]|\b\d+/\d+\b|ETA|eta|\d+(\.\d+)?\s*[KMGT]?i?B/s"
+)
 
 
-class GenericProcessor(Processor):
+class GenericProcessor(base.Processor):
     """Fallback processor that applies universal compression heuristics."""
 
     priority = 999
@@ -26,12 +40,30 @@ class GenericProcessor(Processor):
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "generic"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         return True  # Always matches as fallback
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         lines = output.splitlines()
         lines = self._strip_ansi(lines)
         lines = self._strip_progress_bars(lines)
@@ -57,9 +89,11 @@ class GenericProcessor(Processor):
         return "\n".join(lines)
 
     def _strip_ansi(self, lines: list[str]) -> list[str]:
+        """Remove terminal control sequences from the captured text."""
         return [ANSI_RE.sub("", line) for line in lines]
 
     def _strip_trailing_whitespace(self, lines: list[str]) -> list[str]:
+        """Remove trailing spaces independently from each output line."""
         return [line.rstrip() for line in lines]
 
     def _strip_progress_bars(self, lines: list[str]) -> list[str]:
@@ -183,27 +217,34 @@ class GenericProcessor(Processor):
         # Only collapse on EXPLICIT progress/transfer signals.  Bare digit-ratio
         # heuristics are deliberately NOT used: they also match legitimate
         # numeric data tables (e.g. yearly metrics, id columns), whose rows are
-        # meaningful and must be preserved rather than collapsed as redraw noise.
+        # meaningful and must be preserved rather than collapsed as redraw
+        # noise.
         # Percentage patterns
         if re.search(r"\d+(\.\d+)?%", stripped):
             return True
         # Transfer rate patterns
-        if re.search(r"\d+(\.\d+)?\s*(KB|MB|GB|B|kB|MiB|GiB|k|M|G)/s", stripped):
+        if re.search(
+            r"\d+(\.\d+)?\s*(KB|MB|GB|B|kB|MiB|GiB|k|M|G)/s", stripped
+        ):
             return True
         # ETA/time remaining patterns
         if re.search(r"(ETA|eta)\s+\d+", stripped):
             return True
         # Curl/wget progress format: lines with --:--:-- time patterns
         numeric_chars = sum(1 for c in stripped if c.isdigit())
-        return bool(re.search(r"--:--:--|(\d+:){2}\d+", stripped) and numeric_chars >= 5)
+        return bool(
+            re.search(r"--:--:--|(\d+:){2}\d+", stripped) and numeric_chars >= 5
+        )
 
     def _flush(self, result: list[str], line: str, count: int) -> None:
+        """Append one repeated-line group, including its repetition count."""
         if count > 1:
             result.append(f"{line} (x{count})")
         else:
             result.append(line)
 
     def _flush_similar(self, result: list[str], group: list[str]) -> None:
+        """Append representatives and a count for a group of similar lines."""
         count = len(group)
         if count >= 5:
             result.append(group[0])
@@ -213,7 +254,7 @@ class GenericProcessor(Processor):
             result.extend(group)
 
     def _truncate_middle(self, lines: list[str]) -> list[str]:
-        """Truncate middle of long output, keeping any critical lines it contains.
+        """Truncate the middle of long output while keeping critical lines.
 
         Generic is the safety net: it is where failed commands and unrecognized
         output land.  Plain head+tail truncation would drop an error that
@@ -229,13 +270,21 @@ class GenericProcessor(Processor):
         # every line back (worse than the original).  Use explicit empty slices.
         head = lines[:keep_head] if keep_head > 0 else []
         tail = lines[-keep_tail:] if keep_tail > 0 else []
-        middle = lines[len(head) : total - len(tail)] if keep_tail > 0 else lines[len(head) :]
+        middle = (
+            lines[len(head) : total - len(tail)]
+            if keep_tail > 0
+            else lines[len(head) :]
+        )
         removed = total - len(head) - len(tail)
         if removed <= 0:
             return lines
 
         max_kept = config.get("generic_keep_critical")
-        kept = [ln for ln in middle if is_critical(ln)][:max_kept] if max_kept > 0 else []
+        kept = (
+            [ln for ln in middle if critical.is_critical(ln)][:max_kept]
+            if max_kept > 0
+            else []
+        )
         dropped = removed - len(kept)
 
         marker = f"... ({dropped} lines truncated, {total} total) ..."
@@ -245,6 +294,9 @@ class GenericProcessor(Processor):
             *head,
             marker,
             *kept,
-            f"... ({len(kept)} critical lines kept from the truncated section) ...",
+            (
+                f"... ({len(kept)} critical lines kept from the truncated "
+                f"section) ..."
+            ),
             *tail,
         ]

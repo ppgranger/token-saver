@@ -29,15 +29,17 @@
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
-  "@id": "https://github.com/ppgranger/token-saver",
+  "@type": ["SoftwareApplication", "SoftwareSourceCode"],
+  "@id": {{ "/#software" | absolute_url | jsonify }},
   "name": "Token-Saver",
-  "description": "{{ site.description | strip_html | strip_newlines | escape }}",
+  "description": {{ site.description | strip_html | strip_newlines | jsonify }},
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Windows, macOS, Linux",
   "license": "https://github.com/ppgranger/token-saver/blob/main/LICENSE",
   "codeRepository": "https://github.com/ppgranger/token-saver",
-  "url": "{{ site.url }}{{ site.baseurl }}/",
+  "url": {{ "/" | absolute_url | jsonify }},
+  "programmingLanguage": "Python",
+  "runtimePlatform": "Python 3.10 or later",
   "offers": {
     "@type": "Offer",
     "price": "0",
@@ -50,16 +52,18 @@
   }
 }
 </script>
-{%- elsif page.url contains "/processors/" or page.url == "/benchmarks/" or page.url == "/comparison/" -%}
+{%- elsif page.description -%}
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "TechArticle",
-  "headline": "{{ page.title | strip_html | strip_newlines | escape }}",
-  "description": "{{ page.description | strip_html | strip_newlines | escape }}",
-  "url": "{{ site.url }}{{ page.url | relative_url }}",
+  "headline": {{ page.title | strip_html | strip_newlines | jsonify }},
+  "description": {{ page.description | strip_html | strip_newlines | jsonify }},
+  "url": {{ page.url | absolute_url | jsonify }},
   "isPartOf": {
-    "@id": "https://github.com/ppgranger/token-saver"
+    "@type": "WebSite",
+    "name": {{ site.title | jsonify }},
+    "url": {{ "/" | absolute_url | jsonify }}
   },
   "author": {
     "@type": "Person",

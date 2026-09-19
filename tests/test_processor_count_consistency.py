@@ -1,3 +1,15 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """One processor count, discovered once, asserted everywhere.
 
 ``src/processors/discover_processors()`` is the source of truth. But the
@@ -25,13 +37,13 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.processors import discover_processors
+import src.processors
 
 REPO_ROOT = pathlib.Path(__file__).parent.parent
 
 
 def _processor_count() -> int:
-    return len(discover_processors())
+    return len(src.processors.discover_processors())
 
 
 def _text(rel: str) -> str:
@@ -46,8 +58,14 @@ def _json(rel: str) -> dict:
     ("rel", "pattern"),
     [
         ("README.md", r"\*\*(\d+) specialized processors\*\*"),
-        ("docs/comparison.md", r"\| \*\*Compression method\*\* \| (\d+) specialized processors"),
-        ("skills/token-saver-config/SKILL.md", r"(\d+) specialized processors, auto-discovered"),
+        (
+            "docs/comparison.md",
+            r"\| \*\*Compression method\*\* \| (\d+) specialized processors",
+        ),
+        (
+            "skills/token-saver-config/SKILL.md",
+            r"(\d+) specialized processors, auto-discovered",
+        ),
     ],
 )
 def test_doc_processor_count_matches_registry(rel, pattern):
@@ -62,7 +80,9 @@ def test_doc_processor_count_matches_registry(rel, pattern):
 def test_plugin_manifest_processor_count_matches_registry():
     description = _json(".claude-plugin/plugin.json")["description"]
     match = re.search(r"(\d+) specialized processors", description)
-    assert match, ".claude-plugin/plugin.json description has no processor count"
+    assert match, (
+        ".claude-plugin/plugin.json description has no processor count"
+    )
     assert int(match.group(1)) == _processor_count(), (
         f".claude-plugin/plugin.json says {match.group(1)} processors but "
         f"discover_processors() returns {_processor_count()}"
@@ -75,7 +95,8 @@ def test_marketplace_catalog_processor_count_matches_registry():
         if not match:
             continue
         assert int(match.group(1)) == _processor_count(), (
-            f".claude-plugin/marketplace.json plugin {entry.get('name')!r} says "
+            ".claude-plugin/marketplace.json plugin "
+            f"{entry.get('name')!r} says "
             f"{match.group(1)} processors but discover_processors() returns "
             f"{_processor_count()}"
         )

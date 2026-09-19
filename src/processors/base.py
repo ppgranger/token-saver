@@ -1,13 +1,27 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Abstract base class for output processors."""
 
-from abc import ABC, abstractmethod
+import abc
+
+from src import diagnostics
 
 # Matches any Python invocation: python, python3, python3.11,
-# .venv/bin/python3, /usr/bin/python, etc.
-PYTHON_CMD = r"(?:\S+/)?python[23]?(?:\.\d+)?"
+# .venv/bin/python3, /usr/bin/python, C:/Python/python.exe, etc.
+PYTHON_CMD = r"(?:\S+/)?python[23]?(?:\.\d+)?(?:\.exe)?"
 
 
-class Processor(ABC):
+class Processor(abc.ABC):
     """Base class for all output processors.
 
     Subclasses must set ``priority`` and ``hook_patterns`` as class-level
@@ -16,9 +30,17 @@ class Processor(ABC):
     Priority conventions:
         10-19  High priority overrides (e.g. PackageListProcessor before build)
         20-29  Core processors (git, test, build, lint)
-        30-49  Specialized (network, docker, kubectl, terraform, env, search, system_info)
+        30-49  Specialized command families (network, containers, system tools)
         50-69  Content-based (file_listing, file_content)
         999    Generic fallback (must always be last)
+
+    Attributes:
+        priority: Routing order; lower numbers run first.
+        hook_patterns: Anchored command patterns exposed to platform hooks.
+        chain_to: Optional processor name or ordered names to run afterward.
+        handles_failure: Whether failed-command output can be compressed safely.
+        wants_exit_code: Whether process accepts the optional exit_code keyword.
+        name: Stable identifier used for routing, configuration, and tracking.
     """
 
     priority: int = 50
@@ -61,7 +83,16 @@ class Processor(ABC):
         that only *sometimes* redacts (e.g. one that handles many file
         types and redacts only a few of them) should check here, not opt in
         for every call.
+
+        Args:
+            command: Shell command identifying the input format.
+            output: Captured output that may contain sensitive values.
+
+        Returns:
+            False by default. Overrides return True when raw fallback could
+            disclose values that processing would redact.
         """
+        del command, output  # The default processor does not redact any input.
         return False
 
     #: Whether ``process()`` accepts an ``exit_code`` keyword argument.
@@ -78,11 +109,38 @@ class Processor(ABC):
     #: the simpler two-argument signature.
     wants_exit_code: bool = False
 
-    @abstractmethod
-    def can_handle(self, command: str) -> bool:
-        """Return True if this processor can handle the given command."""
+    def diagnostics(
+        self, command: str, output: str, *, exit_code: int | None = None
+    ) -> diagnostics.Snapshot | None:
+        """Optionally describe complete diagnostics for repeated-run comparison.
 
-    @abstractmethod
+        This extension does not change ``process()`` or require existing user
+        processors to implement it. Callers must sanitize output before parsing.
+
+        Args:
+            command: Original command label identifying one supported run.
+            output: Captured output after secret redaction.
+            exit_code: Command status, or None when unavailable.
+
+        Returns:
+            A complete snapshot, or None when comparison is unsupported or
+            uncertain. The default declines every input.
+        """
+        del command, output, exit_code
+        return None
+
+    @abc.abstractmethod
+    def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command belongs to this processor's supported family.
+        """
+
+    @abc.abstractmethod
     def process(self, command: str, output: str) -> str:
         """Process and compress the output. Return compressed version.
 
@@ -90,13 +148,27 @@ class Processor(ABC):
         ``def process(self, command: str, output: str, *, exit_code: int |
         None = None) -> str`` — the engine detects the flag and calls
         accordingly.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
         """
 
     def clean(self, text: str) -> str:
-        """Light cleanup pass (default: no-op). Overridden by GenericProcessor."""
+        """Return text unchanged; subclasses may override light cleanup.
+
+        Args:
+            text: Output requiring only low-risk terminal-noise cleanup.
+
+        Returns:
+            The input text; overrides may remove formatting noise.
+        """
         return text
 
     @property
-    @abstractmethod
+    @abc.abstractmethod
     def name(self) -> str:
         """Return the processor name for tracking."""

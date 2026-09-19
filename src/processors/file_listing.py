@@ -1,14 +1,28 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """File listing processor: ls, find, tree."""
 
+import collections
 import re
-from collections import defaultdict
 
-from .. import config
-from .base import Processor
-from .utils import format_dir_group, group_paths_by_dir
+from src import config
+from src.processors import base
+from src.processors import utils
 
 
-class FileListingProcessor(Processor):
+class FileListingProcessor(base.Processor):
+    """Reduce directory listings to names, sizes, and grouped paths."""
+
     priority = 50
     hook_patterns = [
         r"^(ls|find|tree|dir|exa|eza|rsync)\b",
@@ -16,12 +30,32 @@ class FileListingProcessor(Processor):
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "file_listing"
 
     def can_handle(self, command: str) -> bool:
-        return bool(re.match(r"\s*(?:\S*/)?(ls|find|tree|dir|exa|eza|rsync)\b", command))
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
+        return bool(
+            re.match(r"\s*(?:\S*/)?(ls|find|tree|dir|exa|eza|rsync)\b", command)
+        )
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
@@ -39,8 +73,10 @@ class FileListingProcessor(Processor):
     # drwxr-xr-x  5 user group  160 Jan 17 12:34 dirname
     # Regex for ls -l long-format lines (locale-agnostic).
     # We capture: type char, size, and everything after the date as filename.
-    # The date field varies by locale (EN: "Jan 12 17:24", FR: "12 janv. 17:24"),
-    # so we match it as: groups of (non-digit-word-chars or digits) ending with HH:MM or year.
+    # The date field varies by locale (EN: "Jan 12 17:24", FR: "12 janv.
+    # 17:24"),
+    # so we match it as: groups of (non-digit-word-chars or digits) ending with
+    # HH:MM or year.
     _LS_LONG_RE = re.compile(
         r"^([d\-lbcps])"  # 1: type indicator
         r"[rwxsStT\-]{9}[@+.]?\s+"  # permissions
@@ -48,11 +84,13 @@ class FileListingProcessor(Processor):
         r"\S+\s+"  # owner
         r"\S+\s+"  # group
         r"(\d+)\s+"  # 2: size in bytes
-        r"(?:\S+\s+){2,3}"  # date tokens (2-3 space-separated tokens: month/day + time/year)
+        # Two or three date tokens: month/day and time/year.
+        r"(?:\S+\s+){2,3}"
         r"(\S.*?)$"  # 3: filename (rest of line, trimmed)
     )
 
     def _format_size(self, size: int) -> str:
+        """Return a compact byte size using binary unit thresholds."""
         if size < 1024:
             return f"{size}B"
         if size < 1024 * 1024:
@@ -62,9 +100,11 @@ class FileListingProcessor(Processor):
         return f"{size / (1024 * 1024 * 1024):.1f}G"
 
     def _process_ls(self, output: str, command: str) -> str:
+        """Retain listing names and sizes, capping large directories."""
         lines = output.splitlines()
 
-        # If -l flag is used, strip permissions/owner/group/date — keep type, size, name
+        # If -l flag is used, strip permissions/owner/group/date — keep type,
+        # size, name
         if re.search(r"\s-\S*l", command):
             result = []
             for line in lines:
@@ -98,7 +138,7 @@ class FileListingProcessor(Processor):
             return output
 
         # Group by extension
-        by_ext: dict[str, list[str]] = defaultdict(list)
+        by_ext: dict[str, list[str]] = collections.defaultdict(list)
         dirs = []
         for item in items:
             if item.endswith(("/", ":")):
@@ -112,25 +152,31 @@ class FileListingProcessor(Processor):
         result = [f"{len(items)} items:"]
         if dirs:
             if len(dirs) > 10:
-                result.append(f"  dirs ({len(dirs)}): {', '.join(dirs[:8])} ... +{len(dirs) - 8}")
+                result.append(
+                    f"  dirs ({len(dirs)}): {', '.join(dirs[:8])} ... "
+                    f"+{len(dirs) - 8}"
+                )
             else:
                 result.append(f"  dirs ({len(dirs)}): {', '.join(dirs)}")
 
         for ext, files in sorted(by_ext.items(), key=lambda x: -len(x[1])):
             if len(files) > 5:
-                result.append(f"  *.{ext} ({len(files)}): {', '.join(files[:3])} ...")
+                result.append(
+                    f"  *.{ext} ({len(files)}): {', '.join(files[:3])} ..."
+                )
             else:
                 result.append(f"  *.{ext}: {', '.join(files)}")
 
         return "\n".join(result)
 
     def _process_find(self, output: str) -> str:
+        """Group paths by directory and summarize large groups."""
         lines = [line.strip() for line in output.splitlines() if line.strip()]
         threshold = config.get("find_compact_threshold")
         if len(lines) <= threshold:
             return output
 
-        by_dir = group_paths_by_dir(lines)
+        by_dir = utils.group_paths_by_dir(lines)
 
         # Alphabetical and uncapped, unlike fd: `find` output is a tree the
         # user is reading structurally, so path order carries meaning and
@@ -138,11 +184,14 @@ class FileListingProcessor(Processor):
         # threshold follows from that — keep listing until it is really long.
         result = [f"{len(lines)} files found:"]
         for dir_path, files in sorted(by_dir.items()):
-            result.extend(format_dir_group(dir_path, files, ext_threshold=20))
+            result.extend(
+                utils.format_dir_group(dir_path, files, ext_threshold=20)
+            )
 
         return "\n".join(result)
 
     def _process_tree(self, output: str) -> str:
+        """Keep the upper tree levels and retain the listing totals."""
         lines = output.splitlines()
         threshold = config.get("tree_compact_threshold")
         if len(lines) <= threshold:
@@ -152,7 +201,8 @@ class FileListingProcessor(Processor):
         keep = threshold - 5
         result = lines[:keep]
 
-        # Find the summary line (usually last line like "X directories, Y files")
+        # Find the summary line (usually last line like "X directories, Y
+        # files")
         summary = ""
         for line in reversed(lines):
             if re.match(r"\d+\s+director(?:ies|y)\b", line):

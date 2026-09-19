@@ -1,8 +1,20 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Maven/Gradle processor: mvn, gradle, gradlew, mvnw builds."""
 
 import re
 
-from .base import Processor
+from src.processors import base
 
 _MVN_RE = re.compile(r"\b(mvn|\.?/?mvnw)\b")
 _GRADLE_RE = re.compile(r"\b(gradle|\.?/?gradlew)\b")
@@ -21,17 +33,23 @@ _MVN_EMPTY_INFO_RE = re.compile(r"^\[INFO\]\s*$")
 
 # Gradle patterns
 _GRADLE_TASK_RE = re.compile(r"^>\s+Task\s+:(\S+)")
-_GRADLE_UPTODATE_RE = re.compile(r"\b(UP-TO-DATE|NO-SOURCE|SKIPPED|FROM-CACHE)\s*$")
+_GRADLE_UPTODATE_RE = re.compile(
+    r"\b(UP-TO-DATE|NO-SOURCE|SKIPPED|FROM-CACHE)\s*$"
+)
 _GRADLE_BUILD_RESULT_RE = re.compile(r"^(BUILD\s+(SUCCESSFUL|FAILED))")
 _GRADLE_ACTIONABLE_RE = re.compile(r"^\d+\s+actionable\s+task")
 _GRADLE_ERROR_RE = re.compile(
     r"^(FAILURE:|>\s+.*[Ee]rror|e:\s+|"
     r"\s+What went wrong|\s+Execution failed)"
 )
-_GRADLE_TEST_RESULT_RE = re.compile(r"^\d+\s+tests?\s+(completed|passed|failed)")
+_GRADLE_TEST_RESULT_RE = re.compile(
+    r"^\d+\s+tests?\s+(completed|passed|failed)"
+)
 
 
-class MavenGradleProcessor(Processor):
+class MavenGradleProcessor(base.Processor):
+    """Summarize Maven and Gradle builds and their failure diagnostics."""
+
     priority = 28
     handles_failure = True
     hook_patterns = [
@@ -40,12 +58,30 @@ class MavenGradleProcessor(Processor):
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "maven_gradle"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         return bool(_MVN_RE.search(command) or _GRADLE_RE.search(command))
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
@@ -54,6 +90,7 @@ class MavenGradleProcessor(Processor):
         return self._process_maven(output)
 
     def _process_maven(self, output: str) -> str:
+        """Retain Maven errors and final status while reducing build chatter."""
         lines = output.splitlines()
         result: list[str] = []
         download_count = 0
@@ -91,7 +128,9 @@ class MavenGradleProcessor(Processor):
                 continue
 
             if in_reactor:
-                if _MVN_BUILD_RESULT_RE.match(stripped) or _MVN_TOTAL_TIME_RE.match(stripped):
+                if _MVN_BUILD_RESULT_RE.match(
+                    stripped
+                ) or _MVN_TOTAL_TIME_RE.match(stripped):
                     in_reactor = False
                 else:
                     reactor_lines.append(line)
@@ -150,6 +189,7 @@ class MavenGradleProcessor(Processor):
         return "\n".join(result) if result else output
 
     def _process_gradle(self, output: str) -> str:
+        """Summarize Gradle tasks while retaining failures and final status."""
         lines = output.splitlines()
         result: list[str] = []
         skipped_tasks = 0

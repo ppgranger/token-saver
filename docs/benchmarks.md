@@ -7,7 +7,7 @@ nav_order: 3
 
 # Token-Saver Compression Benchmarks
 
-Version: **2.7.2** · Baselines last updated: **2026-08-02** · Source: [`tests/compression_baselines.json`](https://github.com/ppgranger/token-saver/blob/main/tests/compression_baselines.json)
+Version: **3.0.0** · Baselines last updated: **2026-08-02** · Source: [`tests/compression_baselines.json`](https://github.com/ppgranger/token-saver/blob/main/tests/compression_baselines.json)
 
 These are not marketing estimates. Every row below is a fixed baseline
 checked into the repository and enforced by
@@ -25,9 +25,9 @@ numbers can only go up, or a PR has to explicitly justify why one went down.
 2. Each scenario is run through the real `CompressionEngine`
    (`src/engine.py`), the same code path a live Claude Code or Antigravity
    CLI session uses — no mocking, no separate "demo" implementation.
-3. The ratio is computed in **tokens**, not bytes or lines, using the same
-   `chars_per_token` estimate the engine uses internally, so the reported
-   percentage matches what actually leaves the context window.
+3. Token counts are **estimates** computed from character counts with the
+   engine's `chars_per_token` setting. The ratio measures that estimate,
+   not a model-specific tokenizer, API billing, or whole-session savings.
 4. Baselines are regenerated only deliberately, by re-running the audit
    script and committing the new JSON — never silently.
 
@@ -94,5 +94,5 @@ for how that's enforced across all 36 processors.
 
 - [How Token-Saver Compares](comparison.md) — the same rigor applied to
   competing approaches (LLM summarization, blind truncation, caching).
-- [Processor reference](processors/) — per-tool documentation of what each
+- [Processor reference](processors/index.md) — per-tool documentation of what each
   processor keeps and drops.

@@ -1,22 +1,48 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Helm output processor: install, upgrade, list, template, status."""
 
 import re
 
-from .base import Processor
+from src.processors import base
 
 
-class HelmProcessor(Processor):
+class HelmProcessor(base.Processor):
+    """Summarize Helm manifests, releases, and deployment status."""
+
     priority = 41
     handles_failure = True
     hook_patterns = [
-        r"^helm\s+(install|upgrade|list|template|status|rollback|history|uninstall|get)\b",
+        (
+            r"^helm\s+(install|upgrade|list|template|status|rollback|history|"
+            r"uninstall|get)\b"
+        ),
     ]
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "helm"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         return bool(
             re.search(
                 r"\bhelm\s+(install|upgrade|list|template|status|rollback|"
@@ -26,6 +52,15 @@ class HelmProcessor(Processor):
         )
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
@@ -56,7 +91,9 @@ class HelmProcessor(Processor):
             stripped = line.strip()
             if stripped == "---":
                 if current_kind:
-                    manifests.append((f"{current_kind}/{current_name}", current_lines))
+                    manifests.append(
+                        (f"{current_kind}/{current_name}", current_lines)
+                    )
                 current_kind = ""
                 current_name = ""
                 current_lines = 0
@@ -72,13 +109,18 @@ class HelmProcessor(Processor):
         if current_kind:
             manifests.append((f"{current_kind}/{current_name}", current_lines))
 
-        result = [f"helm template: {len(manifests)} manifests, {len(lines)} lines total:"]
+        result = [
+            (
+                f"helm template: {len(manifests)} manifests, {len(lines)} "
+                f"lines total:"
+            )
+        ]
         for manifest, count in manifests:
             result.append(f"  {manifest} ({count} lines)")
         return "\n".join(result)
 
     def _process_install(self, output: str) -> str:
-        """Compress helm install/upgrade/status: keep status, skip NOTES boilerplate."""
+        """Keep Helm deployment status while removing NOTES boilerplate."""
         lines = output.splitlines()
         if len(lines) <= 20:
             return output

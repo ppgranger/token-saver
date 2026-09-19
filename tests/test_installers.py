@@ -1,4 +1,16 @@
-"""Tests for installer utility functions: migration, version stamping, CLI/core install."""
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Test installer migration, version stamping, and CLI/core installation."""
 
 import json
 import os
@@ -12,21 +24,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from unittest import mock
 
-from installers.common import (
-    IS_WINDOWS,
-    _legacy_dirs,
-    _read_version,
-    install_cli,
-    install_core,
-    migrate_from_legacy,
-    stamp_version,
-    uninstall_cli,
-    uninstall_core,
-)
+import installers.common
 
 
 class IsolatedSettingsTree:
-    """Base for tests that touch the user's Claude settings tree.
+    r"""Base for tests that touch the user's Claude settings tree.
 
     ``~/.claude`` is the POSIX answer only: on Windows the installer reads
     ``%APPDATA%\\claude``.  Patching ``home()`` therefore isolates nothing
@@ -45,7 +47,7 @@ class IsolatedSettingsTree:
         self.tmp_home = tempfile.mkdtemp()
         self._patches = [
             mock.patch("installers.common.home", return_value=self.tmp_home),
-            mock.patch("installers.claude.home", return_value=self.tmp_home),
+            mock.patch("installers.common.home", return_value=self.tmp_home),
             mock.patch.dict(
                 os.environ,
                 {"APPDATA": os.path.join(self.tmp_home, "AppData", "Roaming")},
@@ -62,9 +64,9 @@ class IsolatedSettingsTree:
     @property
     def settings_dir(self) -> str:
         """Where the installer will look for settings.json, on this platform."""
-        from installers.claude import _settings_dir
+        import installers.claude
 
-        return _settings_dir()
+        return installers.claude._settings_dir()
 
     def legacy_dir(self, kind: str) -> str:
         """One of the three legacy directories, selected by which app owns it.
@@ -73,13 +75,19 @@ class IsolatedSettingsTree:
         a change to ``_legacy_dirs()`` fail loudly instead of silently testing
         the wrong directory.
         """
-        dirs = _legacy_dirs()
+        dirs = installers.common._legacy_dirs()
         rel = {d: os.path.relpath(d, self.tmp_home).lower() for d in dirs}
         if kind == "data":
-            matches = [d for d in dirs if "claude" not in rel[d] and "gemini" not in rel[d]]
+            matches = [
+                d
+                for d in dirs
+                if "claude" not in rel[d] and "gemini" not in rel[d]
+            ]
         else:
             matches = [d for d in dirs if kind in rel[d]]
-        assert len(matches) == 1, f"expected exactly one {kind!r} legacy dir among {dirs}"
+        assert len(matches) == 1, (
+            f"expected exactly one {kind!r} legacy dir among {dirs}"
+        )
         return matches[0]
 
 
@@ -102,14 +110,14 @@ class TestPlatformPaths:
 
         with (
             mock.patch.object(installers.common, "IS_WINDOWS", is_windows),
-            mock.patch.object(installers.claude, "IS_WINDOWS", is_windows),
+            mock.patch.object(installers.common, "IS_WINDOWS", is_windows),
             mock.patch.object(installers.common, "home", return_value=home_dir),
-            mock.patch.object(installers.claude, "home", return_value=home_dir),
+            mock.patch.object(installers.common, "home", return_value=home_dir),
             mock.patch.dict(os.environ, {"APPDATA": appdata}),
         ):
             return {
                 "settings": installers.claude._settings_dir(),
-                "legacy": _legacy_dirs(),
+                "legacy": installers.common._legacy_dirs(),
             }
 
     def test_posix_settings_dir_is_dot_claude_in_home(self):
@@ -117,7 +125,7 @@ class TestPlatformPaths:
         assert paths["settings"] == os.path.join("/home/u", ".claude")
 
     def test_windows_settings_dir_is_claude_under_appdata(self):
-        """Not ``~/.claude``: Claude Code stores settings in the roaming profile."""
+        """Locate Windows Claude Code settings in the roaming profile."""
         appdata = os.path.join("C:", "Users", "u", "AppData", "Roaming")
         paths = self._paths(True, os.path.join("C:", "Users", "u"), appdata)
         assert paths["settings"] == os.path.join(appdata, "claude")
@@ -132,7 +140,9 @@ class TestPlatformPaths:
 
     def test_windows_legacy_dirs_live_under_appdata(self):
         appdata = os.path.join("C:", "Users", "u", "AppData", "Roaming")
-        legacy = self._paths(True, os.path.join("C:", "Users", "u"), appdata)["legacy"]
+        legacy = self._paths(True, os.path.join("C:", "Users", "u"), appdata)[
+            "legacy"
+        ]
         assert legacy == [
             os.path.join(appdata, "claude", "plugins", "token-saving"),
             os.path.join(appdata, "gemini", "extensions", "token-saving"),
@@ -140,7 +150,7 @@ class TestPlatformPaths:
         ]
 
     def test_windows_falls_back_to_a_default_appdata_when_unset(self):
-        """A Windows box with no %APPDATA% must not resolve to a bare relative path."""
+        """Resolve an absolute fallback when APPDATA is unset on Windows."""
         import installers.common
 
         home_dir = os.path.join("C:", "Users", "u")
@@ -149,19 +159,19 @@ class TestPlatformPaths:
             mock.patch.object(installers.common, "home", return_value=home_dir),
             mock.patch.dict(os.environ, {}, clear=True),
         ):
-            legacy = _legacy_dirs()
+            legacy = installers.common._legacy_dirs()
         expected = os.path.join(home_dir, "AppData", "Roaming")
         assert all(d.startswith(expected) for d in legacy), legacy
 
 
 class TestReadVersion:
     def test_reads_current_version(self):
-        from src import __version__
+        import src
 
-        assert _read_version() == __version__
+        assert installers.common._read_version() == src.__version__
 
     def test_version_is_valid_semver(self):
-        version = _read_version()
+        version = installers.common._read_version()
         parts = version.split(".")
         assert len(parts) == 3
         for p in parts:
@@ -180,11 +190,11 @@ class TestStampVersion:
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump({"name": "test", "version": "0.0.0"}, f)
 
-        stamp_version(self.tmp_dir, ["plugin.json"])
+        installers.common.stamp_version(self.tmp_dir, ["plugin.json"])
 
         with open(manifest_path, encoding="utf-8") as f:
             data = json.load(f)
-        assert data["version"] == _read_version()
+        assert data["version"] == installers.common._read_version()
         assert data["name"] == "test"
 
     def test_skips_symlinked_manifest(self):
@@ -198,7 +208,7 @@ class TestStampVersion:
         link_path = os.path.join(link_dir, "plugin.json")
         os.symlink(real_path, link_path)
 
-        stamp_version(link_dir, ["plugin.json"])
+        installers.common.stamp_version(link_dir, ["plugin.json"])
 
         # Original should NOT have been stamped (symlink was skipped)
         with open(real_path, encoding="utf-8") as f:
@@ -207,7 +217,7 @@ class TestStampVersion:
 
     def test_skips_missing_manifest(self):
         # Should not raise
-        stamp_version(self.tmp_dir, ["nonexistent.json"])
+        installers.common.stamp_version(self.tmp_dir, ["nonexistent.json"])
 
     def test_stamps_marketplace_plugin_entries(self):
         """stamp_version must update version inside plugins[] array."""
@@ -217,18 +227,24 @@ class TestStampVersion:
                 {
                     "name": "test-marketplace",
                     "plugins": [
-                        {"name": "my-plugin", "version": "1.0.0", "source": "./"},
+                        {
+                            "name": "my-plugin",
+                            "version": "1.0.0",
+                            "source": "./",
+                        },
                     ],
                 },
                 f,
             )
 
-        stamp_version(self.tmp_dir, ["marketplace.json"])
+        installers.common.stamp_version(self.tmp_dir, ["marketplace.json"])
 
         with open(manifest_path, encoding="utf-8") as f:
             data = json.load(f)
         # The nested version must be stamped
-        assert data["plugins"][0]["version"] == _read_version()
+        assert (
+            data["plugins"][0]["version"] == installers.common._read_version()
+        )
         # No spurious top-level version should be added
         assert "version" not in data
 
@@ -247,12 +263,14 @@ class TestStampVersion:
                 f,
             )
 
-        stamp_version(self.tmp_dir, ["hybrid.json"])
+        installers.common.stamp_version(self.tmp_dir, ["hybrid.json"])
 
         with open(manifest_path, encoding="utf-8") as f:
             data = json.load(f)
-        assert data["version"] == _read_version()
-        assert data["plugins"][0]["version"] == _read_version()
+        assert data["version"] == installers.common._read_version()
+        assert (
+            data["plugins"][0]["version"] == installers.common._read_version()
+        )
 
 
 class TestMigrateFromLegacy(IsolatedSettingsTree):
@@ -260,10 +278,12 @@ class TestMigrateFromLegacy(IsolatedSettingsTree):
         legacy_dir = self.legacy_dir("claude")
         os.makedirs(legacy_dir)
         # Write a dummy file to prove it gets removed
-        with open(os.path.join(legacy_dir, "dummy.txt"), "w", encoding="utf-8") as f:
+        with open(
+            os.path.join(legacy_dir, "dummy.txt"), "w", encoding="utf-8"
+        ) as f:
             f.write("old")
 
-        found = migrate_from_legacy()
+        found = installers.common.migrate_from_legacy()
 
         assert found is True
         assert not os.path.exists(legacy_dir)
@@ -272,7 +292,7 @@ class TestMigrateFromLegacy(IsolatedSettingsTree):
         legacy_dir = self.legacy_dir("gemini")
         os.makedirs(legacy_dir)
 
-        found = migrate_from_legacy()
+        found = installers.common.migrate_from_legacy()
 
         assert found is True
         assert not os.path.exists(legacy_dir)
@@ -281,13 +301,16 @@ class TestMigrateFromLegacy(IsolatedSettingsTree):
         legacy_dir = self.legacy_dir("data")
         os.makedirs(legacy_dir)
 
-        found = migrate_from_legacy()
+        found = installers.common.migrate_from_legacy()
 
         assert found is True
         assert not os.path.exists(legacy_dir)
 
     @pytest.mark.skipif(
-        IS_WINDOWS, reason="creating a symlink on Windows needs Developer Mode or admin rights"
+        installers.common.IS_WINDOWS,
+        reason=(
+            "creating a symlink on Windows needs Developer Mode or admin rights"
+        ),
     )
     def test_removes_legacy_dir_that_is_a_symlink(self):
         """A legacy path that is a symlink must be unlinked, not rmtree'd.
@@ -301,7 +324,7 @@ class TestMigrateFromLegacy(IsolatedSettingsTree):
         os.makedirs(os.path.dirname(legacy_dir), exist_ok=True)
         os.symlink(target, legacy_dir)
 
-        found = migrate_from_legacy()
+        found = installers.common.migrate_from_legacy()
 
         assert found is True
         assert not os.path.islink(legacy_dir)
@@ -309,7 +332,10 @@ class TestMigrateFromLegacy(IsolatedSettingsTree):
         assert os.path.isdir(target)
 
     @pytest.mark.skipif(
-        IS_WINDOWS, reason="creating a symlink on Windows needs Developer Mode or admin rights"
+        installers.common.IS_WINDOWS,
+        reason=(
+            "creating a symlink on Windows needs Developer Mode or admin rights"
+        ),
     )
     def test_removes_broken_legacy_symlink(self):
         """A dangling legacy symlink (target missing) is still removed."""
@@ -317,7 +343,7 @@ class TestMigrateFromLegacy(IsolatedSettingsTree):
         os.makedirs(os.path.dirname(legacy_dir), exist_ok=True)
         os.symlink(os.path.join(self.tmp_home, "does_not_exist"), legacy_dir)
 
-        found = migrate_from_legacy()
+        found = installers.common.migrate_from_legacy()
 
         assert found is True
         assert not os.path.islink(legacy_dir)
@@ -335,7 +361,10 @@ class TestMigrateFromLegacy(IsolatedSettingsTree):
                         "hooks": [
                             {
                                 "type": "command",
-                                "command": "python3 /old/token-saving/claude/hook_pretool.py",
+                                "command": (
+                                    "python3 "
+                                    "/old/token-saving/claude/hook_pretool.py"
+                                ),
                             }
                         ],
                     },
@@ -344,7 +373,10 @@ class TestMigrateFromLegacy(IsolatedSettingsTree):
                         "hooks": [
                             {
                                 "type": "command",
-                                "command": "python3 /new/token-saver/claude/hook_pretool.py",
+                                "command": (
+                                    "python3 "
+                                    "/new/token-saver/claude/hook_pretool.py"
+                                ),
                             }
                         ],
                     },
@@ -354,7 +386,7 @@ class TestMigrateFromLegacy(IsolatedSettingsTree):
         with open(settings_path, "w", encoding="utf-8") as f:
             json.dump(settings, f)
 
-        found = migrate_from_legacy()
+        found = installers.common.migrate_from_legacy()
 
         assert found is True
         with open(settings_path, encoding="utf-8") as f:
@@ -364,7 +396,7 @@ class TestMigrateFromLegacy(IsolatedSettingsTree):
         assert "token-saver" in json.dumps(result["hooks"]["PreToolUse"][0])
 
     def test_noop_when_nothing_legacy(self):
-        found = migrate_from_legacy()
+        found = installers.common.migrate_from_legacy()
 
         assert found is False
 
@@ -379,7 +411,7 @@ class TestMigrateFromLegacy(IsolatedSettingsTree):
             json.dump({"hooks": "invalid"}, f)
 
         # Should not raise
-        found = migrate_from_legacy()
+        found = installers.common.migrate_from_legacy()
 
         assert found is False
 
@@ -392,56 +424,70 @@ class TestInstallCli:
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
     def test_copies_cli_script(self):
-        with mock.patch("installers.common._cli_install_dir", return_value=self.tmp_dir):
-            install_cli(use_symlink=False)
+        with mock.patch(
+            "installers.common._cli_install_dir", return_value=self.tmp_dir
+        ):
+            installers.common.install_cli(use_symlink=False)
 
         dst = os.path.join(self.tmp_dir, "token-saver")
         assert os.path.exists(dst)
         assert os.access(dst, os.X_OK)
 
     def test_symlinks_cli_script(self):
-        with mock.patch("installers.common._cli_install_dir", return_value=self.tmp_dir):
-            install_cli(use_symlink=True)
+        with mock.patch(
+            "installers.common._cli_install_dir", return_value=self.tmp_dir
+        ):
+            installers.common.install_cli(use_symlink=True)
 
         dst = os.path.join(self.tmp_dir, "token-saver")
         assert os.path.islink(dst)
 
     def test_uninstall_removes_cli(self):
         # First install
-        with mock.patch("installers.common._cli_install_dir", return_value=self.tmp_dir):
-            install_cli(use_symlink=False)
+        with mock.patch(
+            "installers.common._cli_install_dir", return_value=self.tmp_dir
+        ):
+            installers.common.install_cli(use_symlink=False)
 
         dst = os.path.join(self.tmp_dir, "token-saver")
         assert os.path.exists(dst)
 
         # Then uninstall
-        with mock.patch("installers.common._cli_install_dir", return_value=self.tmp_dir):
-            uninstall_cli()
+        with mock.patch(
+            "installers.common._cli_install_dir", return_value=self.tmp_dir
+        ):
+            installers.common.uninstall_cli()
 
         assert not os.path.exists(dst)
 
     def test_uninstall_noop_when_missing(self):
         # Should not raise
-        with mock.patch("installers.common._cli_install_dir", return_value=self.tmp_dir):
-            uninstall_cli()
+        with mock.patch(
+            "installers.common._cli_install_dir", return_value=self.tmp_dir
+        ):
+            installers.common.uninstall_cli()
 
     def test_install_overwrites_existing(self):
         dst = os.path.join(self.tmp_dir, "token-saver")
         with open(dst, "w", encoding="utf-8") as f:
             f.write("old content")
 
-        with mock.patch("installers.common._cli_install_dir", return_value=self.tmp_dir):
-            install_cli(use_symlink=False)
+        with mock.patch(
+            "installers.common._cli_install_dir", return_value=self.tmp_dir
+        ):
+            installers.common.install_cli(use_symlink=False)
 
         with open(dst, encoding="utf-8") as f:
             content = f.read()
         assert "old content" not in content
 
     def test_copy_does_not_corrupt_symlink_target(self):
-        """Switching from --link to copy should not overwrite the original source."""
+        """Keep source files intact when switching from links to copies."""
         # First install with symlink
-        with mock.patch("installers.common._cli_install_dir", return_value=self.tmp_dir):
-            install_cli(use_symlink=True)
+        with mock.patch(
+            "installers.common._cli_install_dir", return_value=self.tmp_dir
+        ):
+            installers.common.install_cli(use_symlink=True)
 
         dst = os.path.join(self.tmp_dir, "token-saver")
         assert os.path.islink(dst)
@@ -450,8 +496,10 @@ class TestInstallCli:
             original_content = f.read()
 
         # Reinstall with copy — should NOT overwrite the symlink target
-        with mock.patch("installers.common._cli_install_dir", return_value=self.tmp_dir):
-            install_cli(use_symlink=False)
+        with mock.patch(
+            "installers.common._cli_install_dir", return_value=self.tmp_dir
+        ):
+            installers.common.install_cli(use_symlink=False)
 
         assert not os.path.islink(dst)  # should be a real file now
         with open(target_before, encoding="utf-8") as f:
@@ -466,25 +514,37 @@ class TestInstallCore:
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
     def test_copies_core_files(self):
-        with mock.patch("installers.common.token_saver_data_dir", return_value=self.tmp_dir):
-            install_core(use_symlink=False)
+        with mock.patch(
+            "installers.common.token_saver_data_dir", return_value=self.tmp_dir
+        ):
+            installers.common.install_core(use_symlink=False)
 
         # Verify key files exist
         assert os.path.isfile(os.path.join(self.tmp_dir, "src", "cli.py"))
         assert os.path.isfile(os.path.join(self.tmp_dir, "src", "__init__.py"))
         assert os.path.isfile(os.path.join(self.tmp_dir, "install.py"))
-        assert os.path.isfile(os.path.join(self.tmp_dir, "installers", "common.py"))
+        assert os.path.isfile(
+            os.path.join(self.tmp_dir, "installers", "common.py")
+        )
         assert os.path.isfile(os.path.join(self.tmp_dir, "bin", "token-saver"))
         # New v2 files
-        assert os.path.isfile(os.path.join(self.tmp_dir, ".claude-plugin", "plugin.json"))
+        assert os.path.isfile(
+            os.path.join(self.tmp_dir, ".claude-plugin", "plugin.json")
+        )
         assert os.path.isfile(os.path.join(self.tmp_dir, "hooks", "hooks.json"))
-        assert os.path.isfile(os.path.join(self.tmp_dir, "scripts", "hook_pretool.py"))
+        assert os.path.isfile(
+            os.path.join(self.tmp_dir, "scripts", "hook_pretool.py")
+        )
         assert os.path.isfile(os.path.join(self.tmp_dir, "scripts", "wrap.py"))
-        assert os.path.isfile(os.path.join(self.tmp_dir, "scripts", "__init__.py"))
+        assert os.path.isfile(
+            os.path.join(self.tmp_dir, "scripts", "__init__.py")
+        )
 
     def test_bin_is_executable(self):
-        with mock.patch("installers.common.token_saver_data_dir", return_value=self.tmp_dir):
-            install_core(use_symlink=False)
+        with mock.patch(
+            "installers.common.token_saver_data_dir", return_value=self.tmp_dir
+        ):
+            installers.common.install_core(use_symlink=False)
 
         bin_path = os.path.join(self.tmp_dir, "bin", "token-saver")
         assert os.access(bin_path, os.X_OK)
@@ -496,9 +556,11 @@ class TestInstallCore:
         with open(db_path, "w", encoding="utf-8") as f:
             f.write("database")
 
-        with mock.patch("installers.common.token_saver_data_dir", return_value=self.tmp_dir):
-            install_core(use_symlink=False)
-            uninstall_core()
+        with mock.patch(
+            "installers.common.token_saver_data_dir", return_value=self.tmp_dir
+        ):
+            installers.common.install_core(use_symlink=False)
+            installers.common.uninstall_core()
 
         # Core files should be gone
         assert not os.path.exists(os.path.join(self.tmp_dir, "src", "cli.py"))
@@ -507,26 +569,37 @@ class TestInstallCore:
         assert os.path.isfile(db_path)
 
     def test_uninstall_core_cleans_empty_parent_dirs(self):
-        """Verify that nested empty directories (e.g. src/) are removed after children."""
-        with mock.patch("installers.common.token_saver_data_dir", return_value=self.tmp_dir):
-            install_core(use_symlink=False)
-            uninstall_core()
+        """Remove empty parent directories after their children."""
+        with mock.patch(
+            "installers.common.token_saver_data_dir", return_value=self.tmp_dir
+        ):
+            installers.common.install_core(use_symlink=False)
+            installers.common.uninstall_core()
 
-        # src/ and src/processors/ should both be removed (empty after file deletion)
-        assert not os.path.exists(os.path.join(self.tmp_dir, "src", "processors"))
+        # src/ and src/processors/ should both be removed (empty after file
+        # deletion)
+        assert not os.path.exists(
+            os.path.join(self.tmp_dir, "src", "processors")
+        )
         assert not os.path.exists(os.path.join(self.tmp_dir, "src"))
         # data_dir itself should still exist
         assert os.path.isdir(self.tmp_dir)
 
     def test_cleans_legacy_claude_directory(self):
-        """install_core should remove legacy claude/ subdirectory from data dir."""
+        """Remove the legacy claude directory during core installation."""
         legacy_claude = os.path.join(self.tmp_dir, "claude")
         os.makedirs(legacy_claude)
-        with open(os.path.join(legacy_claude, "hook_pretool.py"), "w", encoding="utf-8") as f:
+        with open(
+            os.path.join(legacy_claude, "hook_pretool.py"),
+            "w",
+            encoding="utf-8",
+        ) as f:
             f.write("# old hook")
 
-        with mock.patch("installers.common.token_saver_data_dir", return_value=self.tmp_dir):
-            install_core(use_symlink=False)
+        with mock.patch(
+            "installers.common.token_saver_data_dir", return_value=self.tmp_dir
+        ):
+            installers.common.install_core(use_symlink=False)
 
         assert not os.path.exists(legacy_claude)
 
@@ -550,7 +623,7 @@ class TestMigrateFromV1(IsolatedSettingsTree):
             return json.load(f)
 
     def test_removes_v1_hooks_from_settings(self):
-        from installers.claude import _migrate_from_v1
+        import installers.claude
 
         self._write_settings(
             {
@@ -561,8 +634,10 @@ class TestMigrateFromV1(IsolatedSettingsTree):
                             "hooks": [
                                 {
                                     "type": "command",
-                                    "command": "python3 /home/user/.claude/plugins/"
-                                    "token-saver/claude/hook_pretool.py",
+                                    "command": (
+                                        "python3 /home/user/.claude/plugins/"
+                                        "token-saver/claude/hook_pretool.py"
+                                    ),
                                 }
                             ],
                         }
@@ -572,8 +647,10 @@ class TestMigrateFromV1(IsolatedSettingsTree):
                             "hooks": [
                                 {
                                     "type": "command",
-                                    "command": "python3 /home/user/.claude/plugins/"
-                                    "token-saver/src/hook_session.py",
+                                    "command": (
+                                        "python3 /home/user/.claude/plugins/"
+                                        "token-saver/src/hook_session.py"
+                                    ),
                                 }
                             ],
                         }
@@ -582,15 +659,15 @@ class TestMigrateFromV1(IsolatedSettingsTree):
             }
         )
 
-        with mock.patch("installers.claude.home", return_value=self.tmp_home):
-            result = _migrate_from_v1()
+        with mock.patch("installers.common.home", return_value=self.tmp_home):
+            result = installers.claude._migrate_from_v1()
 
         assert result is True
         settings = self._read_settings()
         assert "hooks" not in settings
 
     def test_removes_v1_session_hooks_from_settings(self):
-        from installers.claude import _migrate_from_v1
+        import installers.claude
 
         self._write_settings(
             {
@@ -600,7 +677,9 @@ class TestMigrateFromV1(IsolatedSettingsTree):
                             "hooks": [
                                 {
                                     "type": "command",
-                                    "command": "python3 /path/to/src/hook_session.py",
+                                    "command": (
+                                        "python3 /path/to/src/hook_session.py"
+                                    ),
                                 }
                             ],
                         }
@@ -609,43 +688,47 @@ class TestMigrateFromV1(IsolatedSettingsTree):
             }
         )
 
-        with mock.patch("installers.claude.home", return_value=self.tmp_home):
-            result = _migrate_from_v1()
+        with mock.patch("installers.common.home", return_value=self.tmp_home):
+            result = installers.claude._migrate_from_v1()
 
         assert result is True
         settings = self._read_settings()
         assert "hooks" not in settings
 
     def test_removes_legacy_v1_plugin_directory(self):
-        from installers.claude import _migrate_from_v1
+        import installers.claude
 
         old_dir = os.path.join(self._settings_dir(), "plugins", "token-saver")
         claude_subdir = os.path.join(old_dir, "claude")
         os.makedirs(claude_subdir)
-        with open(os.path.join(claude_subdir, "hook_pretool.py"), "w", encoding="utf-8") as f:
+        with open(
+            os.path.join(claude_subdir, "hook_pretool.py"),
+            "w",
+            encoding="utf-8",
+        ) as f:
             f.write("# old")
 
-        with mock.patch("installers.claude.home", return_value=self.tmp_home):
-            result = _migrate_from_v1()
+        with mock.patch("installers.common.home", return_value=self.tmp_home):
+            result = installers.claude._migrate_from_v1()
 
         assert result is True
         assert not os.path.exists(old_dir)
 
     def test_idempotent(self):
-        from installers.claude import _migrate_from_v1
+        import installers.claude
 
-        with mock.patch("installers.claude.home", return_value=self.tmp_home):
-            result1 = _migrate_from_v1()
-            result2 = _migrate_from_v1()
+        with mock.patch("installers.common.home", return_value=self.tmp_home):
+            result1 = installers.claude._migrate_from_v1()
+            result2 = installers.claude._migrate_from_v1()
 
         assert result1 is False
         assert result2 is False
 
     def test_fresh_install_returns_false(self):
-        from installers.claude import _migrate_from_v1
+        import installers.claude
 
-        with mock.patch("installers.claude.home", return_value=self.tmp_home):
-            result = _migrate_from_v1()
+        with mock.patch("installers.common.home", return_value=self.tmp_home):
+            result = installers.claude._migrate_from_v1()
 
         assert result is False
 
@@ -684,10 +767,12 @@ class TestRegisterPlugin(IsolatedSettingsTree):
         )
 
     def test_registers_marketplace(self):
-        from installers.claude import _register_plugin
+        import installers.claude
 
-        with mock.patch("installers.claude.home", return_value=self.tmp_home):
-            _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
+        with mock.patch("installers.common.home", return_value=self.tmp_home):
+            installers.claude._register_plugin(
+                self.tmp_marketplace, self.tmp_target, "2.0.0"
+            )
 
         with open(self._known_marketplaces_path(), encoding="utf-8") as f:
             known = json.load(f)
@@ -699,10 +784,12 @@ class TestRegisterPlugin(IsolatedSettingsTree):
         assert entry["installLocation"] == self.tmp_marketplace
 
     def test_registers_in_installed_plugins_v2_format(self):
-        from installers.claude import _register_plugin
+        import installers.claude
 
-        with mock.patch("installers.claude.home", return_value=self.tmp_home):
-            _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
+        with mock.patch("installers.common.home", return_value=self.tmp_home):
+            installers.claude._register_plugin(
+                self.tmp_marketplace, self.tmp_target, "2.0.0"
+            )
 
         with open(self._installed_plugins_path(), encoding="utf-8") as f:
             data = json.load(f)
@@ -716,10 +803,12 @@ class TestRegisterPlugin(IsolatedSettingsTree):
         assert entries[0]["scope"] == "user"
 
     def test_enables_in_settings(self):
-        from installers.claude import _register_plugin
+        import installers.claude
 
-        with mock.patch("installers.claude.home", return_value=self.tmp_home):
-            _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
+        with mock.patch("installers.common.home", return_value=self.tmp_home):
+            installers.claude._register_plugin(
+                self.tmp_marketplace, self.tmp_target, "2.0.0"
+            )
 
         with open(self._settings_path(), encoding="utf-8") as f:
             settings = json.load(f)
@@ -727,11 +816,15 @@ class TestRegisterPlugin(IsolatedSettingsTree):
         assert settings["enabledPlugins"][key] is True
 
     def test_no_duplicates_on_reregistration(self):
-        from installers.claude import _register_plugin
+        import installers.claude
 
-        with mock.patch("installers.claude.home", return_value=self.tmp_home):
-            _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
-            _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
+        with mock.patch("installers.common.home", return_value=self.tmp_home):
+            installers.claude._register_plugin(
+                self.tmp_marketplace, self.tmp_target, "2.0.0"
+            )
+            installers.claude._register_plugin(
+                self.tmp_marketplace, self.tmp_target, "2.0.0"
+            )
 
         with open(self._installed_plugins_path(), encoding="utf-8") as f:
             data = json.load(f)
@@ -739,7 +832,7 @@ class TestRegisterPlugin(IsolatedSettingsTree):
         assert len(data["plugins"][key]) == 1
 
     def test_preserves_existing_marketplaces(self):
-        from installers.claude import _register_plugin
+        import installers.claude
 
         # Pre-populate with another marketplace
         km_path = self._known_marketplaces_path()
@@ -755,8 +848,10 @@ class TestRegisterPlugin(IsolatedSettingsTree):
                 f,
             )
 
-        with mock.patch("installers.claude.home", return_value=self.tmp_home):
-            _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
+        with mock.patch("installers.common.home", return_value=self.tmp_home):
+            installers.claude._register_plugin(
+                self.tmp_marketplace, self.tmp_target, "2.0.0"
+            )
 
         with open(km_path, encoding="utf-8") as f:
             known = json.load(f)
@@ -764,7 +859,7 @@ class TestRegisterPlugin(IsolatedSettingsTree):
         assert "token-saver-marketplace" in known
 
     def test_preserves_existing_v2_plugins(self):
-        from installers.claude import _register_plugin
+        import installers.claude
 
         # Pre-populate with another plugin in v2 format
         plugins_path = self._installed_plugins_path()
@@ -780,8 +875,10 @@ class TestRegisterPlugin(IsolatedSettingsTree):
                 f,
             )
 
-        with mock.patch("installers.claude.home", return_value=self.tmp_home):
-            _register_plugin(self.tmp_marketplace, self.tmp_target, "2.0.0")
+        with mock.patch("installers.common.home", return_value=self.tmp_home):
+            installers.claude._register_plugin(
+                self.tmp_marketplace, self.tmp_target, "2.0.0"
+            )
 
         with open(plugins_path, encoding="utf-8") as f:
             data = json.load(f)
@@ -813,7 +910,7 @@ class TestUnregisterPlugin(IsolatedSettingsTree):
         )
 
     def test_removes_from_all_files_v2(self):
-        from installers.claude import _unregister_plugin
+        import installers.claude
 
         plugins_dir = os.path.join(self._settings_dir(), "plugins")
         os.makedirs(plugins_dir, exist_ok=True)
@@ -836,7 +933,10 @@ class TestUnregisterPlugin(IsolatedSettingsTree):
             json.dump(
                 {
                     "token-saver-marketplace": {
-                        "source": {"source": "github", "repo": "ppgranger/token-saver"},
+                        "source": {
+                            "source": "github",
+                            "repo": "ppgranger/token-saver",
+                        },
                     },
                 },
                 f,
@@ -853,8 +953,8 @@ class TestUnregisterPlugin(IsolatedSettingsTree):
                 f,
             )
 
-        with mock.patch("installers.claude.home", return_value=self.tmp_home):
-            _unregister_plugin()
+        with mock.patch("installers.common.home", return_value=self.tmp_home):
+            installers.claude._unregister_plugin()
 
         with open(self._installed_plugins_path(), encoding="utf-8") as f:
             data = json.load(f)
@@ -868,7 +968,7 @@ class TestUnregisterPlugin(IsolatedSettingsTree):
 
     def test_removes_from_v1_format(self):
         """Unregister handles our old v1 array format in installed_plugins."""
-        from installers.claude import _unregister_plugin
+        import installers.claude
 
         plugins_dir = os.path.join(self._settings_dir(), "plugins")
         os.makedirs(plugins_dir, exist_ok=True)
@@ -895,14 +995,14 @@ class TestUnregisterPlugin(IsolatedSettingsTree):
                 f,
             )
 
-        with mock.patch("installers.claude.home", return_value=self.tmp_home):
-            _unregister_plugin()
+        with mock.patch("installers.common.home", return_value=self.tmp_home):
+            installers.claude._unregister_plugin()
 
         with open(self._installed_plugins_path(), encoding="utf-8") as f:
             assert len(json.load(f)) == 0
 
     def test_cleans_legacy_hooks(self):
-        from installers.claude import _unregister_plugin
+        import installers.claude
 
         os.makedirs(os.path.dirname(self._settings_path()), exist_ok=True)
         with open(self._settings_path(), "w", encoding="utf-8") as f:
@@ -928,8 +1028,8 @@ class TestUnregisterPlugin(IsolatedSettingsTree):
                 f,
             )
 
-        with mock.patch("installers.claude.home", return_value=self.tmp_home):
-            _unregister_plugin()
+        with mock.patch("installers.common.home", return_value=self.tmp_home):
+            installers.claude._unregister_plugin()
 
         with open(self._settings_path(), encoding="utf-8") as f:
             settings = json.load(f)
@@ -953,7 +1053,9 @@ class TestPluginStructure:
         assert "description" in data
 
     def test_marketplace_json_valid(self):
-        path = os.path.join(self._repo_root(), ".claude-plugin", "marketplace.json")
+        path = os.path.join(
+            self._repo_root(), ".claude-plugin", "marketplace.json"
+        )
         assert os.path.isfile(path)
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
@@ -982,11 +1084,15 @@ class TestPluginStructure:
         assert os.path.isfile(path)
 
     def test_skill_exists(self):
-        path = os.path.join(self._repo_root(), "skills", "token-saver-config", "SKILL.md")
+        path = os.path.join(
+            self._repo_root(), "skills", "token-saver-config", "SKILL.md"
+        )
         assert os.path.isfile(path)
 
     def test_command_exists(self):
-        path = os.path.join(self._repo_root(), "commands", "token-saver-stats.md")
+        path = os.path.join(
+            self._repo_root(), "commands", "token-saver-stats.md"
+        )
         assert os.path.isfile(path)
 
     def test_claude_directory_does_not_exist(self):

@@ -1,4 +1,19 @@
 #!/usr/bin/env python3
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Keep the installed command name stable; this launcher is not a module API.
+# pylint: disable=invalid-name
+
 """Token-Saver CLI wrapper.
 
 Works in three scenarios (tried in order):
@@ -22,7 +37,9 @@ def _find_src_dir():
     # Second: core install at ~/.token-saver/
     home = os.path.expanduser("~")
     if os.name == "nt":
-        appdata = os.environ.get("APPDATA", os.path.join(home, "AppData", "Roaming"))
+        appdata = os.environ.get(
+            "APPDATA", os.path.join(home, "AppData", "Roaming")
+        )
         core_dir = os.path.join(appdata, "token-saver")
     else:
         core_dir = os.path.join(home, ".token-saver")
@@ -32,15 +49,27 @@ def _find_src_dir():
 
     # Third: platform plugin directories (fallback)
     if os.name == "nt":
-        cache_base = os.path.join(appdata, "claude", "plugins", "cache",
-                                  "token-saver-marketplace", "token-saver")
+        cache_base = os.path.join(
+            appdata,
+            "claude",
+            "plugins",
+            "cache",
+            "token-saver-marketplace",
+            "token-saver",
+        )
         candidates = [
             os.path.join(appdata, "claude", "plugins", "token-saver"),
             os.path.join(appdata, "gemini", "extensions", "token-saver"),
         ]
     else:
-        cache_base = os.path.join(home, ".claude", "plugins", "cache",
-                                  "token-saver-marketplace", "token-saver")
+        cache_base = os.path.join(
+            home,
+            ".claude",
+            "plugins",
+            "cache",
+            "token-saver-marketplace",
+            "token-saver",
+        )
         candidates = [
             os.path.join(home, ".claude", "plugins", "token-saver"),
             os.path.join(home, ".gemini", "extensions", "token-saver"),
@@ -49,8 +78,11 @@ def _find_src_dir():
     # v2 cache: files are under .../token-saver/<version>/
     if os.path.isdir(cache_base):
         versions = sorted(
-            (d for d in os.listdir(cache_base)
-             if os.path.isdir(os.path.join(cache_base, d))),
+            (
+                d
+                for d in os.listdir(cache_base)
+                if os.path.isdir(os.path.join(cache_base, d))
+            ),
             reverse=True,
         )
         for v in versions:
@@ -70,6 +102,8 @@ def _find_src_dir():
 src_dir = _find_src_dir()
 sys.path.insert(0, src_dir)
 
-from src.cli import main  # noqa: E402
+# The installed source directory must be found before importing the CLI.
+# pylint: disable=wrong-import-position
+import src.cli  # noqa: E402
 
-main()
+src.cli.main()

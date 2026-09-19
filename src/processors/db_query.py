@@ -1,14 +1,28 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Database query output processor: psql, mysql, sqlite3."""
 
 import re
 
-from .. import config
-from .base import Processor
+from src import config
+from src.processors import base
 
 _DB_CMD_RE = re.compile(r"\b(psql|mysql|sqlite3|mycli|pgcli|litecli)\b")
 
 
-class DbQueryProcessor(Processor):
+class DbQueryProcessor(base.Processor):
+    """Truncate database result rows while retaining table structure."""
+
     priority = 38
     hook_patterns = [
         r"^(psql|mysql|sqlite3|mycli|pgcli|litecli)\b",
@@ -16,12 +30,30 @@ class DbQueryProcessor(Processor):
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "db_query"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         return bool(_DB_CMD_RE.search(command))
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
@@ -66,7 +98,11 @@ class DbQueryProcessor(Processor):
             return False
         for sep in (",", "\t", "|"):
             counts = [line.count(sep) for line in lines[:5] if line.strip()]
-            if len(counts) >= 3 and counts[0] >= 1 and all(c == counts[0] for c in counts):
+            if (
+                len(counts) >= 3
+                and counts[0] >= 1
+                and all(c == counts[0] for c in counts)
+            ):
                 return True
         return False
 
@@ -97,9 +133,13 @@ class DbQueryProcessor(Processor):
 
         data_lines = lines[header_end:data_end]
         # Filter out separator lines from data
-        data_lines = [row for row in data_lines if not re.match(r"^[-─┼+]+$", row.strip())]
+        data_lines = [
+            row for row in data_lines if not re.match(r"^[-─┼+]+$", row.strip())
+        ]
 
-        max_rows = config.get("db_max_rows") if config.get("db_max_rows") else 20
+        max_rows = (
+            config.get("db_max_rows") if config.get("db_max_rows") else 20
+        )
         head_rows = max_rows // 2 + max_rows % 2
         tail_rows = max_rows // 2
 
@@ -117,7 +157,8 @@ class DbQueryProcessor(Processor):
 
     def _process_mysql_table(self, lines: list[str]) -> str:
         """Compress MySQL table output: keep header + limited rows."""
-        # MySQL format: +---+---+, | col | col |, +---+---+, | data |, ..., +---+---+
+        # MySQL format: +---+---+, | col | col |, +---+---+, | data |, ...,
+        # +---+---+
         # Find header section (border + header + border)
         header_section = []
         data_lines = []
@@ -143,7 +184,9 @@ class DbQueryProcessor(Processor):
                 else:
                     data_lines.append(line)
 
-        max_rows = config.get("db_max_rows") if config.get("db_max_rows") else 20
+        max_rows = (
+            config.get("db_max_rows") if config.get("db_max_rows") else 20
+        )
         head_rows = max_rows // 2 + max_rows % 2
         tail_rows = max_rows // 2
 

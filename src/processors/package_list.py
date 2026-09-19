@@ -1,21 +1,47 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Package listing processor: pip list/freeze, npm ls/list, conda list."""
 
 import re
 
-from .base import Processor
+from src.processors import base
 
 
-class PackageListProcessor(Processor):
+class PackageListProcessor(base.Processor):
+    """Summarize installed package lists and dependency trees."""
+
     priority = 15
     hook_patterns = [
-        r"^(pip3?\s+(list|freeze)|npm\s+(ls|list)|conda\s+list|gem\s+list|brew\s+list)\b",
+        (
+            r"^(pip3?\s+(list|freeze)|npm\s+(ls|list)|conda\s+list|gem\s+list|"
+            r"brew\s+list)\b"
+        ),
     ]
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "package_list"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         return bool(
             re.search(
                 r"\b(pip3?\s+(list|freeze)|npm\s+(ls|list)|conda\s+list|"
@@ -25,6 +51,15 @@ class PackageListProcessor(Processor):
         )
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
@@ -82,7 +117,7 @@ class PackageListProcessor(Processor):
         return "\n".join(result)
 
     def _process_npm_ls(self, output: str) -> str:
-        """Compress npm ls: collapse dependency tree, keep top-level + issues."""
+        """Keep top-level npm dependencies and problems, collapsing subtrees."""
         lines = output.splitlines()
         if len(lines) <= 20:
             return output
@@ -132,7 +167,9 @@ class PackageListProcessor(Processor):
     def _process_conda_list(self, output: str) -> str:
         """Compress conda list output."""
         lines = output.splitlines()
-        data_lines = [line for line in lines if line.strip() and not line.startswith("#")]
+        data_lines = [
+            line for line in lines if line.strip() and not line.startswith("#")
+        ]
 
         if len(data_lines) <= 20:
             return output

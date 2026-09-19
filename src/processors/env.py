@@ -1,9 +1,22 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Environment variable processor: env, printenv, set."""
 
 import re
 
-from .. import config
-from .base import Processor
+from src import config
+from src.processors import base
+from src.processors import critical
 
 # System variables that are rarely useful for debugging
 _SYSTEM_PREFIXES = (
@@ -73,14 +86,38 @@ _UNAMBIGUOUS_SECRET = (
     r"DATABASE_URL|DATABASE_PASSWORD|MONGODB_URI|REDIS_URL|CONNECTION_STRING|"
     r"STRIPE_|TWILIO_|SENDGRID_|GITHUB_TOKEN|NPM_TOKEN|WEBHOOK|BEARER"
 )
-_AMBIGUOUS_SECRET = r"(?<![A-Za-z])(?:KEY|KEYS|TOKEN|AUTH|PAT|DSN|PASS|PWD|PEM|CERT)(?![A-Za-z])"  # noqa: S105
+_AMBIGUOUS_SECRET = (
+    r"(?<![A-Za-z])(?:KEY|KEYS|TOKEN|AUTH|PAT|DSN|PASS|PWD|PEM|"  # noqa: S105
+    r"CERT)(?![A-Za-z])"
+)
 _SENSITIVE_PATTERNS = re.compile(
     rf"({_UNAMBIGUOUS_SECRET}|{_AMBIGUOUS_SECRET})",
     re.IGNORECASE,
 )
 
 
-class EnvProcessor(Processor):
+def _redaction_allowlist() -> set[str]:
+    """Return uppercase names explicitly permitted to appear unredacted."""
+    return {
+        str(name).upper() for name in config.get("redaction_allowlist") or []
+    }
+
+
+def is_sensitive_name(name: str) -> bool:
+    """Return whether an environment variable name indicates a secret.
+
+    Args:
+        name: Variable name without its value or assignment operator.
+
+    Returns:
+        Whether the shared secret-name pattern matches, before allowlisting.
+    """
+    return bool(_SENSITIVE_PATTERNS.search(name))
+
+
+class EnvProcessor(base.Processor):
+    """Redact sensitive environment values and group remaining variables."""
+
     priority = 34
     hook_patterns = [
         r"^(env|printenv|set)\s*$",
@@ -88,45 +125,96 @@ class EnvProcessor(Processor):
 
     def redacted_secrets(self, command: str, output: str) -> bool:
         # Cheap, conservative pre-check mirroring process()'s own redaction
-        # logic (system-var and allowlist filtering aside — a false positive
+        # logic (system-var filtering aside — a false positive
         # here only costs the ratio-fallback safety net on an output that
         # turns out to have nothing sensitive, never the reverse).
-        return any(
-            _SENSITIVE_PATTERNS.search(line.split("=", 1)[0])
-            for line in output.splitlines()
-            if "=" in line
-        )
+        """Return whether processing this input would mask sensitive values.
+
+        Args:
+            command: Shell command identifying the input format.
+            output: Captured output that may contain sensitive values.
+
+        Returns:
+            Whether unredacted input must be excluded from fallback results.
+        """
+        allowlist = _redaction_allowlist()
+        for line in output.splitlines():
+            if "=" not in line:
+                continue
+            key = line.split("=", 1)[0].strip()
+            if key.upper() not in allowlist and _SENSITIVE_PATTERNS.search(key):
+                return True
+        return False
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "env"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         return bool(re.match(r"^\s*(env|printenv|set)\s*$", command))
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
         lines = output.splitlines()
+        # Names the user has marked safe to show verbatim (case-insensitive),
+        # e.g. GIT_AUTHOR_NAME or PUBLIC_KEY that would otherwise be redacted.
+        allowlist = _redaction_allowlist()
+
         if len(lines) <= 10:
-            return output
+            # Short output needs no summarization, but still needs redaction.
+            # Preserve every other line and its ending, including system vars
+            # and diagnostics that the long-output summary would omit.
+            safe_lines = []
+            for line in output.splitlines(keepends=True):
+                key, separator, _ = line.partition("=")
+                if (
+                    separator
+                    and key.strip().upper() not in allowlist
+                    and _SENSITIVE_PATTERNS.search(key)
+                ):
+                    ending = line[len(line.rstrip("\r\n")) :]
+                    safe_lines.append(f"{key}=***{ending}")
+                else:
+                    safe_lines.append(line)
+            return "".join(safe_lines)
 
         system_count = 0
         app_vars = []
+        diagnostics = []
         sensitive_redacted = 0
-
-        # Names the user has marked safe to show verbatim (case-insensitive),
-        # e.g. GIT_AUTHOR_NAME or PUBLIC_KEY that would otherwise be redacted.
-        raw_allow = config.get("redaction_allowlist") or []
-        allowlist = {str(n).upper() for n in raw_allow}
 
         for line in lines:
             stripped = line.strip()
-            if not stripped or "=" not in stripped:
+            if not stripped:
+                continue
+            if "=" not in stripped:
+                # Retain diagnostics here: once secrets have been redacted,
+                # the engine cannot safely recover lines from the raw input.
+                if critical.is_critical(stripped):
+                    diagnostics.append(stripped)
                 continue
 
-            key = stripped.split("=", 1)[0]
+            key = stripped.split("=", 1)[0].strip()
             value = stripped.split("=", 1)[1]
 
             # Filter system variables
@@ -144,7 +232,10 @@ class EnvProcessor(Processor):
             if len(value) > 200:
                 parts = value.split(":")
                 if len(parts) > 3:
-                    value = ":".join(parts[:3]) + f":... ({len(parts)} total entries)"
+                    value = (
+                        ":".join(parts[:3])
+                        + f":... ({len(parts)} total entries)"
+                    )
                 else:
                     value = value[:150] + f"... ({len(value)} chars)"
                 app_vars.append(f"  {key}={value}")
@@ -152,8 +243,14 @@ class EnvProcessor(Processor):
                 app_vars.append(f"  {stripped}")
 
         total = len(lines)
-        result = [f"{total} environment variables ({len(app_vars)} application-relevant):"]
+        result = [
+            (
+                f"{total} environment variables ({len(app_vars)} "
+                f"application-relevant):"
+            )
+        ]
         result.extend(app_vars)
+        result.extend(diagnostics)
 
         notes = []
         if system_count:

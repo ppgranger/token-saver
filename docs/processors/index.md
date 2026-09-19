@@ -3,7 +3,7 @@ title: Processors
 description: One page per tool family, documenting exactly what each processor keeps, what it drops, and which config knobs are available.
 permalink: /processors/
 nav_order: 2
-has_toc: true
+has_toc: false
 ---
 
 # Processors
@@ -15,3 +15,15 @@ can drop the ceremony without the guesswork a generic truncator would need.
 
 Every page below documents the same three things: what the processor matches,
 what it keeps, and what it drops. The full list is also in the sidebar.
+
+## All processors
+
+{% assign processor_pages = site.pages | where: "parent", "Processors" | sort_natural: "title" %}
+<ul>
+{% for processor_page in processor_pages %}
+  <li><a href="{{ processor_page.url | relative_url }}">{{ processor_page.title | escape }}</a> — {{ processor_page.description | escape }}</li>
+{% endfor %}
+</ul>
+
+[Compare compression approaches](../comparison.md) or check the
+[measured benchmarks](../benchmarks.md) before choosing thresholds.

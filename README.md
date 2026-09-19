@@ -1,27 +1,40 @@
 # Token-Saver
 
 [![CI](https://github.com/ppgranger/token-saver/actions/workflows/ci.yml/badge.svg)](https://github.com/ppgranger/token-saver/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/badge/coverage-94%25-brightgreen)](tests/)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Avg Savings](docs/assets/badge-savings.svg)](docs/processors/)
 
-**Cut your AI coding costs by 60-99% on CLI output — without losing a single error message.**
+**Keep the signal. Stop rereading the same failures.**
 
-Token-Saver is a drop-in **context-window optimizer for AI coding assistants**. It compresses the verbose terminal output your agent reads — `git diff`, `pytest`, `npm install`, `terraform plan`, `kubectl`, `docker` — so you spend fewer tokens, stay under your LLM context limit, and get faster, cheaper, more focused responses.
+Token-Saver compresses the terminal output your AI coding assistant reads —
+`git diff`, `pytest`, `npm install`, `terraform plan`, `kubectl`, `docker` — to
+leave more room for the code, instructions, and next decision. Compression runs
+locally, without another model call or an output upload.
 
-**36 specialized processors** understand the tools you already use — git, pytest, jest, cargo, go, docker, kubernetes, terraform, pulumi, helm, ansible, aws, gcloud, and more. Each one knows exactly what to keep and what to discard: errors, diffs, stack traces, and actionable data stay; progress bars, passing tests, download spinners, and boilerplate go.
+**New in v3: [Delta](#delta-changes-between-runs).** Run your tests,
+edit, run again: see which failures are new, changed, or unchanged. Fresh
+diagnostics keep their full details; repeated ones can become a short inventory,
+with details available on demand. Delta is an experimental, opt-in feature in
+3.0.0 for supported pytest and Ruff commands in Claude Code.
 
-Compatible with **Claude Code** and **Antigravity CLI**. ~60ms of added overhead per wrapped command (regex/parsing only — dwarfed by the seconds most CLI commands take to run). No extra LLM calls. Fully deterministic. One install, instant savings.
+**36 specialized processors** cover git, pytest, jest, cargo, go, docker,
+kubernetes, terraform, pulumi, helm, ansible, aws, gcloud, and more. Their rules
+reduce progress logs and boilerplate, with failure fixtures and optional quality
+contracts checking important diagnostics.
+
+Ordinary compression supports **Claude Code** and **Antigravity CLI**. It runs
+automatically after installation. Results depend on the command and output;
+already concise or unsupported output may stay unchanged.
 
 **Why developers use Token-Saver:**
 
-- 💸 **Lower API bills** — pay for signal, not noise. Typical savings of 60-99% per command.
+- 💸 **Less output to process** — many benchmark scenarios save 60-99% of estimated output tokens; billing impact depends on your usage and provider.
+- 🔁 **See what changed** — opt-in Delta compares repeated pytest/Ruff runs and keeps retained details one command away.
 - 🪟 **Bigger effective context** — fit more real work into the same context window.
-- ⚡ **Faster responses** — less text for the model to read means quicker turnarounds.
-- 🎯 **Zero information loss** — precision-tested so every error, diff, and warning survives.
+- 🎯 **Tested preservation** — failure fixtures check important diagnostics; add quality contracts for your own workflows.
 - 🔌 **Install once, forget it** — works automatically in the background, no prompts to change.
-- 🛡️ **Private & offline** — pure regex/parsing, no data ever leaves your machine.
+- 🛡️ **Local compression** — pure regex/parsing with no network calls in the compression path.
 
 ---
 
@@ -37,6 +50,8 @@ Compatible with **Claude Code** and **Antigravity CLI**. ~60ms of added overhead
 - [Precision Guarantees](#precision-guarantees)
 - [Installation](#installation)
 - [CLI Reference](#cli-reference)
+- [Delta: Changes Between Runs](#delta-changes-between-runs)
+- [Compression Quality Gates](#compression-quality-gates)
 - [Processors](#processors)
 - [Configuration](#configuration)
 - [Tuning Recipes](#tuning-recipes)
@@ -103,17 +118,25 @@ python3 bin/token-saver explain 'docker compose logs | grep error'
 
 ## Why Token-Saver Exists
 
-Every CLI command your AI coding assistant runs burns tokens — and most of that output is noise. A 500-line `git diff`, a `pytest` run with 200 passing tests, an `npm install` with 80 packages: the model only needs errors, modified files, and results. Everything else is wasted context and wasted money.
+Verbose tool output competes with your code and instructions for context. A
+`pytest` run with 200 passing tests or an install with hundreds of progress
+lines often repeats information that can be represented much more compactly.
+After an edit, another run can repeat the same failures too.
 
-The cost isn't only financial. Verbose tool output is the fastest way to fill a context window, and a full context window is where agents start to degrade — they forget earlier instructions, re-read files they already read, and lose the thread of a multi-step task. **Reducing tool-output tokens is the cheapest way to make a long agent session behave like a short one.**
+Token-Saver reduces that repetition using local parsing. Delta extends this to
+consecutive runs, while keeping a current diagnostic inventory and retrievable
+details. Whether this improves task completion, response time, or billing needs
+measurement in the agent workflow that uses it.
 
 There are three common ways to attack this:
 
 1. **Summarize with another LLM.** Accurate-ish, but it costs a second inference per command, adds seconds of latency, and is non-deterministic — the same `pytest` run can be summarized two different ways.
 2. **Truncate blindly.** Free and instant, but it's exactly how you lose the one stack-trace line that mattered.
-3. **Parse the format you already know.** `git diff` has a grammar. `pytest` has a summary line. `npm install` has a progress phase and a result phase. If you know the shape, you can drop the noise and keep 100% of the signal — deterministically, in milliseconds.
+3. **Parse the format you already know.** `git diff` has a grammar. `pytest` has a summary line. `npm install` has a progress phase and a result phase. Format-aware parsing can remove repetitive output while retaining tested diagnostics, deterministically and without another model call.
 
-Token-Saver is the third approach, applied to 36 command families. It sits between the CLI and your AI assistant, compresses output with content-aware strategies, and hands the model exactly what it needs.
+Token-Saver is the third approach, applied to 36 command families. It sits
+between the CLI and your AI assistant, applying format-specific rules whose
+preservation behavior you can test against your own captured output.
 
 ## Who It's For
 
@@ -216,24 +239,31 @@ The directory shape is preserved down to the truncation point, with an explicit 
 
 ### `env` / `printenv` — secrets redacted before the model sees them
 
-Variables whose names look sensitive (`SECRET`, `PASSWORD`, `CREDENTIAL`, `API_KEY`, `GITHUB_TOKEN`, and bare `KEY`/`TOKEN`/`AUTH`/`PWD` at letter boundaries — so `PATH`, `AUTHOR`, and `MONKEY` are left alone) have their values replaced. This is the one case where Token-Saver returns its output **even when it isn't smaller** than the input: a redacted result is never traded back for the raw one to satisfy a compression threshold.
+Variables whose names look sensitive (`SECRET`, `PASSWORD`, `CREDENTIAL`, `API_KEY`, `GITHUB_TOKEN`, and bare `KEY`/`TOKEN`/`AUTH`/`PWD` at letter boundaries — so `PATH`, `AUTHOR`, and `MONKEY` are left alone) have their values replaced. Token-Saver returns this redacted output **even when it isn't smaller** than the input: a redacted result is never traded back for the raw one to satisfy a compression threshold.
 
 ## How It Compares
 
 | | Token-Saver | LLM summarizer | Blind truncation | Response caching |
 |---|---|---|---|---|
 | Extra inference cost | None | One call per command | None | None |
-| Latency added | ~60ms | Seconds | ~0ms | Varies |
+| Additional work | Python startup + parsing | Another model call | Truncation | Cache lookup |
 | Deterministic | Yes | No | Yes | Yes |
-| Preserves all errors | Yes (tested) | Best effort | No | On cache hit only |
+| Diagnostic preservation | Tested fixtures + configurable quality contracts | Depends on prompt/model | No semantic checks | Depends on cached content |
 | Works offline | Yes | Needs a model | Yes | Usually not |
 | Understands `git diff` | Yes | Sort of | No | N/A |
 
-For a tool-by-tool breakdown against `cc_token_saver_mcp`, `token-optimizer-mcp`, and Claude Context Mode — including which ones you can run *alongside* Token-Saver — see the [full comparison](docs/comparison.md).
+For a sourced comparison with RTK and Context Mode, including integration caveats, see the [full comparison](docs/comparison.md).
 
 ## How It Works
 
 ### Architecture
+
+**Built around explicit SOLID boundaries.** Processors parse output, a shared
+policy decides command eligibility, adapters execute commands, and dedicated
+modules own storage and presentation. Delta comparison and statistics formatting
+are pure functions; engine dependencies and telemetry writers can be supplied
+independently. The [architecture guide](docs/architecture.md) documents the
+contracts, compatibility guarantees, tests, and remaining couplings.
 
 ```
 CLI command  -->  Specialized processor  -->  Compressed output
@@ -321,17 +351,21 @@ ineligible, the whole chain runs untouched.
 Compression is aggressive on noise, conservative on signal:
 
 - Tiny outputs are never touched, and a result that doesn't actually get smaller is discarded in favor of the original (both thresholds are configurable — see [Configuration](#configuration))
-- All errors, stack traces, and actionable information are **fully preserved**
+- Failure fixtures verify specific errors, tracebacks and changed lines; grouping and bounded recovery can omit other details
 - Source code files (`cat *.py`, `cat *.ts`, ...) pass through **unchanged** — the model needs exact content
 - Secrets in `.env.production`, `.env.local`, and other `.env.*` variants are automatically **redacted** before reaching the model (`.env`, `.env.example`, and `.env.template` pass through unchanged, by design — see the note below)
-- Only "noise" is removed: progress bars, passing tests, installation logs, ANSI codes, platform lines
-- Truncation is always **marked**, never silent — the model can tell "there was nothing else" from "there was more, and it was cut"
+- Processors remove or group progress bars, passing tests, installation logs, ANSI codes and other repetitive content according to their documented rules
+- Generic truncation includes an omission marker; format-specific processors can also summarize or omit lines
 - 1300+ tests including precision-specific tests that verify every critical piece of data survives compression, and a compression-ratchet suite that fails CI if a real-world scenario's compression ratio regresses
 
 Two of these are enforced structurally rather than by convention:
 
 - **`TestFailureHandling`** runs a realistic *failing*-command fixture through **every** processor, at **every** exit code (`0`, `1`, and unknown), and asserts the failure reason is still present. A processor that claims `handles_failure = True` has to earn it; one that doesn't gets routed around.
-- **Critical-line recovery** (step 7 above) catches the generic version of the same bug — a processor loop with no `else` branch, where unmatched lines vanish with no marker and no counter.
+- **Critical-line recovery** (step 7 above) restores recognized error lines within a configurable cap, except after redaction where restoring raw lines could expose secrets.
+
+These are protections on tested output formats, not a universal lossless guarantee.
+Use [quality gates](#compression-quality-gates) to assert the exact diagnostics
+your workflow requires.
 
 > **Note on `.env`:** `.env`, `.env.example`, and `.env.template` are intentionally left untouched (not redacted, not compressed) — these are the files you're most likely actively editing, where exact values matter. Other `.env.*` variants (`.env.production`, `.env.local`, ...), which you're more likely to be reading than editing, get their values redacted. If you `cat .env` directly, treat that output as sensitive the same way you would without Token-Saver installed.
 
@@ -470,6 +504,14 @@ After installation the `token-saver` command is available. If `~/.local/bin` is 
 | `token-saver benchmark '<cmd>' --format json` | Machine-readable benchmark |
 | `token-saver explain '<cmd>'` | Explain how a command is routed — or why it's excluded |
 | `token-saver explain '<cmd>' --format json` | Same, machine-readable |
+| `token-saver compress '<cmd>'` | Read UTF-8 stdin and emit compressed text; never execute the command label |
+| `token-saver compress '<cmd>' --exit-code 1 --max-tokens 1500` | Apply failure-aware routing and check an estimated output budget |
+| `token-saver compress '<cmd>' --format json` | Compressed output plus measurements and budget verdict |
+| `token-saver replay quality.json` | Check captured fixtures against preservation and budget contracts |
+| `token-saver replay quality.json --format json` | Content-free quality report for CI |
+| `token-saver delta show RUN` | Read a retained, sanitized Delta snapshot without rerunning its command |
+| `token-saver delta show RUN --diagnostic EXACT_ID` | Read full details for one diagnostic in that snapshot |
+| `token-saver delta clear` | Delete all retained Delta snapshots and reset comparisons |
 
 `explain` is the fastest way to answer "why didn't that get compressed?":
 
@@ -497,6 +539,97 @@ pytest > /tmp/out.txt 2>&1
 token-saver benchmark 'pytest' --stdin --show-removed < /tmp/out.txt
 ```
 
+## Delta: Changes Between Runs
+
+**New in 3.0.0: spend context on the next change.** Delta is experimental and
+disabled by default.
+Delta compares consecutive `pytest` and `ruff check` results in Claude Code so
+the agent can see what changed after an edit. Commands still execute normally.
+New or changed diagnostics retain their full details; unchanged diagnostics keep
+their identity and summary, with a command to retrieve the details locally.
+
+| In your edit–test loop | What Delta reports |
+|---|---|
+| First supported run | A baseline with full failure details. |
+| Same failures again | `UNCHANGED` with names and summaries when that saves output. |
+| An assertion or traceback changes | `CHANGED` with its full current details. |
+| A new regression appears | `NEW` with its full current details. |
+| A previous failure disappears | `PASSED` only with explicit passing evidence; otherwise `NOT OBSERVED`. |
+| You need the original diagnostic | `token-saver delta show RUN --diagnostic EXACT_ID`, without rerunning tests. |
+
+One repeated run from the [real-command fixture benchmark](docs/delta.md#run-the-real-command-benchmark)
+returns this instead of 4,079 characters of ordinary compressed output
+(`RUN` replaces the generated snapshot identifier):
+
+```text
+[token-saver delta] pytest | exit 1
+3 failed, 21 passed in 0.02s
+UNCHANGED test_fixture.py::test_payload — AssertionError: payload diagnostic
+UNCHANGED test_fixture.py::test_status — AssertionError: status diagnostic
+UNCHANGED test_fixture.py::test_cache — AssertionError: cache diagnostic
+
+Details: token-saver delta show RUN [--diagnostic ID]
+```
+
+The complete five-run fixture sequence saves **32.5% of output characters for
+pytest and 8.3% for Ruff**, compared with ordinary compression, **including one
+targeted detail retrieval**. These are measured fixture results, not universal
+savings or billing figures. A complete snapshot read is more expensive: it
+erases the gain in the Ruff scenario. The guide includes every result and the
+reproduction command.
+
+Enable it explicitly in your global configuration, or before launching Claude:
+
+```bash
+export TOKEN_SAVER_DELTA_ENABLED=true
+```
+
+The comparison stays within the same session, working directory, and exact
+command. Each Delta response includes the current exit status, totals, and diagnostic
+inventory. A missing failure is **`NOT OBSERVED`, not confirmed fixed**; `PASSED`
+requires an explicit passing test result in the current output. Use `pytest -v`
+to expose those per-test results.
+
+Delta is disabled by default. Enabling it retains sanitized output snapshots
+locally for 24 hours and at most 100 runs by default. It currently applies only
+to supported single commands through the Claude wrapper, with a host session
+identifier. Unsupported or ambiguous output uses ordinary compression.
+
+The first run and new or changed failures can produce **more output than v2**
+when preserving full details requires it. For unchanged repeats, Token-Saver uses
+ordinary sanitized compression whenever Delta would be as large or larger.
+Ordinary compression can also win for new failures if it retains every full new
+or changed diagnostic. Valid snapshots still establish comparison baselines.
+The [reproducible Delta scenario](docs/delta.md#reproduce-the-output-size-benchmark)
+compares five synthetic pytest captures, including detail retrieval. It does not
+measure agent task success or billing savings; the existing savings table above
+still describes ordinary compression.
+See the [Delta guide](docs/delta.md) for supported formats, retrieval, storage,
+and limits.
+
+## Compression Quality Gates
+
+Make compression testable on **your** workflow: set per-command and total token
+budgets, require a minimum measured reduction, and name literal messages that
+must survive. `replay` checks saved fixtures without re-running commands; a typo
+in a required message fails against the original fixture too.
+
+```bash
+python3 bin/token-saver replay examples/quality-replay.json
+python3 bin/token-saver compress 'pytest -v' --exit-code 1 --max-tokens 1500 < examples/fixtures/pytest_output.txt
+```
+
+An over-budget result returns status `1` and retains the compressed output;
+it never truncates more text just to satisfy a limit. Invalid input returns `2`.
+Token counts use `ceil(characters / chars_per_token)` and remain estimates,
+not exact tokenizer or billing counts. JSON replay reports omit command strings,
+raw output and expected text; `compress --format json` includes the compressed output.
+Neither command stores captured output or savings history.
+
+See [the manifest format and CI example](docs/quality-gates.md). These additions
+are available in this checkout; use `python3 bin/token-saver` to try them before
+a release is published.
+
 ## Processors
 
 Each processor handles a family of commands. The first one that matches
@@ -506,8 +639,8 @@ processor is in [`docs/processors/`](docs/processors/).
 | # | Processor | Priority | Commands | Docs |
 |---|---|---|---|---|
 | 1 | **Package List** | 15 | pip list/freeze, npm ls, conda list, gem list, brew list | [package_list.md](docs/processors/package_list.md) |
-| 2 | **just** | 18 | just --list, just --summary (recipe listing compaction) | — |
-| 3 | **act** | 19 | act (run GitHub Actions locally via nektos/act) | — |
+| 2 | **just** | 18 | just --list, just --summary (recipe listing compaction) | [just.md](docs/processors/just.md) |
+| 3 | **act** | 19 | act (run GitHub Actions locally via nektos/act) | [act.md](docs/processors/act.md) |
 | 4 | **Git** | 20 | status, diff, log, show, push/pull/fetch, branch, stash, reflog, blame, cherry-pick, rebase, merge | [git.md](docs/processors/git.md) |
 | 5 | **Test** | 21 | pytest, jest, vitest, mocha, cargo test, go test, rspec, phpunit, bun test, npm/yarn/pnpm test, dotnet test, swift test, mix test | [test_output.md](docs/processors/test_output.md) |
 | 6 | **Cargo** | 22 | cargo build, check, doc, update, bench | [cargo.md](docs/processors/cargo.md) |
@@ -517,7 +650,7 @@ processor is in [`docs/processors/`](docs/processors/).
 | 10 | **Cargo Clippy** | 26 | cargo clippy (multi-line block grouping with span/help preservation) | [cargo_clippy.md](docs/processors/cargo_clippy.md) |
 | 11 | **Lint** | 27 | eslint, ruff, flake8, pylint, clippy, mypy, prettier, biome, shellcheck, hadolint, rubocop, golangci-lint | [lint_output.md](docs/processors/lint_output.md) |
 | 12 | **Maven/Gradle** | 28 | mvn, ./mvnw, gradle, ./gradlew (download stripping, task noise removal) | [maven_gradle.md](docs/processors/maven_gradle.md) |
-| 13 | **Bun** | 29 | bun install, add, remove, update | — |
+| 13 | **Bun** | 29 | bun install, add, remove, update | [bun.md](docs/processors/bun.md) |
 | 14 | **Network** | 30 | curl, wget, http/https (httpie) | [network.md](docs/processors/network.md) |
 | 15 | **Docker** | 31 | ps, images, logs, pull/push, inspect, stats, compose up/down/build/ps/logs | [docker.md](docs/processors/docker.md) |
 | 16 | **Kubernetes** | 32 | kubectl/oc get, describe, logs, top, apply, delete, create | [kubectl.md](docs/processors/kubectl.md) |
@@ -534,10 +667,10 @@ processor is in [`docs/processors/`](docs/processors/).
 | 27 | **SSH/SCP** | 43 | non-interactive ssh, scp (remote command output compression) | [ssh.md](docs/processors/ssh.md) |
 | 28 | **JQ/YQ** | 44 | jq, yq (large JSON/YAML output compaction) | [jq_yq.md](docs/processors/jq_yq.md) |
 | 29 | **Structured Log** | 45 | stern, kubetail (JSON Lines grouping by level) | [structured_log.md](docs/processors/structured_log.md) |
-| 30 | **Pulumi** | 46 | pulumi up, preview, destroy, refresh | — |
-| 31 | **CDKTF** | 47 | cdktf deploy, diff, destroy, synth | — |
-| 32 | **Nix** | 48 | nix build/develop/eval/run, nix-build, nix-shell | — |
-| 33 | **mise** | 49 | mise install, use, upgrade (runtime version manager) | — |
+| 30 | **Pulumi** | 46 | pulumi up, preview, destroy, refresh | [pulumi.md](docs/processors/pulumi.md) |
+| 31 | **CDKTF** | 47 | cdktf deploy, diff, destroy, synth | [cdktf.md](docs/processors/cdktf.md) |
+| 32 | **Nix** | 48 | nix build/develop/eval/run, nix-build, nix-shell | [nix.md](docs/processors/nix.md) |
+| 33 | **mise** | 49 | mise install, use, upgrade (runtime version manager) | [mise.md](docs/processors/mise.md) |
 | 34 | **File Listing** | 50 | ls, find, tree, exa, eza, rsync | [file_listing.md](docs/processors/file_listing.md) |
 | 35 | **File Content** | 51 | cat, head, tail, bat, less, more (content-aware: code, config, log, CSV) | [file_content.md](docs/processors/file_content.md) |
 | 36 | **Generic** | 999 | Any command (fallback: ANSI strip, dedup, truncation) | [generic.md](docs/processors/generic.md) |
@@ -599,7 +732,13 @@ Drop a `.token-saver.json` in your repository root to override global settings:
 
 Project settings are merged with global settings. Token-Saver walks up parent directories (like `.gitignore` resolution) to find the nearest `.token-saver.json`, stopping at your home directory or the filesystem root. Useful for monorepos or projects with atypical output patterns (large Terraform plans, verbose test suites, etc.).
 
-**Security note:** because this file is auto-discovered from any directory you `cd` into — including one you just cloned and haven't reviewed — three keys are never honored from it: `user_processors_dir` (would let a repo run arbitrary Python as soon as any Bash command executes), `disabled_processors`, and `redaction_allowlist` (both could silently weaken the secret-redaction safety net). Set those three only in `~/.token-saver/config.json` or via a `TOKEN_SAVER_*` environment variable. A project file that sets them has those keys dropped with a debug-log line, not coerced.
+**Security note:** project files cannot set `user_processors_dir` (loads Python
+code), `disabled_processors` or `redaction_allowlist` (can weaken redaction), or
+`delta_enabled`, `delta_retention_hours`, and `delta_max_runs` (control local
+output retention). Set these only in global `~/.token-saver/config.json` or via
+`TOKEN_SAVER_*` environment variables. A project file that sets them has those
+keys dropped with a debug-log line, not coerced. Cloning a repository cannot
+opt you into retaining its command output.
 
 ### Complete Parameter List
 
@@ -656,8 +795,13 @@ they drift apart.
 | `user_processors_dir` | `""` (falls back to `~/.token-saver/processors/`) | Directory for custom processors — **global config / env var only, not project config** |
 | `disabled_processors` | `[]` | Processor names to disable (env: comma-separated) — **global config / env var only, not project config** |
 | `redaction_allowlist` | `[]` | Env var name patterns exempt from secret redaction — **global config / env var only, not project config** |
+| `delta_enabled` | `false` | Experimental repeated-run diagnostics and local output retention — **global config / env var only, not project config** |
+| `delta_retention_hours` | `24` | Delta snapshot lifetime in hours, from 1 to 168 — **global config / env var only, not project config** |
+| `delta_max_runs` | `100` | Maximum retained Delta snapshots across all scopes, from 1 to 1000 — **global config / env var only, not project config** |
 
-The last three cannot be set from a project-level `.token-saver.json` — see the security note in [Per-Project Configuration](#per-project-configuration).
+Parameters marked **global config / env var only** cannot be set from a
+project-level `.token-saver.json` — see the security note in
+[Per-Project Configuration](#per-project-configuration).
 
 ## Tuning Recipes
 
@@ -829,8 +973,17 @@ which sends nothing but a standard HTTP GET.
 
 ### What gets stored
 
-Only sizes. The stats database records the command string, the processor name, the
-original and compressed byte counts, and a timestamp — never the output content.
+The stats database records command strings, processor names, size measurements,
+and timestamps; it does not store captured output. Command strings can themselves
+contain sensitive information.
+
+Opting into [Delta](docs/delta.md) additionally stores sanitized diagnostic
+snapshots, including captured output context, in a separate private local
+database. Defaults are 24-hour retention and 100 snapshots; expiry is enforced
+when the store is accessed. Redaction recognizes specific secret formats and
+cannot detect every secret. Disable `delta_enabled` to stop new captures and run
+`token-saver delta clear` to remove retained snapshots. Deletion does not promise
+secure erasure from filesystem snapshots or backups.
 
 ### How the hook is hardened
 
@@ -838,7 +991,7 @@ original and compressed byte counts, and a timestamp — never the output conten
 - **Syntax-checked rewrites**: the rewritten command is validated with `sh -n -c` before it runs; an invalid rewrite falls back to the original command
 - **Fail-open**: if the hook fails (Python error, missing file, timeout), the original command executes normally. A broken Token-Saver costs you savings, not a working shell.
 - **Secret redaction**: the `env` processor automatically redacts values of variables matching `*KEY*`, `*SECRET*`, `*TOKEN*`, `*PASSWORD*`, `*CREDENTIAL*` patterns, preventing accidental leakage into AI context windows — and a redacted result is never discarded in favor of the raw one by the compression-ratio gate
-- **Untrusted project config**: `user_processors_dir`, `disabled_processors`, and `redaction_allowlist` are ignored in a repo-local `.token-saver.json`, so cloning a hostile repo can't get code executed or turn redaction off
+- **Untrusted project config**: processor-loading, redaction, and Delta retention settings listed as global-only above are ignored in a repo-local `.token-saver.json`
 - **Signal forwarding**: the wrapper propagates SIGINT/SIGTERM to the child process
 - **Exclusions**: commands with complex pipes, redirections, `sudo`, editors, `ssh`, unquoted newlines, background `&`, or shell-construct fragments (`for`, `while`, `if`, `case`) are never intercepted
 - **Safe trailing pipes**: simple trailing pipes (`| head`, `| tail`, `| wc`, `| grep`, `| sort`, `| uniq`, `| cut`) are allowed
@@ -860,17 +1013,20 @@ Measured on macOS, Python 3.12, warm filesystem cache:
 | Bare `sh -c 'echo hi'` | ~5ms |
 | `python3 -c pass` (interpreter startup floor) | ~99ms |
 | Full `wrap.py` round-trip | ~158ms |
-| **Attributable to Token-Saver** | **~60ms** |
+| Wrapper versus bare shell | ~153ms |
+| Portion beyond Python startup | ~60ms |
 
-The dominant cost is Python interpreter startup, not compression logic. For context, the
-commands Token-Saver targets — `pytest`, `npm install`, `terraform plan`, `docker build`
-— routinely take seconds to minutes, so the overhead is well under 1% of wall-clock for
-the workloads that benefit most. It's most noticeable on trivially fast commands like
-`git status` on a small repo, which is also where the savings are smallest.
+These previously recorded timings include interpreter startup in the full
+wrapper cost. The roughly 60ms remainder is not the total overhead users pay.
+Measure the full round-trip on your machine: an extra 153ms is about 15% of a
+one-second command, or 0.5% of a thirty-second command. Short commands can make
+the overhead more noticeable than the output reduction.
 
-Compression itself is linear in output size for essentially every processor, and
-`max_output_bytes` (default 10 MB) caps the input so a pathological output can't turn
-into a pathological regex.
+`max_output_bytes` (default 10,000,000, currently counted as characters) limits
+the text passed to compression after capture. It does not limit subprocess
+buffering or guarantee a bound on every parser's execution time. Delta adds
+parsing, comparison, and local SQLite storage; the timings above are for ordinary
+compression and do not establish its overhead.
 
 ## FAQ
 
@@ -880,17 +1036,21 @@ library. The only network call is an optional GitHub release check, cached for 2
 and silently skipped offline.
 
 **Will it hide an error from me or from the model?**
-That's the failure mode the whole design is built around. Errors, stack traces, and
-non-zero exits are preserved; a failing command routes around processors that haven't
-proven they handle failure; dropped error lines are re-appended by the engine; and a
-test suite runs a failing fixture through every processor at every exit code to prove
-it. Truncation, when it happens, is always explicitly marked.
+That's the failure mode the preservation tests target. Known failures route
+around processors that have not opted into failure handling, and critical-line
+recovery covers selected omissions. These protections are tested on a fixture
+corpus; unfamiliar formats and configured truncation can still lose useful
+context. Use quality contracts for your workload and inspect `--show-removed`
+when evaluating a rule. Delta retains full new or changed diagnostics for its
+supported formats, with details retrievable while the snapshot is retained.
 
 **How much will I actually save?**
-It depends entirely on which commands your agent runs. Sessions dominated by test runs
-and installs see the high end (90%+); sessions dominated by careful `git diff` reading
-see 40-70%. Run `token-saver stats` after a day of normal use for your real number, or
-`token-saver benchmark '<command>'` for a specific one.
+It depends on your command mix, output, and detail retrievals. The tables above
+measure individual fixture scenarios, not complete agent sessions. Run
+`token-saver stats` for recorded command-output estimates, or
+`token-saver benchmark '<command>'` for one command. Delta detail retrievals add
+output and are not included in the ordinary savings tracker; account for them
+separately when evaluating a complete workflow.
 
 **Does it work with the Claude API or the Claude Agent SDK directly?**
 Not as a drop-in — Token-Saver ships as a Claude Code plugin and an Antigravity CLI
@@ -925,9 +1085,11 @@ through it. It *does* handle `cat`, `head`, `tail`, and `bat` run as shell comma
 though source code files pass through unchanged by design.
 
 **Can a repository I clone attack me through `.token-saver.json`?**
-Not through the three keys that would matter. `user_processors_dir` (arbitrary code
-execution), `disabled_processors`, and `redaction_allowlist` are all rejected from
-project-level config. The rest are numeric thresholds with no code path to abuse.
+Project configuration cannot load processors through `user_processors_dir`,
+change `disabled_processors` or `redaction_allowlist`, or enable or adjust Delta
+retention through `delta_enabled`, `delta_retention_hours`, or `delta_max_runs`.
+Those settings require global configuration or environment variables. Other
+project settings still affect compression behavior; review them when needed.
 
 **How do I turn it off temporarily?**
 `export TOKEN_SAVER_ENABLED=false`, or set `{"enabled": false}` in
@@ -990,6 +1152,8 @@ python3 scripts/wrap.py --dry-run 'git status'
 - Long diff compression truncates per-hunk, not per-file: a diff with many small hunks is not reduced
 - The generic processor only deduplicates **consecutive identical lines**, not similar lines
 - Token counts in stats are estimated from a chars-per-token ratio, not a real tokenizer
+- Experimental Delta covers supported single pytest/Ruff commands in Claude Code; it needs an explicit host session and an unchanged command to compare runs
+- Delta retains local output when enabled; fresh diagnostics and detail retrieval can outweigh repeated-run savings
 - Antigravity CLI: the deny/reason mechanism may have side effects if other plugins use the same hook
 
 ## Project Structure
@@ -1026,6 +1190,11 @@ token-saver/
 │   ├── config.py                    # Configuration system + project trust boundary
 │   ├── console.py                   # UTF-8 stdio forcing
 │   ├── engine.py                    # Compression engine (orchestrator)
+│   ├── diagnostics.py               # Immutable processor diagnostic contract
+│   ├── delta.py                     # Compare and render completed runs
+│   ├── delta_redaction.py           # Recognized secret masking for snapshots
+│   ├── delta_store.py               # Private, bounded snapshot persistence
+│   ├── delta_cli.py                 # Retrieve details and clear snapshots
 │   ├── hook_session.py              # SessionStart hook (stats + update notif)
 │   ├── platforms.py                 # Platform detection + I/O abstraction
 │   ├── shell_syntax.py              # Quote-aware shell scanning (exclusions)

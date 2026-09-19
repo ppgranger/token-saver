@@ -1,3 +1,15 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Processor auto-discovery registry.
 
 Scans all .py modules in this package, finds non-abstract Processor
@@ -14,7 +26,10 @@ import os
 import pkgutil
 import sys
 
-from .base import Processor
+import src
+from src import config
+from src import registry as processor_registry
+from src.processors import base
 
 #: Module-name prefix given to processors loaded from the user directory.
 _USER_MODULE_PREFIX = "_user_processor_"
@@ -42,7 +57,9 @@ def _load_user_processors(user_dir: str) -> None:
             mod = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = mod
             spec.loader.exec_module(mod)
-        except Exception as exc:
+        # User modules may raise any exception during import. Isolate each
+        # plugin so one broken extension cannot prevent command output.
+        except Exception as exc:  # pylint: disable=broad-exception-caught
             _debug_log(f"Skipping user processor {filename}: {exc}")
 
 
@@ -54,15 +71,11 @@ def _debug_log(msg: str) -> None:
 
 def _get_user_processors_dir() -> str:
     """Return the user processors directory from config or default."""
-    from .. import config  # noqa: PLC0415
-
     custom_dir = config.get("user_processors_dir")
     if custom_dir:
         return os.path.expanduser(str(custom_dir))
 
-    from .. import data_dir  # noqa: PLC0415
-
-    return os.path.join(data_dir(), "processors")
+    return os.path.join(src.data_dir(), "processors")
 
 
 def _is_registrable(cls: type) -> bool:
@@ -78,17 +91,21 @@ def _is_registrable(cls: type) -> bool:
     return module.startswith((f"{__name__}.", _USER_MODULE_PREFIX))
 
 
-def discover_processors() -> list[Processor]:
+def discover_processors() -> list[base.Processor]:
     """Auto-discover all Processor subclasses in this package.
 
-    Returns instantiated processors sorted by priority (lowest first).
-    GenericProcessor (priority 999) is always last.
+    Returns:
+        Instantiated processors in ascending priority order. The generic
+        fallback, with priority 999, is last.
+
+    Raises:
+        RuntimeError: The discovered processors violate registry invariants.
     """
     package_path = __path__
     package_name = __name__
 
     # Import all modules in this package (skip __init__ and base)
-    for _finder, module_name, _is_pkg in pkgutil.iter_modules(package_path):
+    for _, module_name, _ in pkgutil.iter_modules(package_path):
         if module_name in ("base",):
             continue
         importlib.import_module(f".{module_name}", package_name)
@@ -99,6 +116,7 @@ def discover_processors() -> list[Processor]:
 
     # Find all non-abstract Processor subclasses
     def _all_subclasses(cls):
+        """Collect concrete subclasses belonging to loaded processor modules."""
         result = set()
         for sub in cls.__subclasses__():
             if not inspect.isabstract(sub) and _is_registrable(sub):
@@ -106,35 +124,26 @@ def discover_processors() -> list[Processor]:
             result.update(_all_subclasses(sub))
         return result
 
-    subclasses = _all_subclasses(Processor)
+    subclasses = _all_subclasses(base.Processor)
     instances = [cls() for cls in subclasses]
-    # Sort by (priority, name): _all_subclasses returns a set, so equal
-    # priorities would otherwise order nondeterministically across runs,
-    # making first-match routing unstable.
-    instances.sort(key=lambda p: (p.priority, p.name))
-
-    # Validate: GenericProcessor must be last
-    if instances and instances[-1].priority != 999:
-        raise RuntimeError(
-            f"GenericProcessor (priority 999) must be the lowest-priority processor, "
-            f"but last processor is {instances[-1].name!r} with priority {instances[-1].priority}"
-        )
-
-    return instances
+    # Keep discovery's existing RuntimeError contract for invalid plugins.
+    try:
+        return processor_registry.ProcessorRegistry(instances).processors
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
 
 
 def collect_hook_patterns() -> list[str]:
     """Collect all hook_patterns from discovered processors.
 
-    Returns a flat list of regex pattern strings, used by hook_pretool.py.
     Disabled processors are excluded so their commands are not intercepted.
-    """
-    from .. import config  # noqa: PLC0415
 
+    Returns:
+        A flat list of regex pattern strings consumed by platform hooks.
+    """
     raw_disabled = config.get("disabled_processors") or []
-    disabled = set(raw_disabled if isinstance(raw_disabled, list) else [])
-    patterns: list[str] = []
-    for processor in discover_processors():
-        if processor.name not in disabled:
-            patterns.extend(processor.hook_patterns)
-    return patterns
+    registry = processor_registry.ProcessorRegistry(
+        discover_processors(),
+        disabled=raw_disabled if isinstance(raw_disabled, list) else [],
+    )
+    return registry.hook_patterns()

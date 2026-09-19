@@ -1,3 +1,15 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Tests for user-defined processor loading from external directories."""
 
 import os
@@ -6,9 +18,9 @@ import textwrap
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import src.processors
+import src.processors.base
 from src import config
-from src.processors import _load_user_processors, discover_processors
-from src.processors.base import Processor
 
 
 class TestUserProcessorLoading:
@@ -22,7 +34,7 @@ class TestUserProcessorLoading:
         return path
 
     def test_user_processor_loaded_and_used(self, tmp_path):
-        """Test that a valid user processor is loaded and can handle commands."""
+        """Load valid user processors and route matching commands to them."""
         self._write_processor(
             str(tmp_path),
             "custom_hello.py",
@@ -45,10 +57,13 @@ class TestUserProcessorLoading:
             """,
         )
 
-        _load_user_processors(str(tmp_path))
+        src.processors._load_user_processors(str(tmp_path))
 
         # The HelloProcessor subclass should now exist
-        subclasses = {cls.__name__ for cls in Processor.__subclasses__()}
+        subclasses = {
+            cls.__name__
+            for cls in src.processors.base.Processor.__subclasses__()
+        }
         assert "HelloProcessor" in subclasses
 
     def test_broken_processor_syntax_error_skipped(self, tmp_path):
@@ -62,7 +77,7 @@ class TestUserProcessorLoading:
         )
 
         # Should not raise — broken processor is skipped
-        _load_user_processors(str(tmp_path))
+        src.processors._load_user_processors(str(tmp_path))
 
     def test_broken_processor_missing_class_skipped(self, tmp_path):
         """Test that a processor that raises on import is skipped."""
@@ -75,11 +90,13 @@ class TestUserProcessorLoading:
         )
 
         # Should not raise
-        _load_user_processors(str(tmp_path))
+        src.processors._load_user_processors(str(tmp_path))
 
     def test_nonexistent_directory_is_noop(self):
         """Test that a non-existent directory is handled gracefully."""
-        _load_user_processors("/tmp/nonexistent_dir_for_test_12345")
+        src.processors._load_user_processors(
+            "/tmp/nonexistent_dir_for_test_12345"
+        )
         # No error raised
 
     def test_underscore_files_skipped(self, tmp_path):
@@ -106,8 +123,11 @@ class TestUserProcessorLoading:
             """,
         )
 
-        _load_user_processors(str(tmp_path))
-        subclasses = {cls.__name__ for cls in Processor.__subclasses__()}
+        src.processors._load_user_processors(str(tmp_path))
+        subclasses = {
+            cls.__name__
+            for cls in src.processors.base.Processor.__subclasses__()
+        }
         assert "ShouldNotLoad" not in subclasses
 
     def test_user_processors_dir_config_override(self, tmp_path, monkeypatch):
@@ -115,15 +135,15 @@ class TestUserProcessorLoading:
         monkeypatch.setenv("TOKEN_SAVER_USER_PROCESSORS_DIR", str(tmp_path))
         config.reload()
 
-        from src.processors import _get_user_processors_dir
+        import src.processors
 
-        result = _get_user_processors_dir()
+        result = src.processors._get_user_processors_dir()
         assert result == str(tmp_path)
 
         config.reload()
 
     def test_priority_ordering_with_user_processor(self, tmp_path):
-        """Test that user processors are sorted by priority alongside built-ins."""
+        """Sort user and built-in processors together by priority."""
         self._write_processor(
             str(tmp_path),
             "high_priority.py",
@@ -146,10 +166,11 @@ class TestUserProcessorLoading:
             """,
         )
 
-        _load_user_processors(str(tmp_path))
-        processors = discover_processors()
+        src.processors._load_user_processors(str(tmp_path))
+        processors = src.processors.discover_processors()
 
-        # The high-priority processor should be first (priority 1 < all built-ins)
+        # The high-priority processor should be first (priority 1 < all
+        # built-ins)
         names = [p.name for p in processors]
         assert "high_priority_test" in names
         # Priority 1 should come before package_list (priority 15)

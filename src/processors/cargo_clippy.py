@@ -1,17 +1,23 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Cargo clippy processor: dedicated Rust clippy lint handling."""
 
+import collections
 import re
-from collections import defaultdict
 
-from .. import config
-from .base import Processor
-from .utils import (
-    RUST_COMPILING_RE,
-    RUST_ERROR_START_RE,
-    RUST_FINISHED_RE,
-    RUST_WARNING_START_RE,
-    RUST_WARNING_SUMMARY_RE,
-)
+from src import config
+from src.processors import base
+from src.processors import utils
 
 _CLIPPY_CMD_RE = re.compile(r"\bcargo\s+clippy\b")
 _CHECKING_RE = re.compile(r"^\s*Checking\s+\S+\s+v")
@@ -45,7 +51,9 @@ def _categorize_lint(rule: str) -> str:
     return _CLIPPY_CATEGORIES.get(short, "other")
 
 
-class CargoClippyProcessor(Processor):
+class CargoClippyProcessor(base.Processor):
+    """Group Clippy warnings while preserving compiler error blocks."""
+
     priority = 26
     handles_failure = True
     chain_to = ["lint"]
@@ -55,12 +63,30 @@ class CargoClippyProcessor(Processor):
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "cargo_clippy"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         return bool(_CLIPPY_CMD_RE.search(command))
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
@@ -70,7 +96,9 @@ class CargoClippyProcessor(Processor):
         compiling_count = 0
 
         # Parse warnings as multi-line blocks
-        warnings_by_rule: dict[str, list[list[str]]] = defaultdict(list)
+        warnings_by_rule: dict[str, list[list[str]]] = collections.defaultdict(
+            list
+        )
         error_blocks: list[list[str]] = []
         current_block: list[str] = []
         current_rule: str | None = None
@@ -85,12 +113,12 @@ class CargoClippyProcessor(Processor):
             if _CHECKING_RE.match(stripped):
                 checking_count += 1
                 continue
-            if RUST_COMPILING_RE.match(stripped):
+            if utils.RUST_COMPILING_RE.match(stripped):
                 compiling_count += 1
                 continue
 
             # Error start
-            if RUST_ERROR_START_RE.match(stripped):
+            if utils.RUST_ERROR_START_RE.match(stripped):
                 # Flush current warning block
                 if current_rule and current_block:
                     warnings_by_rule[current_rule].append(current_block)
@@ -104,8 +132,8 @@ class CargoClippyProcessor(Processor):
                 continue
 
             # Warning start
-            wm = RUST_WARNING_START_RE.match(stripped)
-            if wm and not RUST_WARNING_SUMMARY_RE.match(stripped):
+            wm = utils.RUST_WARNING_START_RE.match(stripped)
+            if wm and not utils.RUST_WARNING_SUMMARY_RE.match(stripped):
                 # Flush previous
                 if in_error and current_error:
                     error_blocks.append(current_error)
@@ -119,7 +147,7 @@ class CargoClippyProcessor(Processor):
                 current_block = [line]
                 continue
 
-            if RUST_WARNING_SUMMARY_RE.match(stripped):
+            if utils.RUST_WARNING_SUMMARY_RE.match(stripped):
                 if current_rule and current_block:
                     warnings_by_rule[current_rule].append(current_block)
                     current_block = []
@@ -131,7 +159,7 @@ class CargoClippyProcessor(Processor):
                 summary_lines.append(line)
                 continue
 
-            if RUST_FINISHED_RE.match(stripped):
+            if utils.RUST_FINISHED_RE.match(stripped):
                 if current_rule and current_block:
                     warnings_by_rule[current_rule].append(current_block)
                     current_block = []
@@ -172,11 +200,15 @@ class CargoClippyProcessor(Processor):
         example_count = config.get("cargo_warning_example_count")
         group_threshold = config.get("cargo_warning_group_threshold")
 
-        for rule, blocks in sorted(warnings_by_rule.items(), key=lambda x: -len(x[1])):
+        for rule, blocks in sorted(
+            warnings_by_rule.items(), key=lambda x: -len(x[1])
+        ):
             count = len(blocks)
             category = _categorize_lint(rule)
             if count >= group_threshold:
-                result.append(f"warning[{rule}] ({category}): {count} occurrences")
+                result.append(
+                    f"warning[{rule}] ({category}): {count} occurrences"
+                )
                 for block in blocks[:example_count]:
                     result.extend(f"  {bline}" for bline in block)
                 if count > example_count:

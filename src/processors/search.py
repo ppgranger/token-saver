@@ -1,14 +1,28 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Search output processor: grep -r, rg, ag, fd."""
 
+import collections
 import re
-from collections import defaultdict
 
-from .. import config
-from .base import Processor
-from .utils import format_dir_group, group_paths_by_dir
+from src import config
+from src.processors import base
+from src.processors import utils
 
 
-class SearchProcessor(Processor):
+class SearchProcessor(base.Processor):
+    """Group search results and paths while retaining representative hits."""
+
     priority = 35
     hook_patterns = [
         r"^(grep|rg|ag|fd|fdfind)\b",
@@ -16,12 +30,30 @@ class SearchProcessor(Processor):
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "search"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         return bool(re.match(r"\s*(?:\S*/)?(grep|rg|ag|fd|fdfind)\b", command))
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
@@ -34,7 +66,7 @@ class SearchProcessor(Processor):
             return output
 
         # Detect format: file:line:content or file:content or just file
-        by_file: dict[str, list[str]] = defaultdict(list)
+        by_file: dict[str, list[str]] = collections.defaultdict(list)
         plain_matches = []
 
         for line in lines:
@@ -48,7 +80,9 @@ class SearchProcessor(Processor):
 
             # file:line:content or file:content
             # Accept extensionless files if a line number follows
-            m = re.match(r"^((?:[a-zA-Z]:)?[^\s:]+\.[a-zA-Z0-9]+):(\d+:)?(.*)$", stripped)
+            m = re.match(
+                r"^((?:[a-zA-Z]:)?[^\s:]+\.[a-zA-Z0-9]+):(\d+:)?(.*)$", stripped
+            )
             if not m:
                 m = re.match(r"^((?:[a-zA-Z]:)?[^\s:]+):(\d+:)(.*)$", stripped)
             if m:
@@ -60,7 +94,9 @@ class SearchProcessor(Processor):
         if not by_file and not plain_matches:
             return output
 
-        total_matches = sum(len(v) for v in by_file.values()) + len(plain_matches)
+        total_matches = sum(len(v) for v in by_file.values()) + len(
+            plain_matches
+        )
         total_files = len(by_file)
 
         if total_files == 0:
@@ -123,7 +159,10 @@ class SearchProcessor(Processor):
             by_dir.setdefault(dir_name, {})[filepath] = matches
 
         result = [
-            f"{total_matches} matches across {total_files} files in {len(by_dir)} directories:"
+            (
+                f"{total_matches} matches across {total_files} files in "
+                f"{len(by_dir)} directories:"
+            )
         ]
 
         dirs_shown = 0
@@ -133,15 +172,23 @@ class SearchProcessor(Processor):
             if dirs_shown >= max_files:
                 break
             dir_matches = sum(len(v) for v in files.values())
-            result.append(f"\n{dir_name}/ ({dir_matches} matches in {len(files)} files)")
+            result.append(
+                f"\n{dir_name}/ ({dir_matches} matches in {len(files)} files)"
+            )
 
             # Show top 3 files in this directory
-            for filepath, matches in sorted(files.items(), key=lambda x: -len(x[1]))[:3]:
+            for filepath, matches in sorted(
+                files.items(), key=lambda x: -len(x[1])
+            )[:3]:
                 fname = filepath.rsplit("/", 1)[-1]
                 if len(matches) > max_per_file:
                     result.append(f"  {fname}: ({len(matches)} matches)")
                     for m in matches[:max_per_file]:
-                        display = m[len(filepath) + 1 :] if m.startswith(filepath + ":") else m
+                        display = (
+                            m[len(filepath) + 1 :]
+                            if m.startswith(filepath + ":")
+                            else m
+                        )
                         result.append(f"    {display}")
                 else:
                     for m in matches:
@@ -149,7 +196,9 @@ class SearchProcessor(Processor):
 
             remaining_files = len(files) - 3
             if remaining_files > 0:
-                result.append(f"  ... ({remaining_files} more files in this directory)")
+                result.append(
+                    f"  ... ({remaining_files} more files in this directory)"
+                )
 
             dirs_shown += 1
 
@@ -165,7 +214,7 @@ class SearchProcessor(Processor):
         if len(lines) < 20:
             return output
 
-        by_dir = group_paths_by_dir(lines)
+        by_dir = utils.group_paths_by_dir(lines)
         max_files = config.get("search_max_files")
 
         # Busiest directories first, capped: fd output is a haystack, and the
@@ -173,7 +222,7 @@ class SearchProcessor(Processor):
         result = [f"{len(lines)} files found:"]
         dirs = sorted(by_dir.items(), key=lambda x: -len(x[1]))
         for dir_path, files in dirs[:max_files]:
-            result.extend(format_dir_group(dir_path, files))
+            result.extend(utils.format_dir_group(dir_path, files))
 
         if len(dirs) > max_files:
             result.append(f"... ({len(dirs) - max_files} more directories)")

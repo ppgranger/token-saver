@@ -1,3 +1,15 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """just processor: compress `just --list` / `--summary` recipe listings.
 
 Only the listing subcommands are handled.  Arbitrary recipe runs (``just
@@ -7,14 +19,16 @@ build``) produce the recipe's own output, which we must not touch, so
 
 import re
 
-from .base import Processor
+from src.processors import base
 
 _JUST_LIST_RE = re.compile(r"\bjust\b.*\s(--list|-l|--summary)\b")
 _RECIPE_RE = re.compile(r"^\s{2,}\S")
 _ERROR_RE = re.compile(r"\b(error|Error|failed|Failed)\b")
 
 
-class JustProcessor(Processor):
+class JustProcessor(base.Processor):
+    """Summarize recipe listings and repetitive Just execution output."""
+
     priority = 18
     handles_failure = True
     hook_patterns = [
@@ -23,12 +37,30 @@ class JustProcessor(Processor):
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "just"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         return bool(_JUST_LIST_RE.search(command))
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 

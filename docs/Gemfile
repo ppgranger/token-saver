@@ -1,0 +1,19 @@
+source "https://rubygems.org"
+
+# Keep the local/CI renderer aligned with the GitHub Pages-supported versions.
+# The pinned remote theme remains in _config.yml; this is only the build toolchain.
+gem "jekyll", "3.10.0"
+gem "jekyll-include-cache", "0.2.1"
+gem "jekyll-relative-links", "0.6.1"
+gem "jekyll-remote-theme", "0.4.3"
+gem "jekyll-seo-tag", "2.8.0"
+gem "jekyll-sitemap", "1.4.0"
+gem "kramdown", "2.4.0"
+gem "kramdown-parser-gfm", "1.1.0"
+gem "rouge", "3.30.0"
+gem "rake", "13.3.1" # Required while loading the Just the Docs gemspec.
+
+# safe_yaml and Liquid require these libraries; newer Ruby versions no longer
+# expose them implicitly to a bundle.
+gem "base64", "0.3.0"
+gem "bigdecimal", "4.0.1"

@@ -1,3 +1,15 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Structured diff summary between original and compressed output.
 
 Used by ``token-saver benchmark`` and wrap.py ``--dry-run`` to show *what*
@@ -12,23 +24,24 @@ import difflib
 
 
 def summarize(original: str, compressed: str) -> dict:
-    """Return a structured line/byte breakdown of a compression.
+    """Describe removed and added lines without retaining complete outputs.
 
-    Keys:
-        original_lines, compressed_lines: line counts
-        lines_removed:  lines present in original but not in compressed
-        lines_added:    lines present in compressed but not original
-                        (e.g. summary lines like "... (12 more)")
-        chars_removed:  net characters removed
-        removed_samples: up to 5 representative removed lines
-        added_samples:   up to 5 representative added lines
+    Args:
+        original: Original captured output before compression.
+        compressed: Output after compression.
+
+    Returns:
+        A mapping of line counts, added/removed line counts, net character
+        reduction, and up to five nonempty samples of added and removed lines.
     """
     orig_lines = original.splitlines()
     comp_lines = compressed.splitlines()
 
     removed: list[str] = []
     added: list[str] = []
-    matcher = difflib.SequenceMatcher(None, orig_lines, comp_lines, autojunk=False)
+    matcher = difflib.SequenceMatcher(
+        None, orig_lines, comp_lines, autojunk=False
+    )
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag in ("delete", "replace"):
             removed.extend(orig_lines[i1:i2])
@@ -47,11 +60,20 @@ def summarize(original: str, compressed: str) -> dict:
 
 
 def format_summary(summary: dict) -> str:
-    """Render :func:`summarize` output as an indented text block."""
+    """Render :func:`summarize` output as an indented text block.
+
+    Args:
+        summary: Metrics and line samples produced by summarize().
+
+    Returns:
+        A multiline report suitable for terminal display.
+    """
     lines = [
         "Removed breakdown:",
-        f"  Lines:  {summary['original_lines']:,} -> {summary['compressed_lines']:,} "
-        f"({summary['lines_removed']:,} removed, {summary['lines_added']:,} added)",
+        f"  Lines:  {summary['original_lines']:,} -> "
+        f"{summary['compressed_lines']:,} "
+        f"({summary['lines_removed']:,} removed, "
+        f"{summary['lines_added']:,} added)",
         f"  Chars:  {summary['chars_removed']:,} removed",
     ]
     if summary["removed_samples"]:

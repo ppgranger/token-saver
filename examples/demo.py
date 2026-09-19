@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Process example fixtures through the compression engine and display results.
 
 This script generates the data for the README hero table by running each
@@ -13,13 +25,15 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Run the example directly without installing the package first.
+# pylint: disable=wrong-import-position
+import src.engine
 from src import config
-from src.engine import CompressionEngine
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
 CHARS_PER_TOKEN = config.get("chars_per_token")
 
-engine = CompressionEngine()
+engine = src.engine.CompressionEngine()
 
 DEMOS = [
     ("git diff (large refactor)", "git diff", "large_git_diff.txt"),
@@ -31,10 +45,12 @@ DEMOS = [
 
 
 def to_tokens(n: int) -> int:
+    """Estimate tokens from characters using the configured ratio."""
     return max(1, round(n / CHARS_PER_TOKEN)) if n > 0 else 0
 
 
 def main() -> None:
+    """Print a before-and-after comparison for each bundled output fixture."""
     print()
     print("Token-Saver Compression Demo")
     print("=" * 80)
@@ -52,13 +68,19 @@ def main() -> None:
         with open(fixture_path, encoding="utf-8") as f:
             raw_output = f.read()
 
-        compressed, processor, was_compressed = engine.compress(command, raw_output)
+        compressed, processor, was_compressed = engine.compress(
+            command, raw_output
+        )
 
         orig_chars = len(raw_output)
         comp_chars = len(compressed)
         orig_tokens = to_tokens(orig_chars)
         comp_tokens = to_tokens(comp_chars)
-        savings_pct = (orig_chars - comp_chars) / orig_chars * 100 if orig_chars > 0 else 0
+        savings_pct = (
+            (orig_chars - comp_chars) / orig_chars * 100
+            if orig_chars > 0
+            else 0
+        )
 
         total_orig += orig_chars
         total_comp += comp_chars
@@ -66,8 +88,12 @@ def main() -> None:
         status = "compressed" if was_compressed else "unchanged"
         print(f"  {label}")
         print(f"    Processor:  {processor}")
-        print(f"    Original:   {orig_tokens:>6,} tokens ({orig_chars:>8,} chars)")
-        print(f"    Compressed: {comp_tokens:>6,} tokens ({comp_chars:>8,} chars)")
+        print(
+            f"    Original:   {orig_tokens:>6,} tokens ({orig_chars:>8,} chars)"
+        )
+        print(
+            f"    Compressed: {comp_tokens:>6,} tokens ({comp_chars:>8,} chars)"
+        )
         print(f"    Savings:    {savings_pct:5.1f}%  [{status}]")
         print()
 
@@ -75,7 +101,8 @@ def main() -> None:
         total_savings = (total_orig - total_comp) / total_orig * 100
         print("-" * 80)
         print(
-            f"  Total: {to_tokens(total_orig):,} -> {to_tokens(total_comp):,} tokens"
+            f"  Total: {to_tokens(total_orig):,} -> "
+            f"{to_tokens(total_comp):,} tokens"
             f"  ({total_savings:.1f}% overall savings)"
         )
     print()

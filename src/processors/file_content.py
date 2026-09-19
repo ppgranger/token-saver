@@ -1,3 +1,15 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """File content processor: content-aware compression for file outputs.
 
 Strategy — strict two-category dispatch:
@@ -14,9 +26,10 @@ COMPRESS (structure-preserving):
 import json
 import re
 
-from .. import config
-from .base import Processor
-from .utils import compress_json_value, compress_log_lines
+from src import config
+from src.processors import base
+from src.processors import env
+from src.processors import utils
 
 # ── File type sets ───────────────────────────────────────────────────
 
@@ -138,7 +151,9 @@ _LOG_ERROR_RE = re.compile(
 )
 
 
-class FileContentProcessor(Processor):
+class FileContentProcessor(base.Processor):
+    """Summarize file contents by format and redact environment secrets."""
+
     priority = 51
     handles_failure = True
     hook_patterns = [
@@ -147,10 +162,21 @@ class FileContentProcessor(Processor):
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "file_content"
 
     def can_handle(self, command: str) -> bool:
-        return bool(re.match(r"\s*(?:\S*/)?(cat|head|tail|less|more|bat)\b", command))
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
+        return bool(
+            re.match(r"\s*(?:\S*/)?(cat|head|tail|less|more|bat)\b", command)
+        )
 
     def redacted_secrets(self, command: str, output: str) -> bool:
         # Only the .env-variant branch of process() redacts anything; every
@@ -159,9 +185,27 @@ class FileContentProcessor(Processor):
         # this must not blanket-exempt the whole processor from the ratio
         # gate — that would let a source file's compression regress
         # silently past the safety net that catches exactly that.
+        """Return whether processing this input would mask sensitive values.
+
+        Args:
+            command: Shell command identifying the input format.
+            output: Captured output that may contain sensitive values.
+
+        Returns:
+            Whether unredacted input must be excluded from fallback results.
+        """
         return self._is_env_file_to_redact(self._extract_filename(command))
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
@@ -240,7 +284,7 @@ class FileContentProcessor(Processor):
     _VALUE_FLAGS = {"-n", "-c", "--lines", "--bytes"}
 
     def _file_args(self, command: str) -> list[str]:
-        """Yield candidate file arguments, skipping flags and their numeric values."""
+        """Return candidate file arguments, skipping flags and their values."""
         parts = command.split()
         args: list[str] = []
         i, n = 1, len(parts)
@@ -275,7 +319,7 @@ class FileContentProcessor(Processor):
         return ""
 
     def _extract_filename(self, command: str) -> str:
-        """Extract bare filename from the command, e.g. 'cat /path/to/package-lock.json'."""
+        """Extract the bare filename from a file-reading command."""
         for part in self._file_args(command):
             return part.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
         return ""
@@ -296,7 +340,8 @@ class FileContentProcessor(Processor):
         # Web assets (.js/.ts/.css/...) are exempt — minified bundles are real
         # and nobody patches them.
         is_protected_source = (
-            ext in _SOURCE_CODE_EXTENSIONS or ext in _SENSITIVE_CONFIG_EXTENSIONS
+            ext in _SOURCE_CODE_EXTENSIONS
+            or ext in _SENSITIVE_CONFIG_EXTENSIONS
         ) and ext not in _MINIFIABLE_SOURCE_EXTENSIONS
         if is_protected_source:
             return False
@@ -322,8 +367,6 @@ class FileContentProcessor(Processor):
 
     def _compress_env_file(self, lines: list[str]) -> str:
         """Compress .env files: redact sensitive values, keep structure."""
-        from .env import _SENSITIVE_PATTERNS  # noqa: PLC0415
-
         result = []
         redacted = 0
         for line in lines:
@@ -333,7 +376,7 @@ class FileContentProcessor(Processor):
                 continue
             if "=" in stripped:
                 key = stripped.split("=", 1)[0]
-                if _SENSITIVE_PATTERNS.search(key):
+                if env.is_sensitive_name(key):
                     result.append(f"{key}=***")
                     redacted += 1
                 else:
@@ -367,18 +410,26 @@ class FileContentProcessor(Processor):
         return "unknown"
 
     def _looks_like_csv(self, sample: list[str]) -> bool:
+        """Check whether sample rows use a consistent CSV or TSV delimiter."""
         if len(sample) < 3:
             return False
         for sep in (",", "\t"):
             counts = [line.count(sep) for line in sample if line.strip()]
-            if len(counts) >= 3 and counts[0] >= 2 and all(c == counts[0] for c in counts[:5]):
+            if (
+                len(counts) >= 3
+                and counts[0] >= 2
+                and all(c == counts[0] for c in counts[:5])
+            ):
                 return True
         return False
 
     # ── Lock file compression ────────────────────────────────────────
 
-    def _compress_lock_file(self, lines: list[str], ext: str, filename: str) -> str:
+    def _compress_lock_file(
+        self, lines: list[str], ext: str, filename: str
+    ) -> str:
         """Extract only dependency names and versions from lock files."""
+        del ext  # Lockfile names identify their format more precisely.
         total = len(lines)
         raw = "\n".join(lines)
 
@@ -421,9 +472,13 @@ class FileContentProcessor(Processor):
         else:
             # lockfileVersion 1 uses "dependencies"
             for name, info in data.get("dependencies", {}).items():
-                deps[name] = info.get("version", "?") if isinstance(info, dict) else "?"
+                deps[name] = (
+                    info.get("version", "?") if isinstance(info, dict) else "?"
+                )
 
-        result = [f"package-lock.json ({len(deps)} dependencies, {total} lines):"]
+        result = [
+            f"package-lock.json ({len(deps)} dependencies, {total} lines):"
+        ]
         for name, version in sorted(deps.items()):
             result.append(f"  {name}@{version}")
         return "\n".join(result)
@@ -434,13 +489,24 @@ class FileContentProcessor(Processor):
         for line in lines:
             stripped = line.strip()
             # yarn: lines like '"lodash@^4.17.21":'  or  'lodash@^4.17.21:'
-            if stripped and not stripped.startswith("#") and stripped.endswith(":"):
+            if (
+                stripped
+                and not stripped.startswith("#")
+                and stripped.endswith(":")
+            ):
                 name = stripped.rstrip(":").strip('"')
                 deps.append(name)
             # version line
             if stripped.startswith("version "):
-                version = stripped.split('"')[1] if '"' in stripped else stripped.split()[-1]
-                if deps and "@" not in deps[-1].split(",")[0].rsplit("@", 1)[-1]:
+                version = (
+                    stripped.split('"')[1]
+                    if '"' in stripped
+                    else stripped.split()[-1]
+                )
+                if (
+                    deps
+                    and "@" not in deps[-1].split(",")[0].rsplit("@", 1)[-1]
+                ):
                     deps[-1] = f"{deps[-1]} -> {version}"
 
         result = [f"lock file ({len(deps)} entries, {total} lines):"]
@@ -450,8 +516,10 @@ class FileContentProcessor(Processor):
             result.append(f"  ... ({len(deps) - 50} more)")
         return "\n".join(result)
 
-    def _compress_toml_lock(self, lines: list[str], total: int, label: str) -> str:
-        """Extract [[package]] name and version from TOML lock files (poetry.lock, Cargo.lock)."""
+    def _compress_toml_lock(
+        self, lines: list[str], total: int, label: str
+    ) -> str:
+        """Extract package names and versions from Poetry or Cargo lockfiles."""
         deps = []
         current_name = None
         for line in lines:
@@ -459,10 +527,18 @@ class FileContentProcessor(Processor):
             if stripped == "[[package]]":
                 current_name = None
             elif stripped.startswith("name = "):
-                val = stripped.split('"')[1] if '"' in stripped else stripped.split("=")[1].strip()
+                val = (
+                    stripped.split('"')[1]
+                    if '"' in stripped
+                    else stripped.split("=")[1].strip()
+                )
                 current_name = val
             elif stripped.startswith("version = ") and current_name:
-                val = stripped.split('"')[1] if '"' in stripped else stripped.split("=")[1].strip()
+                val = (
+                    stripped.split('"')[1]
+                    if '"' in stripped
+                    else stripped.split("=")[1].strip()
+                )
                 deps.append(f"{current_name}@{val}")
                 current_name = None
 
@@ -482,7 +558,7 @@ class FileContentProcessor(Processor):
         return self._compress_toml_lock(lines, total, "Cargo.lock")
 
     def _compress_json_lock(self, raw: str, total: int) -> str:
-        """composer.lock / Pipfile.lock: extract package names + versions from JSON."""
+        """Extract package names and versions from Composer or Pipenv JSON."""
         try:
             data = json.loads(raw)
         except (json.JSONDecodeError, ValueError):
@@ -498,7 +574,9 @@ class FileContentProcessor(Processor):
         # Pipfile.lock: default + develop dicts
         for section in ("default", "develop"):
             for name, info in data.get(section, {}).items():
-                version = info.get("version", "?") if isinstance(info, dict) else "?"
+                version = (
+                    info.get("version", "?") if isinstance(info, dict) else "?"
+                )
                 deps.append(f"{name}@{version}")
 
         result = [f"lock file ({len(deps)} packages, {total} lines):"]
@@ -527,6 +605,7 @@ class FileContentProcessor(Processor):
     # ── Structured data compression ──────────────────────────────────
 
     def _compress_structured(self, lines: list[str], fmt: str) -> str:
+        """Dispatch structured file content to the matching format summary."""
         total = len(lines)
         raw = "\n".join(lines)
 
@@ -542,16 +621,18 @@ class FileContentProcessor(Processor):
         return self._truncate_default(lines)
 
     def _compress_json(self, raw: str, total: int) -> str:
+        """Summarize JSON depth and fall back to truncation on parse errors."""
         try:
             data = json.loads(raw)
         except (json.JSONDecodeError, ValueError):
             return self._truncate_default(raw.splitlines())
 
-        compressed = compress_json_value(data, max_depth=2)
+        compressed = utils.compress_json_value(data, max_depth=2)
         result = json.dumps(compressed, indent=2, default=str)
         return f"{result}\n\n({total} total lines)"
 
     def _compress_yaml(self, lines: list[str], total: int) -> str:
+        """Retain YAML structure while bounding lengthy nested content."""
         result = []
         nested_count = 0
         for line in lines:
@@ -599,6 +680,7 @@ class FileContentProcessor(Processor):
         return "\n".join(result)
 
     def _compress_xml(self, lines: list[str], total: int) -> str:
+        """Summarize repeated XML elements and retain the document outline."""
         result = []
         nested_count = 0
         for line in lines:
@@ -617,8 +699,9 @@ class FileContentProcessor(Processor):
     # ── Log compression ─────────────────────────────────────────────
 
     def _compress_log(self, lines: list[str]) -> str:
+        """Keep log boundaries and error context using configured limits."""
         context = config.get("file_log_context_lines")
-        return compress_log_lines(
+        return utils.compress_log_lines(
             lines,
             keep_head=5,
             keep_tail=5,
@@ -629,6 +712,7 @@ class FileContentProcessor(Processor):
     # ── CSV compression ─────────────────────────────────────────────
 
     def _compress_csv(self, lines: list[str]) -> str:
+        """Keep the CSV header and representative data rows with a row count."""
         total = len(lines)
         head_rows = config.get("file_csv_head_rows")
         tail_rows = config.get("file_csv_tail_rows")
@@ -653,6 +737,7 @@ class FileContentProcessor(Processor):
     # ── Fallback: head/tail truncation ───────────────────────────────
 
     def _truncate_default(self, lines: list[str]) -> str:
+        """Keep file boundaries and mark the omitted middle section."""
         keep_head = config.get("file_keep_head")
         keep_tail = config.get("file_keep_tail")
         total = len(lines)

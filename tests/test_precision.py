@@ -1,3 +1,15 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Precision tests: verify no critical information is lost during compression.
 
 These tests simulate real-world outputs and validate that all actionable
@@ -11,15 +23,15 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.engine import CompressionEngine
-from tests.failure_fixtures import CASES
+import src.engine
+import tests.failure_fixtures
 
 
 class TestGitPrecision:
     """Ensure git compression preserves all actionable information."""
 
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_status_long_format_preserves_untracked(self):
         """Long-format git status must preserve untracked files."""
@@ -32,14 +44,19 @@ class TestGitPrecision:
                 "\tmodified:   src/models.py",
                 "",
                 "Untracked files:",
-                '  (use "git add <file>..." to include in what will be committed)',
+                (
+                    '  (use "git add <file>..." to include in what wi'
+                    "ll be committed)"
+                ),
                 "\tsrc/new_handler.py",
                 "\ttests/test_auth_new.py",
                 "",
                 "no changes added to commit",
             ]
         )
-        compressed, _, _was_compressed = self.engine.compress("git status", output)
+        compressed, _, _was_compressed = self.engine.compress(
+            "git status", output
+        )
         # All files must be present
         assert "auth.py" in compressed
         assert "models.py" in compressed
@@ -50,7 +67,10 @@ class TestGitPrecision:
         assert "?:2" in compressed
 
     def test_status_short_format_preserves_all(self):
-        output = " M src/a.py\n M src/b.py\n D src/c.py\n?? src/d.py\nA  src/e.py\n" * 5
+        output = (
+            " M src/a.py\n M src/b.py\n D src/c.py\n?? src/d.py\nA  src/e.py\n"
+            * 5
+        )
         compressed, _, _ = self.engine.compress("git status -s", output)
         # All status codes must appear
         for code in ["M", "D", "?", "A"]:
@@ -110,7 +130,7 @@ class TestGitPrecision:
         assert "unchanged_0" not in compressed  # too far from change
 
     def test_diff_stat_preserves_filenames_and_summary(self):
-        """git diff --stat must keep all filenames and the summary."""
+        """Git diff --stat must keep all filenames and the summary."""
         output = "\n".join(
             [
                 " src/auth.py    | 15 +++++++++------",
@@ -162,7 +182,9 @@ class TestGitPrecision:
                 "   abc1234..def5678  feature/auth -> feature/auth",
             ]
         )
-        compressed, _, _ = self.engine.compress("git push origin feature/auth", output)
+        compressed, _, _ = self.engine.compress(
+            "git push origin feature/auth", output
+        )
         assert "feature/auth" in compressed
         assert "abc1234" in compressed or "def5678" in compressed
 
@@ -171,7 +193,7 @@ class TestTestPrecision:
     """Ensure test compression preserves all failure details."""
 
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_pytest_failure_stack_preserved(self):
         output = "\n".join(
@@ -245,7 +267,7 @@ class TestTestPrecision:
 
 class TestBuildPrecision:
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_all_errors_preserved(self):
         output = "\n".join(
@@ -263,7 +285,9 @@ class TestBuildPrecision:
                 "error: aborting due to 2 previous errors",
             ]
         )
-        compressed, _, was_compressed = self.engine.compress("cargo build", output)
+        compressed, _, was_compressed = self.engine.compress(
+            "cargo build", output
+        )
         assert was_compressed
         assert "mismatched types" in compressed
         assert "unused import" in compressed
@@ -282,13 +306,15 @@ class TestBuildPrecision:
                 "Output: dist/bundle.js (245 KB gzipped)",
             ]
         )
-        compressed, _, was_compressed = self.engine.compress("npm run build", output)
+        compressed, _, was_compressed = self.engine.compress(
+            "npm run build", output
+        )
         assert was_compressed
         assert "Build succeeded" in compressed
         assert "245 KB" in compressed or "gzip" in compressed
 
     def test_errors_mentioning_step_keywords_preserved(self):
-        """Errors containing 'Resolution step' or 'Fetch step' must not be stripped."""
+        """Preserve errors that mention Resolution or Fetch steps."""
         output = "\n".join(
             [f"  Resolving dep-{i}" for i in range(50)]
             + [
@@ -299,7 +325,9 @@ class TestBuildPrecision:
                 "  UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
             ]
         )
-        compressed, _, was_compressed = self.engine.compress("yarn install", output)
+        compressed, _, was_compressed = self.engine.compress(
+            "yarn install", output
+        )
         assert was_compressed
         assert "Resolution step failed" in compressed
         assert "ETIMEDOUT" in compressed
@@ -309,7 +337,7 @@ class TestBuildPrecision:
 
 class TestLintPrecision:
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_eslint_block_format_grouped(self):
         eslint = ""
@@ -318,7 +346,9 @@ class TestLintPrecision:
             eslint += f"  10:{i}  error  Unexpected var  no-var\n"
             eslint += f"  20:{i}  error  Missing return  consistent-return\n\n"
         eslint += "20 problems (20 errors, 0 warnings)"
-        compressed, _, was_compressed = self.engine.compress("eslint src/", eslint)
+        compressed, _, was_compressed = self.engine.compress(
+            "eslint src/", eslint
+        )
         assert was_compressed
         assert "no-var" in compressed
         assert "consistent-return" in compressed
@@ -333,7 +363,9 @@ class TestLintPrecision:
             for i in range(5):
                 lines.append(f"src/f{i}.py:1:1: {rule} some message")
         output = "\n".join(lines)
-        compressed, _, was_compressed = self.engine.compress("ruff check .", output)
+        compressed, _, was_compressed = self.engine.compress(
+            "ruff check .", output
+        )
         assert was_compressed
         for rule in rules:
             assert rule in compressed, f"Rule {rule} missing"
@@ -341,7 +373,7 @@ class TestLintPrecision:
 
 class TestDockerPrecision:
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_docker_build_preserves_steps_and_result(self):
         output = "\n".join(
@@ -360,7 +392,9 @@ class TestDockerPrecision:
                 "Successfully tagged myapp:1.0",
             ]
         )
-        compressed, _, was_compressed = self.engine.compress("docker build -t myapp:1.0 .", output)
+        compressed, _, was_compressed = self.engine.compress(
+            "docker build -t myapp:1.0 .", output
+        )
         assert was_compressed
         assert "Step 1/5" in compressed
         assert "Step 5/5" in compressed
@@ -370,7 +404,7 @@ class TestDockerPrecision:
 
 class TestPytestWarningPrecision:
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_warnings_type_visible(self):
         """Warning types should be visible after compression."""
@@ -382,8 +416,14 @@ class TestPytestWarningPrecision:
             + [
                 "=" * 40 + " warnings summary " + "=" * 40,
             ]
-            + [f"  /lib/pkg.py:{i}: DeprecationWarning: old_func() deprecated" for i in range(20)]
-            + [f"  /lib/other.py:{i}: UserWarning: check something" for i in range(5)]
+            + [
+                f"  /lib/pkg.py:{i}: DeprecationWarning: old_func() deprecated"
+                for i in range(20)
+            ]
+            + [
+                f"  /lib/other.py:{i}: UserWarning: check something"
+                for i in range(5)
+            ]
             + [
                 "-- Docs: https://docs.pytest.org",
                 "=" * 40 + " 50 passed, 25 warnings " + "=" * 40,
@@ -398,7 +438,7 @@ class TestPytestWarningPrecision:
 
 class TestCurlPrecision:
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_curl_verbose_preserves_status_and_body(self):
         """HTTP status code and response body must survive compression."""
@@ -435,7 +475,7 @@ class TestCurlPrecision:
 
 class TestDockerPsPrecision:
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_docker_ps_preserves_unhealthy_containers(self):
         header = (
@@ -456,7 +496,9 @@ class TestDockerPsPrecision:
             "             crashed-app"
         )
         output = "\n".join([header, *entries])
-        compressed, _, was_compressed = self.engine.compress("docker ps -a", output)
+        compressed, _, was_compressed = self.engine.compress(
+            "docker ps -a", output
+        )
         assert was_compressed
         assert "crashed-app" in compressed
         assert "Exited" in compressed
@@ -464,7 +506,7 @@ class TestDockerPsPrecision:
 
 class TestSearchPrecision:
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_grep_preserves_all_matching_files(self):
         """All files with matches should be visible."""
@@ -474,7 +516,9 @@ class TestSearchPrecision:
             for j in range(4):
                 lines.append(f"{f}:{j + 1}:import pattern_here line {j}")
         output = "\n".join(lines)
-        compressed, _, was_compressed = self.engine.compress("grep -r pattern_here .", output)
+        compressed, _, was_compressed = self.engine.compress(
+            "grep -r pattern_here .", output
+        )
         assert was_compressed
         assert "100 matches" in compressed
         # Files up to search_max_files limit should be represented
@@ -487,7 +531,7 @@ class TestSearchPrecision:
 
 class TestEnvPrecision:
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_env_never_leaks_secrets(self):
         """Sensitive values must be redacted."""
@@ -530,15 +574,22 @@ class TestEnvPrecision:
         assert "GITHUB_TOKEN" in compressed
 
     def test_short_secrets_not_leaked_via_ratio_fallback(self):
-        """Regression: when redacting a *short* secret makes the labelled
-        output ("14 environment variables...") no smaller than the input —
-        or not smaller by min_compression_ratio — the engine used to discard
-        the redacted result and fall back to the raw, unredacted original.
-        The secret must survive redaction regardless of how the ratio comes
-        out."""
-        lines = [f"VAR{i}=v" for i in range(12)] + ["API_KEY=s", "DB_PASSWORD=p"]
+        """Keep short secrets redacted when compression misses its ratio gate.
+
+        Regression: when redacting a *short* secret makes the labelled output
+        ("14 environment variables...") no smaller than the input — or not
+        smaller by min_compression_ratio — the engine used to discard the
+        redacted result and fall back to the raw, unredacted original. The
+        secret must survive redaction regardless of how the ratio comes out.
+        """
+        lines = [f"VAR{i}=v" for i in range(12)] + [
+            "API_KEY=s",
+            "DB_PASSWORD=p",
+        ]
         output = "\n".join(lines)
-        compressed, processor, was_compressed = self.engine.compress("env", output)
+        compressed, processor, was_compressed = self.engine.compress(
+            "env", output
+        )
         assert processor == "env"
         assert was_compressed
         assert not compressed.endswith("API_KEY=s")
@@ -549,15 +600,22 @@ class TestEnvPrecision:
         assert "DB_PASSWORD=***" in compressed
 
     def test_secret_not_leaked_via_generic_mismatch_fallback(self):
-        """Regression: when the *redacted* env output still doesn't clear
-        the ratio gate, the engine's mismatch-fallback used to re-run
-        GenericProcessor on the raw, unredacted `output` — leaking the
-        secret through a completely different code path than the direct
-        fallback above."""
-        lines = [f"VAR{i}=verbose_value_padding_to_make_this_long_{i}" for i in range(300)]
+        """Keep secrets redacted through the generic mismatch fallback.
+
+        Regression: when the *redacted* env output still doesn't clear the ratio
+        gate, the engine's mismatch-fallback used to re-run GenericProcessor on
+        the raw, unredacted `output` — leaking the secret through a completely
+        different code path than the direct fallback above.
+        """
+        lines = [
+            f"VAR{i}=verbose_value_padding_to_make_this_long_{i}"
+            for i in range(300)
+        ]
         lines.append("API_KEY=SUPERSECRETVALUE12345")
         output = "\n".join(lines)
-        compressed, _processor, was_compressed = self.engine.compress("env", output)
+        compressed, _processor, was_compressed = self.engine.compress(
+            "env", output
+        )
         assert was_compressed
         assert "SUPERSECRETVALUE12345" not in compressed
         assert "API_KEY=***" in compressed
@@ -565,11 +623,14 @@ class TestEnvPrecision:
 
 class TestFileContentEnvPrecision:
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_short_secret_in_env_variant_not_leaked_via_ratio_fallback(self):
-        """Same regression as TestEnvPrecision, for the file_content
-        processor's .env.* redaction path (cat .env.production etc.)."""
+        """Retain redaction of short secrets in environment-variant files.
+
+        Same regression as TestEnvPrecision, for the file_content processor's
+        .env.* redaction path (cat .env.production etc.).
+        """
         compressed, processor, was_compressed = self.engine.compress(
             "cat .env.production", "API_KEY=s"
         )
@@ -579,14 +640,18 @@ class TestFileContentEnvPrecision:
         assert "API_KEY=***" in compressed
 
     def test_source_code_ratio_gate_is_unaffected(self):
-        """redacted_secrets() must be scoped to the .env branch only — an
-        ordinary source file must still go through the normal ratio gate
-        unmodified."""
+        """Keep the ordinary ratio gate for source-code file contents.
+
+        redacted_secrets() must be scoped to the .env branch only — an ordinary
+        source file must still go through the normal ratio gate unmodified.
+        """
         # Source code is returned verbatim (never compressed) regardless of
         # ratio; this specifically checks that path is untouched by the
         # redaction carve-out, not that it now "always compresses".
         output = "def f():\n    return 1\n"
-        compressed, processor, was_compressed = self.engine.compress("cat file.py", output)
+        compressed, processor, was_compressed = self.engine.compress(
+            "cat file.py", output
+        )
         assert processor == "file_content"
         assert compressed == output
         assert not was_compressed
@@ -594,18 +659,29 @@ class TestFileContentEnvPrecision:
 
 class TestKubectlPrecision:
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_kubectl_get_pods_preserves_failing_pods(self):
-        header = "NAME                    READY   STATUS             RESTARTS   AGE"
+        header = (
+            "NAME                    READY   STATUS             RESTARTS   AGE"
+        )
         entries = [
-            f"healthy-{i:03d}             1/1     Running            0          {i}h"
+            (
+                f"healthy-{i:03d}             1/1     Running            0     "
+                f"     {i}h"
+            )
             for i in range(25)
         ]
-        entries.append("broken-pod              0/1     CrashLoopBackOff   15         1h")
-        entries.append("pending-pod             0/1     Pending            0          30m")
+        entries.append(
+            "broken-pod              0/1     CrashLoopBackOff   15         1h"
+        )
+        entries.append(
+            "pending-pod             0/1     Pending            0          30m"
+        )
         output = "\n".join([header, *entries])
-        compressed, _, was_compressed = self.engine.compress("kubectl get pods", output)
+        compressed, _, was_compressed = self.engine.compress(
+            "kubectl get pods", output
+        )
         assert was_compressed
         assert "CrashLoopBackOff" in compressed
         assert "Pending" in compressed
@@ -615,7 +691,7 @@ class TestKubectlPrecision:
 
 class TestTerraformPrecision:
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_terraform_plan_preserves_summary_and_changes(self):
         output = "\n".join(
@@ -640,7 +716,9 @@ class TestTerraformPrecision:
             ]
             + [""] * 20
         )
-        compressed, _, was_compressed = self.engine.compress("terraform plan", output)
+        compressed, _, was_compressed = self.engine.compress(
+            "terraform plan", output
+        )
         assert was_compressed
         assert "aws_instance.web" in compressed
         assert "aws_s3_bucket.data" in compressed
@@ -652,7 +730,7 @@ class TestTerraformPrecision:
 
 class TestPackageListPrecision:
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_npm_ls_preserves_unmet_dependencies(self):
         lines = ["my-project@1.0.0 /home/user/project"]
@@ -667,12 +745,14 @@ class TestPackageListPrecision:
         assert "critical-package" in compressed
 
     def test_pip_list_routed_to_package_processor_not_build(self):
-        """pip list must NOT produce 'Build succeeded.' output."""
+        """Pip list must NOT produce 'Build succeeded.' output."""
         lines = ["Package    Version", "---------- -------"]
         for i in range(50):
             lines.append(f"package-{i:03d}  {i}.0.0")
         output = "\n".join(lines)
-        compressed, processor, was_compressed = self.engine.compress("pip list", output)
+        compressed, processor, was_compressed = self.engine.compress(
+            "pip list", output
+        )
         assert was_compressed
         assert processor == "package_list"
         assert "Build succeeded" not in compressed
@@ -681,7 +761,7 @@ class TestPackageListPrecision:
 
 class TestGhPrecision:
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_gh_checks_preserves_failures(self):
         """All failing checks must survive compression."""
@@ -692,7 +772,9 @@ class TestGhPrecision:
         lines.append("✗  security-scan\tfailing\t2m")
         lines.append("○  deploy\tpending\t-")
         output = "\n".join(lines)
-        compressed, _, was_compressed = self.engine.compress("gh pr checks", output)
+        compressed, _, was_compressed = self.engine.compress(
+            "gh pr checks", output
+        )
         assert was_compressed
         assert "lint" in compressed
         assert "security-scan" in compressed
@@ -704,7 +786,9 @@ class TestGhPrecision:
         for i in range(40):
             lines.append(f"{i + 100}\tFix critical bug #{i}\tfix/bug-{i}\tOPEN")
         output = "\n".join(lines)
-        compressed, _, was_compressed = self.engine.compress("gh pr list", output)
+        compressed, _, was_compressed = self.engine.compress(
+            "gh pr list", output
+        )
         assert was_compressed
         # First 30 PRs should be present
         assert "100" in compressed
@@ -713,7 +797,7 @@ class TestGhPrecision:
 
 class TestDbQueryPrecision:
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_psql_preserves_header_and_row_count(self):
         """Table header and row count must survive compression."""
@@ -750,7 +834,7 @@ class TestDbQueryPrecision:
 
 class TestCloudCliPrecision:
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_aws_preserves_instance_ids_and_state(self):
         """Instance IDs and state must survive JSON compression."""
@@ -765,7 +849,10 @@ class TestCloudCliPrecision:
                             "State": {"Name": "running"},
                             "Tags": [{"Key": "Name", "Value": "prod-web-1"}],
                             "SecurityGroups": [
-                                {"GroupId": f"sg-{j:08d}", "GroupName": f"web-sg-{j}"}
+                                {
+                                    "GroupId": f"sg-{j:08d}",
+                                    "GroupName": f"web-sg-{j}",
+                                }
                                 for j in range(10)
                             ],
                         }
@@ -774,7 +861,9 @@ class TestCloudCliPrecision:
             ]
         }
         output = json.dumps(data, indent=2)
-        compressed, _, _ = self.engine.compress("aws ec2 describe-instances", output)
+        compressed, _, _ = self.engine.compress(
+            "aws ec2 describe-instances", output
+        )
         assert "i-0abc123def456789a" in compressed
         assert "running" in compressed
         assert "prod-web-1" in compressed
@@ -782,13 +871,15 @@ class TestCloudCliPrecision:
 
 class TestGenericPrecision:
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_unique_lines_never_lost(self):
         """Unique content should never be silently dropped."""
         unique_lines = [f"IMPORTANT_DATA_{i}: value_{i}" for i in range(100)]
         output = "\n".join(unique_lines)
-        compressed, _, was_compressed = self.engine.compress("unknown_cmd", output)
+        compressed, _, was_compressed = self.engine.compress(
+            "unknown_cmd", output
+        )
         # If compressed, all unique lines should still be there
         # (generic only deduplicates identical lines)
         if was_compressed:
@@ -809,7 +900,7 @@ class TestFileContentSignaturePrecision:
     """Ensure source code is NEVER compressed — model needs exact content."""
 
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_source_code_passthrough_preserves_everything(self):
         """Source code (.py) must pass through byte-for-byte, even if huge."""
@@ -837,7 +928,9 @@ class TestFileContentSignaturePrecision:
             ]
             + [""] * 40  # pad to exceed threshold
         )
-        compressed, _, was_compressed = self.engine.compress("cat src/manager.py", code)
+        compressed, _, was_compressed = self.engine.compress(
+            "cat src/manager.py", code
+        )
         assert not was_compressed
         assert compressed == code
 
@@ -846,17 +939,23 @@ class TestFileContentSignaturePrecision:
         code = "\n".join(f"line {i}: code content" for i in range(500))
         extensions = [".py", ".js", ".ts", ".tsx", ".go", ".rs", ".java", ".rb"]
         for ext in extensions:
-            compressed, _, was_compressed = self.engine.compress(f"cat file{ext}", code)
+            compressed, _, was_compressed = self.engine.compress(
+                f"cat file{ext}", code
+            )
             assert not was_compressed, f"Extension {ext} was compressed"
             assert compressed == code, f"Extension {ext} content changed"
 
     def test_sensitive_config_passthrough(self):
-        """Sensitive config files (.env, .ini, .cfg, .conf) must pass through."""
+        """Pass sensitive configuration files through unchanged."""
         config_content = "\n".join(f"KEY_{i}=value_{i}" for i in range(200))
         for ext in [".env", ".ini", ".cfg", ".conf"]:
-            compressed, _, was_compressed = self.engine.compress(f"cat config{ext}", config_content)
+            compressed, _, was_compressed = self.engine.compress(
+                f"cat config{ext}", config_content
+            )
             assert not was_compressed, f"Extension {ext} was compressed"
-            assert compressed == config_content, f"Extension {ext} content changed"
+            assert compressed == config_content, (
+                f"Extension {ext} content changed"
+            )
 
     def test_large_source_file_class_definitions_intact(self):
         """All class names must survive in large .py files (by passthrough)."""
@@ -870,7 +969,9 @@ class TestFileContentSignaturePrecision:
             classes.append("        return data")
             classes.append("")
         code = "\n".join(classes)
-        compressed, _, was_compressed = self.engine.compress("cat src/handlers.py", code)
+        compressed, _, was_compressed = self.engine.compress(
+            "cat src/handlers.py", code
+        )
         assert not was_compressed
         assert compressed == code
         for i in range(8):
@@ -881,26 +982,33 @@ class TestGenericTruncationPrecision:
     """Ensure generic truncation preserves head and tail correctly."""
 
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_unique_lines_at_boundary_preserved(self):
-        """With generic_truncate_threshold=100, lines at positions 45-55
-        (near the head/tail boundary) must not be silently lost if they
-        are unique and actionable."""
+        """Keep actionable lines near the head and tail boundaries.
+
+        With generic_truncate_threshold=100, lines at positions 45-55 (near the
+        head/tail boundary) must not be silently lost if they are unique and
+        actionable.
+        """
         from src import config
 
         threshold = config.get("generic_truncate_threshold")
-        # Build output that exceeds threshold but has a critical message in the middle
+        # Build output that exceeds threshold but has a critical message in the
+        # middle
         lines = [f"Processing item {i}" for i in range(threshold + 50)]
         # Insert a critical error in the middle
         mid = (threshold + 50) // 2
         lines[mid] = "CRITICAL ERROR: database connection lost at step 75"
         output = "\n".join(lines)
-        compressed, _, _was_compressed = self.engine.compress("unknown_tool run", output)
+        compressed, _, _was_compressed = self.engine.compress(
+            "unknown_tool run", output
+        )
         # Head and tail must be present
         assert "Processing item 0" in compressed
         assert f"Processing item {threshold + 49}" in compressed
-        # The critical error in the middle may be truncated — this is the expected
+        # The critical error in the middle may be truncated — this is the
+        # expected
         # trade-off. But the truncation marker must indicate lines were dropped.
         if "CRITICAL ERROR" not in compressed:
             assert "truncated" in compressed or "omitted" in compressed
@@ -910,15 +1018,17 @@ class TestGitLogCountPrecision:
     """Test that git log respects the configured limit clearly."""
 
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_truncation_marker_shows_count(self):
-        """When commits are truncated, the marker must show how many are hidden."""
+        """Report the number of omitted commits in the truncation marker."""
         entries = []
         for i in range(15):
             entries.append(f"abc{i:04x} Fix issue #{i}")
         output = "\n".join(entries)
-        compressed, _, was_compressed = self.engine.compress("git log --oneline -15", output)
+        compressed, _, was_compressed = self.engine.compress(
+            "git log --oneline -15", output
+        )
         assert was_compressed
         # Must show how many are hidden
         assert "more" in compressed
@@ -928,7 +1038,7 @@ class TestLintFileCoveragePrecision:
     """Ensure lint compression shows all affected files even with 1 example."""
 
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_all_affected_files_listed(self):
         """Even with lint_example_count=1, the file count must be accurate."""
@@ -939,7 +1049,9 @@ class TestLintFileCoveragePrecision:
             files.add(f)
             lines.append(f"{f}:10:1: E501 line too long")
         output = "\n".join(lines)
-        compressed, _, was_compressed = self.engine.compress("ruff check .", output)
+        compressed, _, was_compressed = self.engine.compress(
+            "ruff check .", output
+        )
         assert was_compressed
         # File count must appear
         assert "8 files" in compressed or "8 occurrences" in compressed
@@ -949,7 +1061,7 @@ class TestCloudCliImportantKeyPrecision:
     """Test that cloud CLI important key preservation works via .search()."""
 
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_instance_id_key_preserved(self):
         """Keys like InstanceId and ResourceName must be preserved at depth."""
@@ -981,7 +1093,9 @@ class TestCloudCliImportantKeyPrecision:
             ]
         }
         output = json.dumps(data, indent=2)
-        compressed, _, _ = self.engine.compress("aws ec2 describe-instances", output)
+        compressed, _, _ = self.engine.compress(
+            "aws ec2 describe-instances", output
+        )
         assert "i-0abc123def456789a" in compressed
         assert "running" in compressed
 
@@ -990,7 +1104,7 @@ class TestGitStatusSbPrecision:
     """Test git status -sb branch header precision."""
 
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_sb_format_preserves_branch_and_files(self):
         output = "\n".join(
@@ -1012,10 +1126,10 @@ class TestJsonCompressionPrecision:
     """Ensure JSON compression preserves all top-level keys."""
 
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_all_top_level_keys_preserved(self):
-        """Every top-level key in a JSON file must appear in compressed output."""
+        """Preserve every top-level JSON key in compressed output."""
         import json
 
         data = {
@@ -1051,7 +1165,7 @@ class TestLockFilePrecision:
     """Ensure lock file compression preserves all dependency names."""
 
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_npm_lock_dependency_count_accurate(self):
         """The reported dependency count must match actual dependencies."""
@@ -1093,7 +1207,7 @@ class TestLockFilePrecision:
 
 class TestCargoPrecision:
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_cargo_build_preserves_all_errors_with_spans(self):
         lines = [f"   Compiling dep-{i} v1.0.{i}" for i in range(100)]
@@ -1113,7 +1227,9 @@ class TestCargoPrecision:
             ]
         )
         output = "\n".join(lines)
-        compressed, proc, was_compressed = self.engine.compress("cargo build", output)
+        compressed, proc, was_compressed = self.engine.compress(
+            "cargo build", output
+        )
         assert was_compressed
         assert proc == "cargo"
         assert "mismatched types" in compressed
@@ -1144,7 +1260,9 @@ class TestCargoPrecision:
         warnings.append("warning: `myapp` (lib) generated 15 warnings")
         warnings.append("    Finished dev [unoptimized + debuginfo] target(s)")
         output = "\n".join(warnings)
-        compressed, proc, was_compressed = self.engine.compress("cargo build", output)
+        compressed, proc, was_compressed = self.engine.compress(
+            "cargo build", output
+        )
         assert was_compressed
         assert proc == "cargo"
         assert "unused_variable" in compressed
@@ -1154,22 +1272,28 @@ class TestCargoPrecision:
 
 class TestGoPrecision:
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_go_build_preserves_all_errors(self):
-        # Need enough package headers to trigger compression (multi-package build)
+        # Need enough package headers to trigger compression (multi-package
+        # build)
         lines = [f"# myapp/pkg/module{i}" for i in range(10)]
         lines.extend(
             [
                 "# myapp/pkg/handler",
                 "pkg/handler/main.go:15:2: undefined: DoSomething",
-                "pkg/handler/main.go:20:10: cannot use x (variable of type string) as int",
+                (
+                    "pkg/handler/main.go:20:10: cannot use x (variabl"
+                    "e of type string) as int"
+                ),
                 "# myapp/pkg/db",
                 'pkg/db/conn.go:5:3: imported and not used: "fmt"',
             ]
         )
         output = "\n".join(lines)
-        compressed, proc, was_compressed = self.engine.compress("go build ./...", output)
+        compressed, proc, was_compressed = self.engine.compress(
+            "go build ./...", output
+        )
         assert was_compressed
         assert proc == "go"
         assert "undefined: DoSomething" in compressed
@@ -1178,11 +1302,15 @@ class TestGoPrecision:
         assert "conn.go:5:3" in compressed
 
     def test_go_mod_tidy_preserves_additions(self):
-        lines = [f"go: downloading github.com/pkg/dep{i} v1.0.{i}" for i in range(50)]
+        lines = [
+            f"go: downloading github.com/pkg/dep{i} v1.0.{i}" for i in range(50)
+        ]
         lines.append("go: added github.com/new/important v1.0.0")
         lines.append("go: removed github.com/old/unused v0.5.0")
         output = "\n".join(lines)
-        compressed, proc, was_compressed = self.engine.compress("go mod tidy", output)
+        compressed, proc, was_compressed = self.engine.compress(
+            "go mod tidy", output
+        )
         assert was_compressed
         assert proc == "go"
         assert "added" in compressed
@@ -1192,20 +1320,23 @@ class TestGoPrecision:
 
 class TestJqPrecision:
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
     def test_jq_preserves_top_level_structure(self):
         import json
 
         data = {
             "users": [
-                {"id": i, "name": f"user-{i}", "email": f"user{i}@test.com"} for i in range(50)
+                {"id": i, "name": f"user-{i}", "email": f"user{i}@test.com"}
+                for i in range(50)
             ],
             "metadata": {"total": 50, "page": 1},
             "status": "ok",
         }
         output = json.dumps(data, indent=2)
-        compressed, proc, was_compressed = self.engine.compress("jq . data.json", output)
+        compressed, proc, was_compressed = self.engine.compress(
+            "jq . data.json", output
+        )
         assert was_compressed
         assert proc == "jq_yq"
         assert "users" in compressed
@@ -1214,8 +1345,10 @@ class TestJqPrecision:
 
 
 class TestFailureHandling:
-    """The central promise, enforced mechanically: a failed command's reason
-    must survive compression — for every processor, at every exit code.
+    """Preserve failure reasons across all processors and exit statuses.
+
+    The central promise, enforced mechanically: a failed command's reason must
+    survive compression — for every processor, at every exit code.
 
     Each case in ``tests/failure_fixtures.py`` is realistic output from a
     command that failed, long enough to trigger compression, with the reason
@@ -1223,17 +1356,26 @@ class TestFailureHandling:
     """
 
     def setup_method(self):
-        self.engine = CompressionEngine()
+        self.engine = src.engine.CompressionEngine()
 
-    @pytest.mark.parametrize("case", CASES, ids=lambda c: c.processor)
+    @pytest.mark.parametrize(
+        "case", tests.failure_fixtures.CASES, ids=lambda c: c.processor
+    )
     def test_case_routes_to_its_processor(self, case):
         """A fixture that silently stopped routing would test nothing."""
         selected = next(
-            (p.name for p in self.engine.processors if p.can_handle(case.command)), "none"
+            (
+                p.name
+                for p in self.engine.processors
+                if p.can_handle(case.command)
+            ),
+            "none",
         )
         assert selected == case.processor
 
-    @pytest.mark.parametrize("case", CASES, ids=lambda c: c.processor)
+    @pytest.mark.parametrize(
+        "case", tests.failure_fixtures.CASES, ids=lambda c: c.processor
+    )
     @pytest.mark.parametrize("exit_code", [0, 1, None])
     def test_failure_reason_survives(self, case, exit_code):
         compressed, _proc, _was = self.engine.compress(
@@ -1244,43 +1386,59 @@ class TestFailureHandling:
                 f"{case.processor} dropped {marker!r} at exit_code={exit_code}"
             )
 
-    @pytest.mark.parametrize("case", CASES, ids=lambda c: c.processor)
+    @pytest.mark.parametrize(
+        "case", tests.failure_fixtures.CASES, ids=lambda c: c.processor
+    )
     def test_handles_failure_claim_is_earned(self, case):
         """``handles_failure = True`` is a claim; this is what makes it true.
 
         A processor that opts out of the generic downgrade must preserve the
         failure reason on its own, without the engine's recovery net.
         """
-        processor = next(p for p in self.engine.processors if p.name == case.processor)
+        processor = next(
+            p for p in self.engine.processors if p.name == case.processor
+        )
         if not processor.handles_failure:
             pytest.skip(f"{case.processor} does not claim handles_failure")
         raw = processor.process(case.command, case.output)
         for marker in case.critical:
             assert marker in raw, (
-                f"{case.processor} sets handles_failure = True but drops {marker!r}; "
+                f"{case.processor} sets handles_failure = True but drops "
+                f"{marker!r}; "
                 "either fix the processor or remove the claim"
             )
 
     def test_every_processor_has_a_case(self):
         """A new processor must ship a failure fixture with it."""
-        covered = {c.processor for c in CASES}
+        covered = {c.processor for c in tests.failure_fixtures.CASES}
         registered = {p.name for p in self.engine.processors}
         assert registered - covered == set(), (
-            f"processors without a failure fixture: {sorted(registered - covered)}"
+            f"processors without a failure fixture: "
+            f"{sorted(registered - covered)}"
         )
 
     def test_failed_command_downgrades_to_generic(self):
-        """The exit-code mechanism itself: an opted-out processor is bypassed."""
-        case = next(c for c in CASES if c.processor == "search")
-        _c, proc_ok, _ = self.engine.compress(case.command, case.output, exit_code=0)
-        _c, proc_fail, _ = self.engine.compress(case.command, case.output, exit_code=1)
+        """Bypass processors that do not support failed-command output."""
+        case = next(
+            c for c in tests.failure_fixtures.CASES if c.processor == "search"
+        )
+        _c, proc_ok, _ = self.engine.compress(
+            case.command, case.output, exit_code=0
+        )
+        _c, proc_fail, _ = self.engine.compress(
+            case.command, case.output, exit_code=1
+        )
         assert proc_ok == "search"
         assert proc_fail == "generic"
         assert self.engine.last_event["failure_fallback"] is True
 
     def test_opted_in_processor_still_used_on_failure(self):
         """…and an opted-in one keeps its specialized compression."""
-        case = next(c for c in CASES if c.processor == "test")
-        _c, proc, _ = self.engine.compress(case.command, case.output, exit_code=1)
+        case = next(
+            c for c in tests.failure_fixtures.CASES if c.processor == "test"
+        )
+        _c, proc, _ = self.engine.compress(
+            case.command, case.output, exit_code=1
+        )
         assert proc == "test"
         assert self.engine.last_event["failure_fallback"] is False

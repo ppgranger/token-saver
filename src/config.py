@@ -1,7 +1,19 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Configuration system for Token-Saver.
 
-All thresholds and settings can be overridden via environment variables
-or a JSON config file at ~/.token-saver/config.json.
+All thresholds and settings can be overridden via environment variables or a
+JSON config file at ~/.token-saver/config.json.
 """
 
 from __future__ import annotations
@@ -12,9 +24,15 @@ import os
 import sys
 from typing import Any
 
+import src
+
 
 def _debug_log(msg: str) -> None:
-    """Print a debug message if TOKEN_SAVER_DEBUG is set."""
+    """Print a debug message if TOKEN_SAVER_DEBUG is set.
+
+    Args:
+        msg: Diagnostic text written to stderr when debugging is enabled.
+    """
     if os.environ.get("TOKEN_SAVER_DEBUG", "").lower() in ("1", "true", "yes"):
         print(f"[token-saver] {msg}", file=sys.stderr)
 
@@ -59,6 +77,9 @@ _DEFAULTS = {
     "max_traceback_lines": 30,
     "db_max_rows": 20,
     "db_prune_days": 90,
+    "delta_enabled": False,
+    "delta_retention_hours": 24,
+    "delta_max_runs": 100,
     "chars_per_token": 4,
     "user_processors_dir": "",
     "cargo_warning_example_count": 2,
@@ -88,11 +109,20 @@ PROJECT_CONFIG_FILE = ".token-saver.json"
 #: every ``.py`` file in that directory.  ``disabled_processors`` and
 #: ``redaction_allowlist`` don't run code, but they can silently switch off
 #: the secret-redaction safety net this same repo could then rely on you not
-#: noticing. None of the three has a legitimate per-project use that
+#: noticing. Delta options control sensitive output retention: a cloned repo
+#: must not enable recording or extend retention. These options belong in
+#: trusted configuration. None has a legitimate per-project use that
 #: ``~/.token-saver/config.json`` or an env var doesn't already cover, so a
 #: project file setting them is dropped outright rather than coerced.
 _PROJECT_FORBIDDEN_KEYS = frozenset(
-    {"user_processors_dir", "disabled_processors", "redaction_allowlist"}
+    {
+        "user_processors_dir",
+        "disabled_processors",
+        "redaction_allowlist",
+        "delta_enabled",
+        "delta_retention_hours",
+        "delta_max_runs",
+    }
 )
 
 
@@ -100,6 +130,9 @@ def _find_project_config() -> str | None:
     """Walk up from cwd to find a .token-saver.json file.
 
     Stops at filesystem root or user home directory.
+
+    Returns:
+        The nearest project configuration path, or None if none is found.
     """
     home = os.path.expanduser("~")
     current = os.getcwd()
@@ -122,11 +155,19 @@ def _coerce_value(default_val: Any, raw: Any) -> Any:
     """Coerce a file-config value to the type of its default.
 
     Returns the coerced value, or ``None`` if it cannot be sensibly coerced
-    (caller should then keep the existing/default value).  Unlike env vars,
-    JSON values already carry types, but a hand-edited config can still hold a
-    string where an int is expected (e.g. ``{"wrap_timeout": "300"}``) or an
-    outright wrong type (e.g. ``{"max_chain_depth": "deep"}``) — the latter
-    must not reach arithmetic/comparison code downstream.
+    (caller should then keep the existing/default value).  Unlike env vars, JSON
+    values already carry types, but a hand-edited config can still hold a string
+    where an int is expected (e.g. ``{"wrap_timeout": "300"}``) or an outright
+    wrong type (e.g. ``{"max_chain_depth": "deep"}``) — the latter must not
+    reach arithmetic/comparison code downstream.
+
+    Args:
+        default_val: Default value whose type defines the accepted
+            representation.
+        raw: Unvalidated JSON value to convert.
+
+    Returns:
+        A compatible value, or None when the value cannot be converted.
     """
     # bool must be checked before int (bool is a subclass of int).
     if isinstance(default_val, bool):
@@ -176,14 +217,24 @@ def _coerce_value(default_val: Any, raw: Any) -> Any:
 
 
 def _apply_file_overrides(
-    config: dict[str, Any], file_config: dict[str, Any], source: str, *, trusted: bool = True
+    config: dict[str, Any],
+    file_config: dict[str, Any],
+    source: str,
+    *,
+    trusted: bool = True,
 ) -> None:
     """Merge a loaded config file, validating types and dropping unknown keys.
 
-    ``trusted=False`` additionally drops ``_PROJECT_FORBIDDEN_KEYS`` — used
-    for project-level ``.token-saver.json``, which (unlike the global config
-    file or env vars) can be introduced by simply cloning or ``cd``-ing into
-    a repo you don't control.
+    ``trusted=False`` additionally drops ``_PROJECT_FORBIDDEN_KEYS`` — used for
+    project-level ``.token-saver.json``, which (unlike the global config file or
+    env vars) can be introduced by simply cloning or ``cd``-ing into a repo you
+    don't control.
+
+    Args:
+        config: Mutable settings mapping to update in place.
+        file_config: Parsed JSON settings; non-mapping values are ignored.
+        source: Provenance label saved for accepted settings.
+        trusted: Whether this source may set global-only sensitive options.
     """
     if not isinstance(file_config, dict):
         return
@@ -206,14 +257,16 @@ def _apply_file_overrides(
 
 
 def _load_config() -> dict[str, Any]:
-    """Load config: defaults -> global file -> project file -> env vars."""
+    """Load config: defaults -> global file -> project file -> env vars.
+
+    Returns:
+        Resolved settings and per-key provenance after applying precedence.
+    """
     config: dict[str, Any] = dict(_DEFAULTS)
     config["_config_source"] = dict.fromkeys(_DEFAULTS, "default")
 
     # Load from global config file if it exists
-    from src import data_dir  # noqa: PLC0415
-
-    config_path = os.path.join(data_dir(), "config.json")
+    config_path = os.path.join(src.data_dir(), "config.json")
     if os.path.exists(config_path):
         try:
             with open(config_path, encoding="utf-8") as f:
@@ -231,7 +284,10 @@ def _load_config() -> dict[str, Any]:
             with open(project_config_path, encoding="utf-8") as f:
                 project_config = json.load(f)
             _apply_file_overrides(
-                config, project_config, f"project:{project_config_path}", trusted=False
+                config,
+                project_config,
+                f"project:{project_config_path}",
+                trusted=False,
             )
         except (json.JSONDecodeError, OSError):
             # Invalid project config is silently ignored
@@ -251,16 +307,35 @@ def _load_config() -> dict[str, Any]:
                 with contextlib.suppress(ValueError):
                     config[key] = float(env_val)
             elif isinstance(default_val, list):
-                config[key] = [s.strip() for s in env_val.split(",") if s.strip()]
+                config[key] = [
+                    s.strip() for s in env_val.split(",") if s.strip()
+                ]
             else:
                 config[key] = env_val
             config.setdefault("_config_source", {})[key] = f"env:{env_key}"
+
+    # Output retention is always bounded, even for trusted configuration. Bad
+    # limits fall back to documented defaults instead of disabling expiry.
+    for key, maximum in (
+        ("delta_retention_hours", 168),
+        ("delta_max_runs", 1000),
+    ):
+        if not 1 <= config[key] <= maximum:
+            config[key] = _DEFAULTS[key]
+            config["_config_source"][key] = "default"
 
     return config
 
 
 def get(key: str) -> Any:
-    """Get a config value."""
+    """Get a config value.
+
+    Args:
+        key: Configuration key to look up.
+
+    Returns:
+        The effective value, or None for an unknown configuration key.
+    """
     global _config  # noqa: PLW0603
     if _config is None:
         _config = _load_config()

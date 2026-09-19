@@ -1,3 +1,15 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Tests for individual processors."""
 
 import os
@@ -5,49 +17,49 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.chain_utils import extract_primary_command, split_chain_with_ops
-from src.processors.act import ActProcessor
-from src.processors.ansible import AnsibleProcessor
-from src.processors.build_output import BuildOutputProcessor
-from src.processors.bun import BunProcessor
-from src.processors.cargo import CargoProcessor
-from src.processors.cargo_clippy import CargoClippyProcessor
-from src.processors.cdktf import CdktfProcessor
-from src.processors.cloud_cli import CloudCliProcessor
-from src.processors.db_query import DbQueryProcessor
-from src.processors.docker import DockerProcessor
-from src.processors.env import EnvProcessor
-from src.processors.file_content import FileContentProcessor
-from src.processors.file_listing import FileListingProcessor
-from src.processors.generic import GenericProcessor
-from src.processors.gh import GhProcessor
-from src.processors.git import GitProcessor
-from src.processors.go import GoProcessor
-from src.processors.helm import HelmProcessor
-from src.processors.jq_yq import JqYqProcessor
-from src.processors.just import JustProcessor
-from src.processors.kubectl import KubectlProcessor
-from src.processors.lint_output import LintOutputProcessor
-from src.processors.maven_gradle import MavenGradleProcessor
-from src.processors.mise import MiseProcessor
-from src.processors.network import NetworkProcessor
-from src.processors.nix import NixProcessor
-from src.processors.package_list import PackageListProcessor
-from src.processors.pulumi import PulumiProcessor
-from src.processors.python_install import PythonInstallProcessor
-from src.processors.search import SearchProcessor
-from src.processors.ssh import SshProcessor
-from src.processors.structured_log import StructuredLogProcessor
-from src.processors.syslog import SyslogProcessor
-from src.processors.system_info import SystemInfoProcessor
-from src.processors.terraform import TerraformProcessor
-from src.processors.test_output import TestOutputProcessor
-from src.processors.utils import format_dir_group, group_paths_by_dir
+import src.chain_utils
+import src.processors.act
+import src.processors.ansible
+import src.processors.build_output
+import src.processors.bun
+import src.processors.cargo
+import src.processors.cargo_clippy
+import src.processors.cdktf
+import src.processors.cloud_cli
+import src.processors.db_query
+import src.processors.docker
+import src.processors.env
+import src.processors.file_content
+import src.processors.file_listing
+import src.processors.generic
+import src.processors.gh
+import src.processors.git
+import src.processors.go
+import src.processors.helm
+import src.processors.jq_yq
+import src.processors.just
+import src.processors.kubectl
+import src.processors.lint_output
+import src.processors.maven_gradle
+import src.processors.mise
+import src.processors.network
+import src.processors.nix
+import src.processors.package_list
+import src.processors.pulumi
+import src.processors.python_install
+import src.processors.search
+import src.processors.ssh
+import src.processors.structured_log
+import src.processors.syslog
+import src.processors.system_info
+import src.processors.terraform
+import src.processors.test_output
+import src.processors.utils
 
 
 class TestGitProcessor:
     def setup_method(self):
-        self.p = GitProcessor()
+        self.p = src.processors.git.GitProcessor()
 
     def test_can_handle_git_commands(self):
         assert self.p.can_handle("git status")
@@ -71,14 +83,16 @@ class TestGitProcessor:
         assert self.p.can_handle("git --work-tree /repo diff")
 
     def test_process_routes_with_global_options(self):
-        """Commands with global options should route to the correct processor."""
+        """Route commands correctly when global options are present."""
         status_output = "On branch main\nnothing to commit, working tree clean"
         result = self.p.process("git -C /some/path status", status_output)
         assert "nothing to commit" in result
 
         log_lines = [f"abc{i:04d} commit message {i}" for i in range(30)]
         log_output = "\n".join(log_lines)
-        result = self.p.process("git -C /opt/homebrew --no-pager log --oneline", log_output)
+        result = self.p.process(
+            "git -C /opt/homebrew --no-pager log --oneline", log_output
+        )
         assert "more" in result
 
     def test_empty_output(self):
@@ -157,7 +171,9 @@ class TestGitProcessor:
 
     def test_push_all_progress(self):
         """When all lines are progress, should return last non-empty line."""
-        output = "Counting objects: 100% (5/5)\nCompressing objects: 100% (3/3)\n"
+        output = (
+            "Counting objects: 100% (5/5)\nCompressing objects: 100% (3/3)\n"
+        )
         result = self.p.process("git push", output)
         assert result.strip()  # Should not be empty
 
@@ -171,7 +187,7 @@ class TestGitProcessor:
         assert len(result) < len(output)
 
     def test_diff_strips_index_lines(self):
-        """index lines (blob hashes) should be removed."""
+        """Index lines (blob hashes) should be removed."""
         output = "\n".join(
             [
                 "diff --git a/file.py b/file.py",
@@ -207,7 +223,7 @@ class TestGitProcessor:
         assert "+added line" in result
 
     def test_diff_context_lines_limited(self):
-        """Context lines should be limited to max_diff_context_lines around changes."""
+        """Limit unchanged diff context around each change."""
         lines = ["diff --git a/file.py b/file.py", "@@ -1,20 +1,21 @@"]
         # 10 context lines before the change
         for i in range(10):
@@ -230,7 +246,7 @@ class TestGitProcessor:
         assert "context_after_9" not in result
 
     def test_diff_stat_format(self):
-        """git diff --stat visual bars should be stripped."""
+        """Git diff --stat visual bars should be stripped."""
         output = "\n".join(
             [
                 " src/auth.py    | 15 +++++++++------",
@@ -241,7 +257,9 @@ class TestGitProcessor:
         )
         result = self.p.process("git diff --stat", output)
         assert "auth.py" in result
-        assert "+++" not in result or "+++" in result.split("changed")[0]  # bars stripped
+        assert (
+            "+++" not in result or "+++" in result.split("changed")[0]
+        )  # bars stripped
         assert "3 files changed" in result
 
     def test_show_with_diff(self):
@@ -286,7 +304,8 @@ class TestGitProcessor:
 
     def test_blame_short_unchanged(self):
         lines = [
-            f"abc1234{i} (Author 2025-01-01 12:00:00 +0000 {i + 1}) line {i}" for i in range(10)
+            f"abc1234{i} (Author 2025-01-01 12:00:00 +0000 {i + 1}) line {i}"
+            for i in range(10)
         ]
         output = "\n".join(lines)
         result = self.p.process("git blame src/main.py", output)
@@ -297,7 +316,8 @@ class TestGitProcessor:
         for i in range(30):
             author = "Alice" if i < 20 else "Bob"
             lines.append(
-                f"abc{i:04d}00 ({author} 2025-01-{i + 1:02d} 12:00:00 +0000 {i + 1}) line {i}"
+                f"abc{i:04d}00 ({author} 2025-01-{i + 1:02d} 12:00:00 "
+                f"+0000 {i + 1}) line {i}"
             )
         output = "\n".join(lines)
         result = self.p.process("git blame src/main.py", output)
@@ -344,7 +364,9 @@ class TestGitProcessor:
         assert "25 files changed" in result
 
     def test_stash_list(self):
-        lines = [f"stash@{{{i}}}: WIP on branch: message {i}" for i in range(20)]
+        lines = [
+            f"stash@{{{i}}}: WIP on branch: message {i}" for i in range(20)
+        ]
         output = "\n".join(lines)
         result = self.p.process("git stash list", output)
         assert "more stashes" in result
@@ -355,7 +377,9 @@ class TestGitProcessor:
         assert result == output
 
     def test_status_head_detached(self):
-        output = "HEAD detached at abc1234\nnothing to commit, working tree clean"
+        output = (
+            "HEAD detached at abc1234\nnothing to commit, working tree clean"
+        )
         result = self.p.process("git status", output)
         assert "HEAD detached" in result
 
@@ -375,7 +399,7 @@ class TestGitProcessor:
 
 class TestTestOutputProcessor:
     def setup_method(self):
-        self.p = TestOutputProcessor()
+        self.p = src.processors.test_output.TestOutputProcessor()
 
     def test_can_handle_test_commands(self):
         assert self.p.can_handle("pytest tests/")
@@ -467,7 +491,10 @@ class TestTestOutputProcessor:
                 "  /usr/lib/python3/site-packages/pkg/mod.py:20:"
                 " DeprecationWarning: func_b() deprecated",
                 "tests/test_a.py::test3",
-                "  /usr/lib/python3/site-packages/pkg/mod.py:30: UserWarning: check config",
+                (
+                    "  /usr/lib/python3/site-packages/pkg/mod.py:30: "
+                    "UserWarning: check config"
+                ),
                 "-- Docs: https://docs.pytest.org/en/stable/warnings.html",
                 "=" * 40 + " 3 passed, 3 warnings " + "=" * 40,
             ]
@@ -510,7 +537,7 @@ class TestTestOutputProcessor:
         assert self.p.can_handle("mix test")
 
     def test_pnpm_test_routes_to_jest(self):
-        """pnpm test should use jest processor."""
+        """Pnpm test should use jest processor."""
         lines = [
             "PASS src/app.test.ts (5 tests)",
             "PASS src/util.test.ts (3 tests)",
@@ -591,14 +618,17 @@ class TestPytestParameterized:
     """Tests for parameterized test grouping."""
 
     def setup_method(self):
-        self.p = TestOutputProcessor()
+        self.p = src.processors.test_output.TestOutputProcessor()
 
     def test_all_param_passed_grouped(self):
         """50 parameterized tests all PASSED should show just the count."""
         lines = []
         for i in range(50):
             lines.append(f"tests/test_math.py::test_add[{i}] PASSED")
-        lines.append("======================== 50 passed in 1.0s ========================")
+        lines.append(
+            "======================== 50 passed in 1.0s ====="
+            "==================="
+        )
         output = "\n".join(lines)
         result = self.p.process("pytest -v", output)
         assert "50 tests passed" in result
@@ -612,7 +642,10 @@ class TestPytestParameterized:
             lines.append(f"tests/test_math.py::test_add[{i}] PASSED")
         for i in range(47, 50):
             lines.append(f"tests/test_math.py::test_add[{i}] FAILED")
-        lines.append("======================== 47 passed, 3 failed ========================")
+        lines.append(
+            "======================== 47 passed, 3 failed ==="
+            "====================="
+        )
         output = "\n".join(lines)
         result = self.p.process("pytest -v", output)
         assert "47/50 passed" in result
@@ -624,7 +657,10 @@ class TestPytestParameterized:
             "tests/test_app.py::test_one PASSED",
             "tests/test_app.py::test_two PASSED",
             "tests/test_app.py::test_three FAILED",
-            "======================== 2 passed, 1 failed ========================",
+            (
+                "======================== 2 passed, 1 failed ===="
+                "===================="
+            ),
         ]
         output = "\n".join(lines)
         result = self.p.process("pytest -v", output)
@@ -636,7 +672,7 @@ class TestPytestCoverage:
     """Tests for pytest coverage report compression."""
 
     def setup_method(self):
-        self.p = TestOutputProcessor()
+        self.p = src.processors.test_output.TestOutputProcessor()
 
     def test_coverage_table_compressed(self):
         """Coverage table with low-coverage files should be compressed."""
@@ -649,10 +685,14 @@ class TestPytestCoverage:
         ]
         for i in range(20):
             pct = 95 if i < 17 else 60
-            lines.append(f"src/mod{i}.py          100     {100 - pct}    {pct}%")
+            lines.append(
+                f"src/mod{i}.py          100     {100 - pct}    {pct}%"
+            )
         lines.append("TOTAL                 2000    300    85%")
         lines.append("---------------------------------------")
-        lines.append("======================== 2 passed in 1.0s ========================")
+        lines.append(
+            "======================== 2 passed in 1.0s ========================"
+        )
         output = "\n".join(lines)
         result = self.p.process("pytest --cov", output)
         assert "TOTAL" in result
@@ -666,7 +706,10 @@ class TestPytestCoverage:
         """Output without coverage should not be modified by coverage logic."""
         lines = [
             "tests/test_app.py::test_one PASSED",
-            "======================== 1 passed in 0.5s ========================",
+            (
+                "======================== 1 passed in 0.5s ======"
+                "=================="
+            ),
         ]
         output = "\n".join(lines)
         result = self.p.process("pytest", output)
@@ -690,19 +733,25 @@ class TestPytestCoverage:
 
 class TestBuildOutputProcessor:
     def setup_method(self):
-        self.p = BuildOutputProcessor()
+        self.p = src.processors.build_output.BuildOutputProcessor()
 
     def test_can_handle_build_commands(self):
         assert self.p.can_handle("npm run build")
         assert not self.p.can_handle("cargo build")  # handled by CargoProcessor
         assert self.p.can_handle("make")
-        assert not self.p.can_handle("pip install -r requirements.txt")  # PythonInstallProcessor
+        assert not self.p.can_handle(
+            "pip install -r requirements.txt"
+        )  # PythonInstallProcessor
         assert self.p.can_handle("yarn add lodash")
         assert self.p.can_handle("next build")
         assert not self.p.can_handle("git status")
-        assert not self.p.can_handle("mvn clean install")  # MavenGradleProcessor
+        assert not self.p.can_handle(
+            "mvn clean install"
+        )  # MavenGradleProcessor
         assert not self.p.can_handle("gradle build")  # MavenGradleProcessor
-        assert not self.p.can_handle("./gradlew assemble")  # MavenGradleProcessor
+        assert not self.p.can_handle(
+            "./gradlew assemble"
+        )  # MavenGradleProcessor
 
     def test_empty_output(self):
         assert self.p.process("npm run build", "") == ""
@@ -837,7 +886,7 @@ class TestBuildOutputProcessor:
         assert "vulnerabilities" in result.lower() or "found" in result.lower()
 
     def test_pip_install_not_handled(self):
-        """pip install is now handled by PythonInstallProcessor."""
+        """Pip install is now handled by PythonInstallProcessor."""
         assert not self.p.can_handle("pip install requests")
         assert not self.p.can_handle("pip3 install flask")
 
@@ -861,12 +910,15 @@ class TestBuildOutputProcessor:
         assert "Build succeeded" in result
 
     def test_pnpm_progress_lines_skipped(self):
-        """pnpm emits 'Progress: resolved N, ...' and hard link messages."""
+        """Pnpm emits 'Progress: resolved N, ...' and hard link messages."""
         output = "\n".join(
             [
                 "Packages are hard linked from the content-addressable store",
                 "Progress: resolved 150, reused 148, downloaded 2, added 150",
-                "Progress: resolved 200, reused 198, downloaded 2, added 200, done",
+                (
+                    "Progress: resolved 200, reused 198, downloaded 2"
+                    ", added 200, done"
+                ),
                 "Done in 4.2s",
             ]
         )
@@ -878,7 +930,7 @@ class TestBuildOutputProcessor:
 
 class TestLintOutputProcessor:
     def setup_method(self):
-        self.p = LintOutputProcessor()
+        self.p = src.processors.lint_output.LintOutputProcessor()
 
     def test_can_handle_lint_commands(self):
         assert self.p.can_handle("eslint src/")
@@ -908,9 +960,14 @@ class TestLintOutputProcessor:
     def test_mypy_errors_grouped(self):
         lines = []
         for i in range(10):
-            lines.append(f"src/file{i}.py:{i + 1}: error: Incompatible types [assignment]")
+            lines.append(
+                f"src/file{i}.py:{i + 1}: error: Incompatible types "
+                f"[assignment]"
+            )
         for i in range(5):
-            lines.append(f"src/file{i}.py:{i + 1}: error: Missing return [return]")
+            lines.append(
+                f"src/file{i}.py:{i + 1}: error: Missing return [return]"
+            )
         output = "\n".join(lines)
         result = self.p.process("mypy src/", output)
         assert "assignment" in result
@@ -952,7 +1009,10 @@ class TestLintOutputProcessor:
     def test_shellcheck_violations_parsed(self):
         lines = []
         for i in range(10):
-            lines.append(f"script.sh:{i + 1}:1: warning - SC2086 Double quote to prevent globbing")
+            lines.append(
+                f"script.sh:{i + 1}:1: warning - SC2086 Double quote to "
+                f"prevent globbing"
+            )
         output = "\n".join(lines)
         result = self.p.process("shellcheck script.sh", output)
         assert "SC2086" in result
@@ -961,7 +1021,9 @@ class TestLintOutputProcessor:
     def test_hadolint_violations_parsed(self):
         lines = []
         for i in range(8):
-            lines.append(f"Dockerfile:{i + 1} DL3008 Pin versions in apt get install")
+            lines.append(
+                f"Dockerfile:{i + 1} DL3008 Pin versions in apt get install"
+            )
         output = "\n".join(lines)
         result = self.p.process("hadolint Dockerfile", output)
         assert "DL3008" in result
@@ -970,7 +1032,8 @@ class TestLintOutputProcessor:
         lines = []
         for i in range(10):
             lines.append(
-                f"src/file{i}.ts:{i + 1}:1 lint/correctness/noUnusedVariables unused variable"
+                f"src/file{i}.ts:{i + 1}:1 "
+                f"lint/correctness/noUnusedVariables unused variable"
             )
         output = "\n".join(lines)
         result = self.p.process("biome lint src/", output)
@@ -990,13 +1053,15 @@ class TestLintOutputProcessor:
         assert "clippy::needless_return" in result
         # "1 warning" should NOT be parsed as a rule
         assert "1 warning" not in [
-            line.strip() for line in result.splitlines() if line.strip().startswith("1 warning:")
+            line.strip()
+            for line in result.splitlines()
+            if line.strip().startswith("1 warning:")
         ]
 
 
 class TestFileListingProcessor:
     def setup_method(self):
-        self.p = FileListingProcessor()
+        self.p = src.processors.file_listing.FileListingProcessor()
 
     def test_can_handle_listing_commands(self):
         assert self.p.can_handle("ls -la")
@@ -1033,7 +1098,9 @@ class TestFileListingProcessor:
         assert "tsx" in result
 
     def test_ls_compact_groups_by_extension(self):
-        items = [f"file{i}.py" for i in range(15)] + [f"mod{i}.js" for i in range(10)]
+        items = [f"file{i}.py" for i in range(15)] + [
+            f"mod{i}.js" for i in range(10)
+        ]
         output = "\n".join(items)
         result = self.p.process("ls", output)
         assert "25 items" in result
@@ -1046,7 +1113,7 @@ class TestFileListingProcessor:
         assert result == output
 
     def test_ls_long_strips_metadata(self):
-        """ls -la should strip permissions, owner, group, date — keep type+size+name."""
+        """Keep listing names and sizes while removing metadata."""
         output = (
             "total 312\n"
             "drwxr-xr-x  18 user  staff    576 Jan 12 17:24 .\n"
@@ -1121,7 +1188,7 @@ class TestFileListingProcessor:
 
 class TestFileContentProcessor:
     def setup_method(self):
-        self.p = FileContentProcessor()
+        self.p = src.processors.file_content.FileContentProcessor()
 
     def test_can_handle_cat_commands(self):
         assert self.p.can_handle("cat file.py")
@@ -1149,7 +1216,7 @@ class TestFileContentProcessor:
         assert result == output
 
     def test_sensitive_config_never_compressed(self):
-        """Sensitive config files (.env, .ini, .cfg, .conf) pass through unchanged."""
+        """Pass sensitive configuration files through unchanged."""
         output = "\n".join(f"KEY_{i}=value_{i}" for i in range(500))
         result = self.p.process("cat .env", output)
         assert result == output
@@ -1244,7 +1311,12 @@ class TestFileContentProcessor:
 
     def test_yaml_compression_preserves_keys(self):
         """YAML files should preserve top-level and second-level keys."""
-        lines = ["apiVersion: v1", "kind: Deployment", "metadata:", "  name: my-app"]
+        lines = [
+            "apiVersion: v1",
+            "kind: Deployment",
+            "metadata:",
+            "  name: my-app",
+        ]
         for i in range(150):
             lines.append(f"    label_{i}: value_{i}")
         output = "\n".join(lines)
@@ -1277,16 +1349,20 @@ class TestFileContentProcessor:
         lines = []
         for i in range(200):
             if i == 100:
-                lines.append(f"2025-01-01 12:00:{i:02d} ERROR Database connection lost")
+                lines.append(
+                    f"2025-01-01 12:00:{i:02d} ERROR Database connection lost"
+                )
             else:
-                lines.append(f"2025-01-01 12:00:{i:02d} INFO Processing request {i}")
+                lines.append(
+                    f"2025-01-01 12:00:{i:02d} INFO Processing request {i}"
+                )
         output = "\n".join(lines)
         result = self.p.process("cat app.log", output)
         assert len(result) < len(output)
         assert "Database connection lost" in result
 
     def test_unknown_gets_generic_truncation(self):
-        """Unknown file types get conservative head/tail truncation, not passthrough."""
+        """Apply conservative boundary truncation to unknown file formats."""
         output = "\n".join(f"data line {i}" for i in range(500))
         result = self.p.process("cat unknown_data.xyz", output)
         assert "truncated" in result
@@ -1297,7 +1373,7 @@ class TestFileContentProcessor:
 
 class TestGenericProcessor:
     def setup_method(self):
-        self.p = GenericProcessor()
+        self.p = src.processors.generic.GenericProcessor()
 
     def test_always_handles(self):
         assert self.p.can_handle("anything")
@@ -1350,8 +1426,10 @@ class TestGenericProcessor:
         assert len(result.splitlines()) < 600
 
     def test_keep_tail_zero_does_not_emit_whole_list(self):
-        """generic_keep_tail=0 must yield an empty tail, not lines[-0:] (the
-        whole list).  Guards the slice bug noted in generic.py:_truncate_middle.
+        """Keep an empty tail when generic_keep_tail is zero.
+
+        generic_keep_tail=0 must yield an empty tail, not lines[-0:] (the whole
+        list).  Guards the slice bug noted in generic.py:_truncate_middle.
         """
         from src import config
 
@@ -1378,7 +1456,7 @@ class TestGenericProcessor:
             assert line == line.rstrip()
 
     def test_clean_method(self):
-        """clean() should only strip ANSI and blank lines, not dedup or truncate."""
+        """Limit cleanup to ANSI codes and blank lines."""
         output = "\x1b[32mline\x1b[0m\n\n\n\x1b[31mline\x1b[0m"
         result = self.p.clean(output)
         assert "\x1b[" not in result
@@ -1389,7 +1467,10 @@ class TestGenericProcessor:
     def test_similar_lines_progress_collapsed(self):
         """Curl-like progress lines differing only in % should be collapsed."""
         lines = [
-            f"  {i}  1024M    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0"
+            (
+                f"  {i}  1024M    0     0    0     0      0      0 --:--:-- "
+                f"--:--:-- --:--:--     0"
+            )
             for i in range(20)
         ]
         output = "\n".join(lines)
@@ -1419,10 +1500,10 @@ class TestEnvVariantDetection:
     """Tests for .env variant file handling."""
 
     def setup_method(self):
-        self.p = FileContentProcessor()
+        self.p = src.processors.file_content.FileContentProcessor()
 
     def test_env_production_redacted(self):
-        """cat .env.production should redact sensitive values."""
+        """Cat .env.production should redact sensitive values."""
         output = "\n".join(
             [
                 "APP_NAME=myapp",
@@ -1439,7 +1520,7 @@ class TestEnvVariantDetection:
         assert "sensitive values redacted" in result
 
     def test_env_example_passthrough(self):
-        """cat .env.example should pass through (template file)."""
+        """Cat .env.example should pass through (template file)."""
         output = "\n".join(
             [
                 "API_KEY=your_api_key_here",
@@ -1450,7 +1531,7 @@ class TestEnvVariantDetection:
         assert result == output
 
     def test_env_exact_passthrough(self):
-        """cat .env should still pass through unchanged (existing behavior)."""
+        """Cat .env should still pass through unchanged (existing behavior)."""
         output = "\n".join(f"KEY_{i}=value_{i}" for i in range(500))
         result = self.p.process("cat .env", output)
         assert result == output
@@ -1460,10 +1541,10 @@ class TestMinifiedFileDetection:
     """Tests for minified file detection in file_content processor."""
 
     def setup_method(self):
-        self.p = FileContentProcessor()
+        self.p = src.processors.file_content.FileContentProcessor()
 
     def test_min_js_compressed(self):
-        """cat dist/app.min.js with large single line should be summarized."""
+        """Cat dist/app.min.js with large single line should be summarized."""
         output = "a" * 100_000
         result = self.p.process("cat dist/app.min.js", output)
         assert "minified file" in result
@@ -1471,7 +1552,7 @@ class TestMinifiedFileDetection:
         assert "100,000 chars" in result
 
     def test_bundle_js_heuristic(self):
-        """cat bundle.js with very long lines should be detected as minified."""
+        """Cat bundle.js with very long lines should be detected as minified."""
         output = "\n".join(["x" * 10_000 for _ in range(5)])
         result = self.p.process("cat bundle.js", output)
         assert "minified file" in result
@@ -1484,8 +1565,10 @@ class TestMinifiedFileDetection:
         assert result == output
 
     def test_long_line_sql_not_minified(self):
-        """A .sql file with very long lines must pass through (not misdetected)."""
-        output = "\n".join(["SELECT " + ", ".join(f"col{i}" for i in range(200)) + ";"] * 3)
+        """Avoid treating long SQL lines as minified content."""
+        output = "\n".join(
+            ["SELECT " + ", ".join(f"col{i}" for i in range(200)) + ";"] * 3
+        )
         result = self.p.process("cat schema.sql", output)
         assert result == output
         assert "minified file" not in result
@@ -1506,14 +1589,14 @@ class TestMinifiedFileDetection:
 
     def test_cat_n_boolean_flag_keeps_file(self):
         """`cat -n foo.json` — `-n` is boolean here, foo.json is the file."""
-        p = FileContentProcessor()
+        p = src.processors.file_content.FileContentProcessor()
         assert p._extract_filename("cat -n foo.json") == "foo.json"
         assert p._extract_extension("cat -n foo.json") == ".json"
 
 
 class TestNetworkProcessor:
     def setup_method(self):
-        self.p = NetworkProcessor()
+        self.p = src.processors.network.NetworkProcessor()
 
     def test_can_handle(self):
         assert self.p.can_handle("curl https://example.com")
@@ -1575,9 +1658,18 @@ class TestNetworkProcessor:
     def test_curl_progress_stripped(self):
         output = "\n".join(
             [
-                "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current",
-                "                                 Dload  Upload   Total   Spent    Left  Speed",
-                "  0  1024M    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0",
+                (
+                    "  % Total    % Received % Xferd  Average Speed  "
+                    " Time    Time     Time  Current"
+                ),
+                (
+                    "                                 Dload  Upload  "
+                    " Total   Spent    Left  Speed"
+                ),
+                (
+                    "  0  1024M    0     0    0     0      0      0 -"
+                    "-:--:-- --:--:-- --:--:--     0"
+                ),
                 '{"result": "ok"}',
             ]
         )
@@ -1589,15 +1681,24 @@ class TestNetworkProcessor:
         output = "\n".join(
             [
                 "Resolving example.com (example.com)... 93.184.216.34",
-                "Connecting to example.com (example.com)|93.184.216.34|:443... connected.",
+                (
+                    "Connecting to example.com (example.com)|93.184.2"
+                    "16.34|:443... connected."
+                ),
                 "HTTP request sent, awaiting response... 200 OK",
                 "Length: 1024000 (1000K) [application/octet-stream]",
                 "Saving to: 'file.tar.gz'",
                 "",
                 "file.tar.gz         50%[========>           ] 500K  1.00MB/s",
-                "file.tar.gz        100%[===================>] 1000K  2.00MB/s    in 0.5s",
+                (
+                    "file.tar.gz        100%[===================>] 10"
+                    "00K  2.00MB/s    in 0.5s"
+                ),
                 "",
-                "2025-01-01 12:00:00 (2.00 MB/s) - 'file.tar.gz' saved [1024000/1024000]",
+                (
+                    "2025-01-01 12:00:00 (2.00 MB/s) - 'file.tar.gz' "
+                    "saved [1024000/1024000]"
+                ),
             ]
         )
         result = self.p.process("wget https://example.com/file.tar.gz", output)
@@ -1618,7 +1719,9 @@ class TestNetworkProcessor:
     def test_can_handle_no_false_positive(self):
         """http/https in URLs should NOT trigger network processor."""
         assert not self.p.can_handle("git push https://github.com/repo")
-        assert not self.p.can_handle("pip install https://example.com/pkg.tar.gz")
+        assert not self.p.can_handle(
+            "pip install https://example.com/pkg.tar.gz"
+        )
 
     def test_httpie_compresses(self):
         output = "\n".join(
@@ -1629,10 +1732,15 @@ class TestNetworkProcessor:
                 "Server: nginx",
                 "X-Request-Id: abc-123",
                 "",
-                '{"users": [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]}',
+                (
+                    '{"users": [{"id": 1, "name": "Alice"}, {"id": 2,'
+                    ' "name": "Bob"}]}'
+                ),
             ]
         )
-        result = self.p.process("http GET https://api.example.com/users", output)
+        result = self.p.process(
+            "http GET https://api.example.com/users", output
+        )
         assert "HTTP/1.1 200" in result
         assert "Content-Type" in result
         assert "X-Request-Id" not in result or "abc-123" in result
@@ -1645,7 +1753,8 @@ class TestNetworkProcessor:
 
         data = {
             "users": [
-                {"id": i, "name": f"User {i}", "email": f"user{i}@example.com"} for i in range(20)
+                {"id": i, "name": f"User {i}", "email": f"user{i}@example.com"}
+                for i in range(20)
             ],
             "total": 20,
             "page": 1,
@@ -1665,7 +1774,7 @@ class TestNetworkProcessor:
 
 class TestDockerProcessor:
     def setup_method(self):
-        self.p = DockerProcessor()
+        self.p = src.processors.docker.DockerProcessor()
 
     def test_can_handle(self):
         assert self.p.can_handle("docker ps")
@@ -1678,7 +1787,9 @@ class TestDockerProcessor:
     def test_can_handle_with_global_options(self):
         assert self.p.can_handle("docker --context remote ps")
         assert self.p.can_handle("docker -H tcp://host:2375 images")
-        assert self.p.can_handle("docker --host unix:///var/run/docker.sock logs container")
+        assert self.p.can_handle(
+            "docker --host unix:///var/run/docker.sock logs container"
+        )
 
     def test_empty_output(self):
         assert self.p.process("docker ps", "") == ""
@@ -1734,7 +1845,10 @@ class TestDockerProcessor:
                 "Using default tag: latest",
                 "latest: Pulling from library/nginx",
                 "a2318d6c47ec: Pulling fs layer",
-                "a2318d6c47ec: Downloading  [==>                    ] 1.5MB/25MB",
+                (
+                    "a2318d6c47ec: Downloading  [==>                 "
+                    "   ] 1.5MB/25MB"
+                ),
                 "a2318d6c47ec: Download complete",
                 "a2318d6c47ec: Pull complete",
                 "b12007d4c5a8: Already exists",
@@ -1778,7 +1892,9 @@ class TestDockerProcessor:
                     "Env": [f"VAR_{i}=val" for i in range(10)],
                 },
                 "NetworkSettings": {
-                    "Ports": {"80/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8080"}]},
+                    "Ports": {
+                        "80/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8080"}]
+                    },
                     "Networks": {
                         "bridge": {"IPAddress": "172.17.0.2"},
                     },
@@ -1806,7 +1922,10 @@ class TestDockerProcessor:
         for block in range(3):
             blocks.append(header)
             for i in range(5):
-                blocks.append(f"abc{i:03d}         web-{i}   {block + i}.0%    100MiB / 1GiB")
+                blocks.append(
+                    f"abc{i:03d}         web-{i}   {block + i}.0%    "
+                    f"100MiB / 1GiB"
+                )
         output = "\n".join(blocks)
         result = self.p.process("docker stats", output)
         # Should only keep last block (header + 5 rows)
@@ -1873,10 +1992,19 @@ class TestDockerProcessor:
 
     def test_ps_dead_containers_in_stopped(self):
         """Dead containers should be grouped with stopped."""
-        header = "CONTAINER ID   IMAGE          COMMAND   CREATED   STATUS         PORTS     NAMES"
+        header = (
+            "CONTAINER ID   IMAGE          COMMAND   CREATED "
+            "  STATUS         PORTS     NAMES"
+        )
         entries = [
-            "abc0000000000   nginx:latest   nginx     1h ago    Up 1 hours     80/tcp    web-0",
-            "abc0000000001   myapp:latest   python    2h ago    Dead                     dead-app",
+            (
+                "abc0000000000   nginx:latest   nginx     1h ago "
+                "   Up 1 hours     80/tcp    web-0"
+            ),
+            (
+                "abc0000000001   myapp:latest   python    2h ago "
+                "   Dead                     dead-app"
+            ),
         ]
         output = "\n".join([header, *entries])
         result = self.p.process("docker ps -a", output)
@@ -1885,7 +2013,7 @@ class TestDockerProcessor:
 
 class TestPackageListProcessor:
     def setup_method(self):
-        self.p = PackageListProcessor()
+        self.p = src.processors.package_list.PackageListProcessor()
 
     def test_can_handle(self):
         assert self.p.can_handle("pip list")
@@ -1950,10 +2078,10 @@ class TestPackageListProcessor:
         assert "UNMET" in result
 
     def test_build_processor_rejects_pip_list(self):
-        """pip list should NOT be handled by build processor."""
-        from src.processors.build_output import BuildOutputProcessor
+        """Pip list should NOT be handled by build processor."""
+        import src.processors.build_output
 
-        bp = BuildOutputProcessor()
+        bp = src.processors.build_output.BuildOutputProcessor()
         assert not bp.can_handle("pip list")
         assert not bp.can_handle("pip3 list")
         assert not bp.can_handle("npm ls")
@@ -1962,7 +2090,7 @@ class TestPackageListProcessor:
 
 class TestSearchProcessor:
     def setup_method(self):
-        self.p = SearchProcessor()
+        self.p = src.processors.search.SearchProcessor()
 
     def test_can_handle(self):
         assert self.p.can_handle("grep -r pattern .")
@@ -2033,22 +2161,25 @@ class TestSearchDirectoryGrouping:
     """Tests for search result directory grouping with large result sets."""
 
     def setup_method(self):
-        self.p = SearchProcessor()
+        self.p = src.processors.search.SearchProcessor()
 
     def test_many_files_grouped_by_dir(self):
-        """rg with 40+ files should group by directory."""
+        """Rg with 40+ files should group by directory."""
         lines = []
         for d in range(12):
             for f in range(4):
                 for m in range(3):
-                    lines.append(f"src/dir{d}/file{f}.py:{m + 1}:TODO: fix this {d}-{f}-{m}")
+                    lines.append(
+                        f"src/dir{d}/file{f}.py:{m + 1}:TODO: fix this "
+                        f"{d}-{f}-{m}"
+                    )
         output = "\n".join(lines)
         result = self.p.process("rg TODO", output)
         assert "directories" in result
         assert "src/dir0/" in result
 
     def test_few_files_not_grouped(self):
-        """rg with 10 files should use per-file grouping."""
+        """Rg with 10 files should use per-file grouping."""
         lines = []
         for f in range(10):
             lines.append(f"src/file{f}.py:1:TODO fix")
@@ -2063,10 +2194,10 @@ class TestDockerComposeLogs:
     """Tests for docker compose log grouping by service."""
 
     def setup_method(self):
-        self.p = DockerProcessor()
+        self.p = src.processors.docker.DockerProcessor()
 
     def test_compose_logs_grouped(self):
-        """docker compose logs with multiple services should group by service."""
+        """Group Docker Compose logs by service."""
         lines = []
         for i in range(200):
             service = ["web", "api", "db"][i % 3]
@@ -2105,7 +2236,7 @@ class TestDockerComposeLogs:
 
 class TestKubectlProcessor:
     def setup_method(self):
-        self.p = KubectlProcessor()
+        self.p = src.processors.kubectl.KubectlProcessor()
 
     def test_can_handle(self):
         assert self.p.can_handle("kubectl get pods")
@@ -2120,15 +2251,21 @@ class TestKubectlProcessor:
         assert self.p.can_handle("kubectl --context prod describe pod my-pod")
         assert self.p.can_handle("kubectl -A get pods")
         assert self.p.can_handle("kubectl --all-namespaces get pods")
-        assert self.p.can_handle("kubectl -n monitoring --context staging logs my-pod")
+        assert self.p.can_handle(
+            "kubectl -n monitoring --context staging logs my-pod"
+        )
         assert self.p.can_handle("kubectl --kubeconfig /path/config get nodes")
 
     def test_get_pods_summarizes_healthy(self):
         header = "NAME                    READY   STATUS    RESTARTS   AGE"
         entries = []
         for i in range(20):
-            entries.append(f"web-{i:03d}                 1/1     Running   0          {i}h")
-        entries.append("web-failing             0/1     CrashLoopBackOff   5          2h")
+            entries.append(
+                f"web-{i:03d}                 1/1     Running   0          {i}h"
+            )
+        entries.append(
+            "web-failing             0/1     CrashLoopBackOff   5          2h"
+        )
         output = "\n".join([header, *entries])
         result = self.p.process("kubectl get pods", output)
         assert "CrashLoopBackOff" in result
@@ -2140,10 +2277,16 @@ class TestKubectlProcessor:
         assert "STATUS" in result
 
     def test_get_services_strips_age(self):
-        """kubectl get svc should strip AGE column from generic tabular output."""
-        header = "NAME         TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE"
+        """Remove AGE columns from Kubernetes service tables."""
+        header = (
+            "NAME         TYPE        CLUSTER-IP     EXTERNAL"
+            "-IP   PORT(S)   AGE"
+        )
         entries = [
-            f"svc-{i:03d}      ClusterIP   10.0.0.{i}      <none>        80/TCP    {i}d"
+            (
+                f"svc-{i:03d}      ClusterIP   10.0.0.{i}      <none>        "
+                f"80/TCP    {i}d"
+            )
             for i in range(15)
         ]
         output = "\n".join([header, *entries])
@@ -2164,8 +2307,14 @@ class TestKubectlProcessor:
                 "Labels:       app=web",
                 "Annotations:  kubernetes.io/config.seen: 2025-01-01",
                 "              kubernetes.io/config.source: api",
-                "Tolerations:  node.kubernetes.io/not-ready:NoExecute op=Exists",
-                "              node.kubernetes.io/unreachable:NoExecute op=Exists",
+                (
+                    "Tolerations:  node.kubernetes.io/not-ready:NoExe"
+                    "cute op=Exists"
+                ),
+                (
+                    "              node.kubernetes.io/unreachable:NoE"
+                    "xecute op=Exists"
+                ),
                 "QoS Class:    BestEffort",
                 "Volumes:",
                 "  default-token-abc:",
@@ -2174,8 +2323,14 @@ class TestKubectlProcessor:
                 "    Optional:    false",
                 "Events:",
                 "  Type    Reason     Age   From               Message",
-                "  Normal  Scheduled  10m   default-scheduler  Successfully assigned",
-                "  Normal  Pulled     10m   kubelet            Container image pulled",
+                (
+                    "  Normal  Scheduled  10m   default-scheduler  Su"
+                    "ccessfully assigned"
+                ),
+                (
+                    "  Normal  Pulled     10m   kubelet            Co"
+                    "ntainer image pulled"
+                ),
                 "  Warning BackOff    5m    kubelet"
                 "            Back-off restarting failed container",
             ]
@@ -2247,7 +2402,10 @@ class TestKubectlProcessor:
         entries = [
             "sidecar-pod  3/3     Running   0          1h",
             "init-pod     2/3     Running   0          1h",
-        ] + [f"web-{i:03d}      1/1     Running   0          {i}h" for i in range(15)]
+        ] + [
+            f"web-{i:03d}      1/1     Running   0          {i}h"
+            for i in range(15)
+        ]
         output = "\n".join([header, *entries])
         result = self.p.process("kubectl get pods", output)
         # init-pod (2/3) should be shown explicitly
@@ -2258,7 +2416,7 @@ class TestKubectlProcessor:
 
 class TestEnvProcessor:
     def setup_method(self):
-        self.p = EnvProcessor()
+        self.p = src.processors.env.EnvProcessor()
 
     def test_can_handle(self):
         assert self.p.can_handle("env")
@@ -2324,7 +2482,9 @@ class TestEnvProcessor:
             "SLACK_WEBHOOK_URL": "https://hooks.slack.com/x",
             "BEARER_TOKEN": "ey.jwt.value",
         }
-        lines = [f"{k}={v}" for k, v in secrets.items()] + [f"FILLER_{i}=val" for i in range(20)]
+        lines = [f"{k}={v}" for k, v in secrets.items()] + [
+            f"FILLER_{i}=val" for i in range(20)
+        ]
         result = self.p.process("env", "\n".join(lines))
         for k, v in secrets.items():
             assert f"{k}=***" in result
@@ -2339,7 +2499,9 @@ class TestEnvProcessor:
             "PATH_HINT": "/tmp",
             "PASSAGE": "novel",
         }
-        lines = [f"{k}={v}" for k, v in safe.items()] + [f"FILLER_{i}=val" for i in range(20)]
+        lines = [f"{k}={v}" for k, v in safe.items()] + [
+            f"FILLER_{i}=val" for i in range(20)
+        ]
         result = self.p.process("env", "\n".join(lines))
         for k, v in safe.items():
             assert f"{k}={v}" in result
@@ -2353,7 +2515,9 @@ class TestEnvProcessor:
     def test_allowlist_bypasses_redaction(self, monkeypatch):
         from src import config
 
-        monkeypatch.setenv("TOKEN_SAVER_REDACTION_ALLOWLIST", "GIT_AUTHOR_NAME,PUBLIC_KEY")
+        monkeypatch.setenv(
+            "TOKEN_SAVER_REDACTION_ALLOWLIST", "GIT_AUTHOR_NAME,PUBLIC_KEY"
+        )
         config.reload()
         try:
             lines = [
@@ -2376,7 +2540,9 @@ class TestEnvProcessor:
         monkeypatch.setenv("TOKEN_SAVER_REDACTION_ALLOWLIST", "public_key")
         config.reload()
         try:
-            lines = ["PUBLIC_KEY=ssh-rsa AAAA"] + [f"FILLER_{i}=val" for i in range(20)]
+            lines = ["PUBLIC_KEY=ssh-rsa AAAA"] + [
+                f"FILLER_{i}=val" for i in range(20)
+            ]
             result = self.p.process("env", "\n".join(lines))
             assert "PUBLIC_KEY=ssh-rsa AAAA" in result
         finally:
@@ -2385,7 +2551,7 @@ class TestEnvProcessor:
 
 class TestSystemInfoProcessor:
     def setup_method(self):
-        self.p = SystemInfoProcessor()
+        self.p = src.processors.system_info.SystemInfoProcessor()
 
     def test_can_handle(self):
         assert self.p.can_handle("du -sh *")
@@ -2419,7 +2585,12 @@ class TestSystemInfoProcessor:
         assert "more" in result
 
     def test_wc_filters_zeros(self):
-        lines = ["  100 a.py", "    0 empty.py", "    0 blank.py", "  100 total"]
+        lines = [
+            "  100 a.py",
+            "    0 empty.py",
+            "    0 blank.py",
+            "  100 total",
+        ]
         output = "\n".join(lines)
         result = self.p.process("wc -l *.py", output)
         assert result == output  # Short enough, unchanged
@@ -2454,7 +2625,7 @@ class TestSystemInfoProcessor:
 
 class TestTerraformProcessor:
     def setup_method(self):
-        self.p = TerraformProcessor()
+        self.p = src.processors.terraform.TerraformProcessor()
 
     def test_can_handle(self):
         assert self.p.can_handle("terraform plan")
@@ -2595,7 +2766,7 @@ class TestTerraformProcessor:
         assert len(result) < len(output)
 
     def test_subcommand_detection_not_fooled_by_args(self):
-        """terraform plan -var init=true should NOT route to init handler."""
+        """Terraform plan -var init=true should NOT route to init handler."""
         output = "\n".join(
             [
                 "# aws_instance.web will be created",
@@ -2612,7 +2783,7 @@ class TestTerraformProcessor:
 
 class TestGhProcessor:
     def setup_method(self):
-        self.p = GhProcessor()
+        self.p = src.processors.gh.GhProcessor()
 
     def test_can_handle(self):
         assert self.p.can_handle("gh pr list")
@@ -2629,14 +2800,20 @@ class TestGhProcessor:
     def test_pr_list_compresses_long_output(self):
         lines = []
         for i in range(40):
-            lines.append(f"{i}\tFix bug #{i}\tfeature/fix-{i}\tOPEN\t2025-01-{i % 28 + 1:02d}")
+            lines.append(
+                f"{i}\tFix bug "
+                f"#{i}\tfeature/fix-{i}\tOPEN\t2025-01-{i % 28 + 1:02d}"
+            )
         output = "\n".join(lines)
         result = self.p.process("gh pr list", output)
         assert "more pr" in result
         assert len(result.splitlines()) < len(lines)
 
     def test_pr_list_short_unchanged(self):
-        output = "1\tFix login\tmain\tOPEN\t2025-01-01\n2\tAdd tests\tmain\tOPEN\t2025-01-02"
+        output = (
+            "1\tFix login\tmain\tOPEN\t2025-01-01\n"
+            "2\tAdd tests\tmain\tOPEN\t2025-01-02"
+        )
         result = self.p.process("gh pr list", output)
         assert result == output
 
@@ -2695,7 +2872,7 @@ class TestGhProcessor:
 
 class TestDbQueryProcessor:
     def setup_method(self):
-        self.p = DbQueryProcessor()
+        self.p = src.processors.db_query.DbQueryProcessor()
 
     def test_can_handle(self):
         assert self.p.can_handle("psql -d mydb -c 'SELECT * FROM users'")
@@ -2743,7 +2920,13 @@ class TestDbQueryProcessor:
         assert "50 rows in set" in result
 
     def test_mysql_short_unchanged(self):
-        output = "+----+------+\n| id | name |\n+----+------+\n|  1 | Bob  |\n+----+------+"
+        output = (
+            "+----+------+\n"
+            "| id | name |\n"
+            "+----+------+\n"
+            "|  1 | Bob  |\n"
+            "+----+------+"
+        )
         result = self.p.process("mysql", output)
         assert result == output
 
@@ -2770,7 +2953,7 @@ class TestDbQueryProcessor:
 
 class TestCloudCliProcessor:
     def setup_method(self):
-        self.p = CloudCliProcessor()
+        self.p = src.processors.cloud_cli.CloudCliProcessor()
 
     def test_can_handle(self):
         assert self.p.can_handle("aws ec2 describe-instances")
@@ -2798,7 +2981,10 @@ class TestCloudCliProcessor:
                                     "SubnetId": f"subnet-{j:08d}",
                                     "PrivateIpAddress": f"10.0.{i}.{j}",
                                     "Groups": [
-                                        {"GroupId": f"sg-{j:08d}", "GroupName": f"group-{j}"},
+                                        {
+                                            "GroupId": f"sg-{j:08d}",
+                                            "GroupName": f"group-{j}",
+                                        },
                                     ],
                                 }
                                 for j in range(5)
@@ -2843,7 +3029,11 @@ class TestCloudCliProcessor:
             "InstanceId": "i-abc123def456",
             "State": {"Name": "stopped", "Code": 80},
             "arn": "arn:aws:ec2:us-east-1:123456789:instance/i-abc123def456",
-            "VeryDeepField": {"Level1": {"Level2": {"Level3": {"Level4": {"data": "deep value"}}}}},
+            "VeryDeepField": {
+                "Level1": {
+                    "Level2": {"Level3": {"Level4": {"data": "deep value"}}}
+                }
+            },
         }
         output = json.dumps(data, indent=2)
         result = self.p.process("aws ec2 describe-instances", output)
@@ -2861,20 +3051,28 @@ class TestCloudCliProcessor:
             lines.append(f"| i-{i:010d} | running | server-{i} |")
         lines.append("+---+---+---+")
         output = "\n".join(lines)
-        result = self.p.process("aws ec2 describe-instances --output table", output)
+        result = self.p.process(
+            "aws ec2 describe-instances --output table", output
+        )
         assert "more rows" in result
         assert len(result.splitlines()) < len(lines)
 
     def test_text_output_compressed(self):
-        lines = [f"i-{i:012d}\trunning\tserver-{i}\tt3.micro" for i in range(50)]
+        lines = [
+            f"i-{i:012d}\trunning\tserver-{i}\tt3.micro" for i in range(50)
+        ]
         output = "\n".join(lines)
-        result = self.p.process("aws ec2 describe-instances --output text", output)
+        result = self.p.process(
+            "aws ec2 describe-instances --output text", output
+        )
         assert "omitted" in result
         assert len(result.splitlines()) < len(lines)
 
     def test_text_short_unchanged(self):
         output = "i-123\trunning\tserver-1"
-        result = self.p.process("aws ec2 describe-instances --output text", output)
+        result = self.p.process(
+            "aws ec2 describe-instances --output text", output
+        )
         assert result == output
 
 
@@ -2882,7 +3080,7 @@ class TestGitRemoteProcessor:
     """Tests for git remote subcommand handler."""
 
     def setup_method(self):
-        self.p = GitProcessor()
+        self.p = src.processors.git.GitProcessor()
 
     def test_can_handle_remote(self):
         assert self.p.can_handle("git remote -v")
@@ -2899,8 +3097,12 @@ class TestGitRemoteProcessor:
     def test_remote_deduplicates_fetch_push(self):
         lines = []
         for i in range(8):
-            lines.append(f"remote-{i}\thttps://github.com/user/repo-{i}.git (fetch)")
-            lines.append(f"remote-{i}\thttps://github.com/user/repo-{i}.git (push)")
+            lines.append(
+                f"remote-{i}\thttps://github.com/user/repo-{i}.git (fetch)"
+            )
+            lines.append(
+                f"remote-{i}\thttps://github.com/user/repo-{i}.git (push)"
+            )
         output = "\n".join(lines)
         result = self.p.process("git remote -v", output)
         assert "fetch/push deduplicated" in result
@@ -2913,7 +3115,7 @@ class TestGitTypechange:
     """Test typechange status code handling."""
 
     def setup_method(self):
-        self.p = GitProcessor()
+        self.p = src.processors.git.GitProcessor()
 
     def test_status_typechange(self):
         output = "\n".join(
@@ -2933,7 +3135,7 @@ class TestGitStatusShortBranch:
     """Test git status -sb branch header detection."""
 
     def setup_method(self):
-        self.p = GitProcessor()
+        self.p = src.processors.git.GitProcessor()
 
     def test_status_sb_branch_header(self):
         output = "\n".join(
@@ -2963,10 +3165,10 @@ class TestGitDiffStatGrouping:
     """Tests for --stat directory grouping with many files."""
 
     def setup_method(self):
-        self.p = GitProcessor()
+        self.p = src.processors.git.GitProcessor()
 
     def test_stat_many_files_grouped(self):
-        """git diff --stat with 50+ files should group by directory."""
+        """Git diff --stat with 50+ files should group by directory."""
         lines = []
         for i in range(25):
             lines.append(f" src/components/file{i}.tsx | 10 ++++------")
@@ -2981,7 +3183,7 @@ class TestGitDiffStatGrouping:
         assert "50 files changed" in result
 
     def test_stat_few_files_not_grouped(self):
-        """git diff --stat with few files should not group."""
+        """Git diff --stat with few files should not group."""
         lines = [
             " src/app.py | 5 ++---",
             " src/utils.py | 3 +--",
@@ -2997,7 +3199,7 @@ class TestGitLockfileDiff:
     """Tests for lockfile detection in git diff output."""
 
     def setup_method(self):
-        self.p = GitProcessor()
+        self.p = src.processors.git.GitProcessor()
 
     def test_lockfile_only_diff_summarized(self):
         """A diff containing only package-lock.json should be summarized."""
@@ -3059,7 +3261,7 @@ class TestBuildBunCanHandle:
     """Test bun command handling in build processor."""
 
     def setup_method(self):
-        self.p = BuildOutputProcessor()
+        self.p = src.processors.build_output.BuildOutputProcessor()
 
     def test_can_handle_bun_install(self):
         assert self.p.can_handle("bun install")
@@ -3075,7 +3277,7 @@ class TestBuildWarningSamples:
     """Test that build success shows warning samples."""
 
     def setup_method(self):
-        self.p = BuildOutputProcessor()
+        self.p = src.processors.build_output.BuildOutputProcessor()
 
     def test_warning_samples_shown(self):
         lines = [f"  WARNING: deprecated dep-{i}" for i in range(10)]
@@ -3102,20 +3304,25 @@ class TestTscTypecheck:
     """Tests for tsc --noEmit type-check grouping."""
 
     def setup_method(self):
-        self.p = BuildOutputProcessor()
+        self.p = src.processors.build_output.BuildOutputProcessor()
 
     def test_tsc_noemit_errors_grouped(self):
-        """tsc --noEmit with many errors should group by code."""
+        """Tsc --noEmit with many errors should group by code."""
         lines = []
         for i in range(30):
-            lines.append(f"src/file{i}.ts(10,5): error TS2322: Type 'string' is not assignable.")
+            lines.append(
+                f"src/file{i}.ts(10,5): error TS2322: Type 'string' is not "
+                f"assignable."
+            )
         for i in range(15):
             lines.append(
-                f"src/util{i}.ts:5:3 - error TS2345: Argument of type 'number' not assignable."
+                f"src/util{i}.ts:5:3 - error TS2345: Argument of type "
+                f"'number' not assignable."
             )
         for i in range(5):
             lines.append(
-                f"src/other{i}.ts(1,1): error TS7006: Parameter implicitly has 'any' type."
+                f"src/other{i}.ts(1,1): error TS7006: Parameter implicitly "
+                f"has 'any' type."
             )
         lines.append("Found 50 errors in 50 files.")
         output = "\n".join(lines)
@@ -3126,7 +3333,7 @@ class TestTscTypecheck:
         assert "Found 50 errors" in result
 
     def test_tsc_build_unchanged(self):
-        """tsc (without --noEmit) should use existing build logic."""
+        """Tsc (without --noEmit) should use existing build logic."""
         output = "Build succeeded.\nDone in 2.5s."
         result = self.p.process("tsc", output)
         # Should not trigger typecheck grouping
@@ -3136,8 +3343,14 @@ class TestTscTypecheck:
         """Error codes and file paths should be preserved in examples."""
         output = "\n".join(
             [
-                "src/app.ts(10,5): error TS2322: Type 'string' is not assignable.",
-                "src/app.ts(20,3): error TS2322: Type 'number' is not assignable.",
+                (
+                    "src/app.ts(10,5): error TS2322: Type 'string' is"
+                    " not assignable."
+                ),
+                (
+                    "src/app.ts(20,3): error TS2322: Type 'number' is"
+                    " not assignable."
+                ),
                 "Found 2 errors.",
             ]
         )
@@ -3150,12 +3363,13 @@ class TestBuildOutputPipeGuard:
     """Test that piped build commands bypass aggressive summarization."""
 
     def setup_method(self):
-        self.p = BuildOutputProcessor()
+        self.p = src.processors.build_output.BuildOutputProcessor()
 
     def test_piped_output_not_summarized(self):
         """Piped build output must not be aggressively summarized."""
         output = "\n".join(
-            [f"  Installing dep-{i}..." for i in range(20)] + ["Build completed successfully"]
+            [f"  Installing dep-{i}..." for i in range(20)]
+            + ["Build completed successfully"]
         )
         result = self.p.process("npm run build | tail -10", output)
         # With pipe, output should pass through unchanged
@@ -3164,18 +3378,22 @@ class TestBuildOutputPipeGuard:
     def test_unpiped_output_still_summarized(self):
         """Non-piped build output should still be summarized normally."""
         output = "\n".join(
-            [f"  Installing dep-{i}..." for i in range(20)] + ["Build completed successfully"]
+            [f"  Installing dep-{i}..." for i in range(20)]
+            + ["Build completed successfully"]
         )
         result = self.p.process("npm run build", output)
         assert "Build succeeded" in result
 
 
 class TestBuildOutputExitCodeFallback:
-    """A failed build with no recognized error vocabulary at all must not be
-    reported as a success — the only remaining signal is the exit code."""
+    """Honor a failed exit status even without recognized error text.
+
+    A failed build with no recognized error vocabulary at all must not be
+    reported as a success — the only remaining signal is the exit code.
+    """
 
     def setup_method(self):
-        self.p = BuildOutputProcessor()
+        self.p = src.processors.build_output.BuildOutputProcessor()
 
     def test_no_vocabulary_but_nonzero_exit_is_not_a_success(self):
         output = "\n".join([f"cc -c file{i}.c -o file{i}.o" for i in range(40)])
@@ -3189,8 +3407,11 @@ class TestBuildOutputExitCodeFallback:
         assert "Build succeeded" in result
 
     def test_no_vocabulary_and_unknown_exit_defaults_to_success(self):
-        """exit_code=None (unknown) preserves prior behaviour: best effort
-        from text alone.  Antigravity never supplies an exit code."""
+        """Use output text when a command exit status is unavailable.
+
+        exit_code=None (unknown) preserves prior behaviour: best effort from
+        text alone.  Antigravity never supplies an exit code.
+        """
         output = "\n".join([f"cc -c file{i}.c -o file{i}.o" for i in range(40)])
         result = self.p.process("make", output, exit_code=None)
         assert "Build succeeded" in result
@@ -3209,7 +3430,7 @@ class TestLintNewPatterns:
     """Test new lint patterns: oxlint, deno lint, golangci-lint, rubocop."""
 
     def setup_method(self):
-        self.p = LintOutputProcessor()
+        self.p = src.processors.lint_output.LintOutputProcessor()
 
     def test_can_handle_oxlint(self):
         assert self.p.can_handle("oxlint src/")
@@ -3221,7 +3442,10 @@ class TestLintNewPatterns:
         output = "\n".join(
             [
                 "main.go:10:5: undeclared name: foo (typecheck)",
-                "main.go:20:1: exported function Bar should have comment (golint)",
+                (
+                    "main.go:20:1: exported function Bar should have "
+                    "comment (golint)"
+                ),
                 "util.go:5:10: undeclared name: baz (typecheck)",
             ]
         )
@@ -3246,7 +3470,7 @@ class TestTerraformNewPatterns:
     """Test terraform validate/fmt handling."""
 
     def setup_method(self):
-        self.p = TerraformProcessor()
+        self.p = src.processors.terraform.TerraformProcessor()
 
     def test_can_handle_validate(self):
         assert self.p.can_handle("terraform validate")
@@ -3262,7 +3486,7 @@ class TestGhApiHandling:
     """Test gh api command handling."""
 
     def setup_method(self):
-        self.p = GhProcessor()
+        self.p = src.processors.gh.GhProcessor()
 
     def test_can_handle_gh_api(self):
         assert self.p.can_handle("gh api repos/owner/repo/pulls")
@@ -3291,7 +3515,7 @@ class TestSearchExtensionless:
     """Test grep grouping of extensionless files."""
 
     def setup_method(self):
-        self.p = SearchProcessor()
+        self.p = src.processors.search.SearchProcessor()
 
     def test_extensionless_file_grouped(self):
         lines = []
@@ -3307,7 +3531,7 @@ class TestCloudCliImportantKeys:
     """Test that cloud CLI preserves keys like InstanceId via .search()."""
 
     def setup_method(self):
-        self.p = CloudCliProcessor()
+        self.p = src.processors.cloud_cli.CloudCliProcessor()
 
     def test_instance_id_preserved_at_depth(self):
         import json
@@ -3346,7 +3570,7 @@ class TestDbQueryPsqlDetection:
     """Test improved psql table detection requiring count('|') >= 2."""
 
     def setup_method(self):
-        self.p = DbQueryProcessor()
+        self.p = src.processors.db_query.DbQueryProcessor()
 
     def test_single_pipe_not_table(self):
         lines = [
@@ -3369,7 +3593,7 @@ class TestGenericNumericThreshold:
     """Test that generic processor uses 30% digit threshold."""
 
     def setup_method(self):
-        self.p = GenericProcessor()
+        self.p = src.processors.generic.GenericProcessor()
 
     def test_tabular_data_26pct_not_collapsed(self):
         # Line with ~26% digits should NOT be collapsed (below 30%)
@@ -3381,113 +3605,176 @@ class TestGenericNumericThreshold:
 
 
 class TestChainedCommandProcessorRouting:
-    """Verify extract_primary_command returns the correct segment and
-    that the right processor handles it."""
+    """Select the correct chain segment and route it to its processor.
+
+    Verify extract_primary_command returns the correct segment and that the
+    right processor handles it.
+    """
 
     def test_extract_last_compressible(self):
-        assert extract_primary_command("git add . && git push") == "git push"
+        assert (
+            src.chain_utils.extract_primary_command("git add . && git push")
+            == "git push"
+        )
 
     def test_extract_skips_silent(self):
-        assert extract_primary_command("cd /project && npm install") == "npm install"
-        assert extract_primary_command("mkdir -p /tmp && ls -la") == "ls -la"
+        assert (
+            src.chain_utils.extract_primary_command(
+                "cd /project && npm install"
+            )
+            == "npm install"
+        )
+        assert (
+            src.chain_utils.extract_primary_command("mkdir -p /tmp && ls -la")
+            == "ls -la"
+        )
 
     def test_extract_single_command(self):
-        assert extract_primary_command("git status") == "git status"
+        assert (
+            src.chain_utils.extract_primary_command("git status")
+            == "git status"
+        )
 
     def test_extract_semicolon(self):
-        assert extract_primary_command("cd /tmp; git log --oneline") == "git log --oneline"
+        assert (
+            src.chain_utils.extract_primary_command(
+                "cd /tmp; git log --oneline"
+            )
+            == "git log --oneline"
+        )
 
     def test_extract_all_silent_returns_last(self):
-        assert extract_primary_command("cd /tmp && mkdir -p foo") == "mkdir -p foo"
+        assert (
+            src.chain_utils.extract_primary_command("cd /tmp && mkdir -p foo")
+            == "mkdir -p foo"
+        )
 
     def test_extract_mixed_chain(self):
-        assert extract_primary_command("cd /project && git add .; git push") == "git push"
+        assert (
+            src.chain_utils.extract_primary_command(
+                "cd /project && git add .; git push"
+            )
+            == "git push"
+        )
 
     def test_git_processor_handles_extracted(self):
-        p = GitProcessor()
-        primary = extract_primary_command("git add . && git push origin main")
+        p = src.processors.git.GitProcessor()
+        primary = src.chain_utils.extract_primary_command(
+            "git add . && git push origin main"
+        )
         assert primary == "git push origin main"
         assert p.can_handle(primary)
 
     def test_build_processor_handles_extracted(self):
-        p = BuildOutputProcessor()
-        primary = extract_primary_command("cd /project && npm install")
+        p = src.processors.build_output.BuildOutputProcessor()
+        primary = src.chain_utils.extract_primary_command(
+            "cd /project && npm install"
+        )
         assert primary == "npm install"
         assert p.can_handle(primary)
 
     def test_file_listing_processor_handles_extracted(self):
-        p = FileListingProcessor()
-        primary = extract_primary_command("mkdir -p /tmp/test && ls -la /tmp/test")
+        p = src.processors.file_listing.FileListingProcessor()
+        primary = src.chain_utils.extract_primary_command(
+            "mkdir -p /tmp/test && ls -la /tmp/test"
+        )
         assert primary == "ls -la /tmp/test"
         assert p.can_handle(primary)
 
     def test_extract_quoted_semicolon_not_split(self):
         """Semicolons inside quotes should not split."""
-        assert extract_primary_command('grep -r "foo;bar" .') == 'grep -r "foo;bar" .'
+        assert (
+            src.chain_utils.extract_primary_command('grep -r "foo;bar" .')
+            == 'grep -r "foo;bar" .'
+        )
 
     def test_extract_quoted_ampersand_not_split(self):
         """&& inside quotes should not split."""
         cmd = 'git log --format="%H && %s"'
-        assert extract_primary_command(cmd) == cmd
+        assert src.chain_utils.extract_primary_command(cmd) == cmd
 
     def test_extract_three_segment_chain(self):
-        primary = extract_primary_command("cd /project && git add . && git push")
+        primary = src.chain_utils.extract_primary_command(
+            "cd /project && git add . && git push"
+        )
         assert primary == "git push"
 
     def test_extract_git_checkout_then_status(self):
-        """git checkout is silent, git status is compressible."""
-        primary = extract_primary_command("git checkout main && git status")
+        """Git checkout is silent, git status is compressible."""
+        primary = src.chain_utils.extract_primary_command(
+            "git checkout main && git status"
+        )
         assert primary == "git status"
 
     def test_extract_multi_silent_then_compressible(self):
-        primary = extract_primary_command("cd /project && git checkout main && git pull")
+        primary = src.chain_utils.extract_primary_command(
+            "cd /project && git checkout main && git pull"
+        )
         assert primary == "git pull"
 
     def test_test_processor_handles_extracted(self):
-        p = TestOutputProcessor()
-        primary = extract_primary_command("cd /project && pytest tests/ -v")
+        p = src.processors.test_output.TestOutputProcessor()
+        primary = src.chain_utils.extract_primary_command(
+            "cd /project && pytest tests/ -v"
+        )
         assert primary == "pytest tests/ -v"
         assert p.can_handle(primary)
 
     def test_lint_processor_handles_extracted(self):
-        p = LintOutputProcessor()
-        primary = extract_primary_command("cd /project && ruff check .")
+        p = src.processors.lint_output.LintOutputProcessor()
+        primary = src.chain_utils.extract_primary_command(
+            "cd /project && ruff check ."
+        )
         assert primary == "ruff check ."
         assert p.can_handle(primary)
 
     def test_docker_processor_handles_extracted(self):
-        p = DockerProcessor()
-        primary = extract_primary_command("cd /app && docker compose build")
+        p = src.processors.docker.DockerProcessor()
+        primary = src.chain_utils.extract_primary_command(
+            "cd /app && docker compose build"
+        )
         assert primary == "docker compose build"
         assert p.can_handle(primary)
 
     def test_terraform_processor_handles_extracted(self):
-        p = TerraformProcessor()
-        primary = extract_primary_command("cd infra && terraform plan")
+        p = src.processors.terraform.TerraformProcessor()
+        primary = src.chain_utils.extract_primary_command(
+            "cd infra && terraform plan"
+        )
         assert primary == "terraform plan"
         assert p.can_handle(primary)
 
     def test_kubectl_processor_handles_extracted(self):
-        p = KubectlProcessor()
-        primary = extract_primary_command("cd /deploy && kubectl get pods")
+        p = src.processors.kubectl.KubectlProcessor()
+        primary = src.chain_utils.extract_primary_command(
+            "cd /deploy && kubectl get pods"
+        )
         assert primary == "kubectl get pods"
         assert p.can_handle(primary)
 
 
 class TestSplitChainWithOps:
-    """Verify the operator-preserving chain splitter used for per-segment compression."""
+    """Preserve operators when splitting command chains."""
 
     def test_single_command(self):
-        assert split_chain_with_ops("git status") == [("git status", "")]
+        assert src.chain_utils.split_chain_with_ops("git status") == [
+            ("git status", "")
+        ]
 
     def test_two_segment_and(self):
-        assert split_chain_with_ops("a && b") == [("a", "&&"), ("b", "")]
+        assert src.chain_utils.split_chain_with_ops("a && b") == [
+            ("a", "&&"),
+            ("b", ""),
+        ]
 
     def test_two_segment_semicolon(self):
-        assert split_chain_with_ops("a ; b") == [("a", ";"), ("b", "")]
+        assert src.chain_utils.split_chain_with_ops("a ; b") == [
+            ("a", ";"),
+            ("b", ""),
+        ]
 
     def test_three_segment_mixed(self):
-        assert split_chain_with_ops("a && b ; c") == [
+        assert src.chain_utils.split_chain_with_ops("a && b ; c") == [
             ("a", "&&"),
             ("b", ";"),
             ("c", ""),
@@ -3495,17 +3782,19 @@ class TestSplitChainWithOps:
 
     def test_quoted_ampersand_not_split(self):
         cmd = 'git log --format="%H && %s"'
-        assert split_chain_with_ops(cmd) == [(cmd, "")]
+        assert src.chain_utils.split_chain_with_ops(cmd) == [(cmd, "")]
 
     def test_quoted_semicolon_not_split(self):
-        assert split_chain_with_ops('grep "a;b" .') == [('grep "a;b" .', "")]
+        assert src.chain_utils.split_chain_with_ops('grep "a;b" .') == [
+            ('grep "a;b" .', "")
+        ]
 
     def test_empty(self):
-        assert split_chain_with_ops("") == []
+        assert src.chain_utils.split_chain_with_ops("") == []
 
     def test_real_world_git_chain(self):
         cmd = 'git add -A && git commit -m "fix" && git push origin main'
-        assert split_chain_with_ops(cmd) == [
+        assert src.chain_utils.split_chain_with_ops(cmd) == [
             ("git add -A", "&&"),
             ('git commit -m "fix"', "&&"),
             ("git push origin main", ""),
@@ -3514,7 +3803,7 @@ class TestSplitChainWithOps:
 
 class TestAnsibleProcessor:
     def setup_method(self):
-        self.p = AnsibleProcessor()
+        self.p = src.processors.ansible.AnsibleProcessor()
 
     def test_can_handle(self):
         assert self.p.can_handle("ansible-playbook site.yml")
@@ -3541,7 +3830,9 @@ class TestAnsibleProcessor:
                 lines.append(f"ok: [host-{h}]")
         lines.append("PLAY RECAP ****")
         for h in range(20):
-            lines.append(f"host-{h}  : ok=30   changed=0    unreachable=0    failed=0")
+            lines.append(
+                f"host-{h}  : ok=30   changed=0    unreachable=0    failed=0"
+            )
         output = "\n".join(lines)
         result = self.p.process("ansible-playbook site.yml", output)
         assert "ok" in result
@@ -3558,7 +3849,9 @@ class TestAnsibleProcessor:
             lines.append(f"TASK [task-{i}] ****")
             lines.append(f"ok: [host-{i}]")
         lines.append("TASK [deploy] ****")
-        lines.append('fatal: [host-1]: FAILED! => {"msg": "Connection refused"}')
+        lines.append(
+            'fatal: [host-1]: FAILED! => {"msg": "Connection refused"}'
+        )
         lines.append("TASK [rollback] ****")
         lines.append("changed: [host-1]")
         lines.append("PLAY RECAP ****")
@@ -3593,8 +3886,12 @@ class TestAnsibleProcessor:
             lines.append(f"TASK [task-{i}] ****")
             lines.append(f"ok: [prod-server-{i}]")
         lines.append("PLAY RECAP ****")
-        lines.append("prod-server-0  : ok=25   changed=0    unreachable=0    failed=0")
-        lines.append("prod-server-1  : ok=25   changed=0    unreachable=0    failed=0")
+        lines.append(
+            "prod-server-0  : ok=25   changed=0    unreachable=0    failed=0"
+        )
+        lines.append(
+            "prod-server-1  : ok=25   changed=0    unreachable=0    failed=0"
+        )
         output = "\n".join(lines)
         result = self.p.process("ansible-playbook site.yml", output)
         assert "prod-server-0" in result
@@ -3603,7 +3900,7 @@ class TestAnsibleProcessor:
 
 class TestHelmProcessor:
     def setup_method(self):
-        self.p = HelmProcessor()
+        self.p = src.processors.helm.HelmProcessor()
 
     def test_can_handle(self):
         assert self.p.can_handle("helm install myrelease mychart")
@@ -3618,7 +3915,7 @@ class TestHelmProcessor:
         assert self.p.process("helm install x y", "") == ""
 
     def test_template_many_manifests_summarized(self):
-        """helm template with 500 lines, 8 manifests should be summarized."""
+        """Helm template with 500 lines, 8 manifests should be summarized."""
         lines = []
         for i in range(8):
             lines.append("---")
@@ -3635,7 +3932,7 @@ class TestHelmProcessor:
         assert len(result.splitlines()) < 20
 
     def test_install_notes_omitted(self):
-        """helm install with NOTES section should omit NOTES."""
+        """Helm install with NOTES section should omit NOTES."""
         lines = [
             "NAME: myrelease",
             "NAMESPACE: default",
@@ -3652,7 +3949,7 @@ class TestHelmProcessor:
         assert "Get the application URL" not in result
 
     def test_list_many_releases_truncated(self):
-        """helm list with 50 releases should be truncated."""
+        """Helm list with 50 releases should be truncated."""
         lines = ["NAME\tNAMESPACE\tREVISION\tSTATUS"]
         for i in range(50):
             lines.append(f"release-{i}\tdefault\t1\tdeployed")
@@ -3670,7 +3967,7 @@ class TestHelmProcessor:
 
 class TestSyslogProcessor:
     def setup_method(self):
-        self.p = SyslogProcessor()
+        self.p = src.processors.syslog.SyslogProcessor()
 
     def test_can_handle(self):
         assert self.p.can_handle("journalctl -u nginx")
@@ -3686,17 +3983,26 @@ class TestSyslogProcessor:
         assert result == output
 
     def test_journalctl_with_errors(self):
-        """journalctl with 500 lines and errors should preserve errors."""
+        """Journalctl with 500 lines and errors should preserve errors."""
         lines = []
         for i in range(500):
             if i == 250:
-                lines.append("Mar 17 10:00:00 host nginx[1234]: ERROR: connection refused")
+                lines.append(
+                    "Mar 17 10:00:00 host nginx[1234]: ERROR: connect"
+                    "ion refused"
+                )
             elif i == 251:
-                lines.append("Mar 17 10:00:01 host nginx[1234]: retrying connection")
+                lines.append(
+                    "Mar 17 10:00:01 host nginx[1234]: retrying connection"
+                )
             elif i == 300:
-                lines.append("Mar 17 10:05:00 host nginx[1234]: fatal: out of memory")
+                lines.append(
+                    "Mar 17 10:05:00 host nginx[1234]: fatal: out of memory"
+                )
             else:
-                lines.append(f"Mar 17 10:00:00 host nginx[1234]: normal log line {i}")
+                lines.append(
+                    f"Mar 17 10:00:00 host nginx[1234]: normal log line {i}"
+                )
         output = "\n".join(lines)
         result = self.p.process("journalctl -u nginx", output)
         assert "ERROR" in result
@@ -3704,7 +4010,7 @@ class TestSyslogProcessor:
         assert len(result) < len(output)
 
     def test_dmesg_no_errors_truncated(self):
-        """dmesg with 200 lines and no errors should show head + tail."""
+        """Dmesg with 200 lines and no errors should show head + tail."""
         lines = [f"[{i}.000000] Normal kernel message {i}" for i in range(200)]
         output = "\n".join(lines)
         result = self.p.process("dmesg", output)
@@ -3721,7 +4027,7 @@ class TestSyslogProcessor:
 
 class TestCargoProcessor:
     def setup_method(self):
-        self.p = CargoProcessor()
+        self.p = src.processors.cargo.CargoProcessor()
 
     def test_can_handle_cargo_commands(self):
         assert self.p.can_handle("cargo build")
@@ -3747,7 +4053,9 @@ class TestCargoProcessor:
 
     def test_cargo_build_collapses_compiling(self):
         lines = [f"   Compiling dep-{i} v1.{i}.0" for i in range(50)]
-        lines.append("    Finished dev [unoptimized + debuginfo] target(s) in 12.34s")
+        lines.append(
+            "    Finished dev [unoptimized + debuginfo] target(s) in 12.34s"
+        )
         output = "\n".join(lines)
         result = self.p.process("cargo build", output)
         assert "50 crates compiled" in result
@@ -3782,7 +4090,10 @@ class TestCargoProcessor:
                     f" --> src/file{i}.rs:{i + 1}:5",
                     "  |",
                     f"{i + 1} |     let x{i} = 42;",
-                    "  |         ^^ help: if this is intentional, prefix it with an underscore",
+                    (
+                        "  |         ^^ help: if this is intentional, pre"
+                        "fix it with an underscore"
+                    ),
                     "",
                 ]
             )
@@ -3852,7 +4163,9 @@ class TestCargoProcessor:
         assert "old-dep" in result
 
     def test_cargo_update_collapses_patch_bumps(self):
-        lines = [f"    Updating dep-{i} v1.0.{i} -> v1.0.{i + 1}" for i in range(20)]
+        lines = [
+            f"    Updating dep-{i} v1.0.{i} -> v1.0.{i + 1}" for i in range(20)
+        ]
         output = "\n".join(lines)
         result = self.p.process("cargo update", output)
         assert "20 dependencies updated" in result
@@ -3893,7 +4206,7 @@ class TestCargoProcessor:
 
 class TestGoProcessor:
     def setup_method(self):
-        self.p = GoProcessor()
+        self.p = src.processors.go.GoProcessor()
 
     def test_can_handle_go_commands(self):
         assert self.p.can_handle("go build ./...")
@@ -3921,7 +4234,10 @@ class TestGoProcessor:
             [
                 "# myapp/pkg/handler",
                 "pkg/handler/main.go:15:2: undefined: DoSomething",
-                "pkg/handler/main.go:20:10: cannot use x (variable of type string) as int",
+                (
+                    "pkg/handler/main.go:20:10: cannot use x (variabl"
+                    "e of type string) as int"
+                ),
             ]
         )
         result = self.p.process("go build ./...", output)
@@ -3932,7 +4248,10 @@ class TestGoProcessor:
     def test_go_vet_groups_warnings(self):
         warnings = []
         for i in range(6):
-            warnings.append(f"pkg/file{i}.go:{i + 1}:5: printf format %d has arg of wrong type")
+            warnings.append(
+                f"pkg/file{i}.go:{i + 1}:5: printf format %d has arg of "
+                f"wrong type"
+            )
         for i in range(3):
             warnings.append(f"pkg/util{i}.go:{i + 1}:3: unreachable code")
         output = "\n".join(warnings)
@@ -3942,7 +4261,9 @@ class TestGoProcessor:
         assert "unreachable" in result
 
     def test_go_mod_tidy_collapses_downloads(self):
-        lines = [f"go: downloading github.com/pkg/dep{i} v1.0.{i}" for i in range(30)]
+        lines = [
+            f"go: downloading github.com/pkg/dep{i} v1.0.{i}" for i in range(30)
+        ]
         lines.append("go: added github.com/new/pkg v0.5.0")
         lines.append("go: removed github.com/old/pkg v1.0.0")
         output = "\n".join(lines)
@@ -3999,12 +4320,14 @@ class TestGoProcessor:
 
 class TestSshProcessor:
     def setup_method(self):
-        self.p = SshProcessor()
+        self.p = src.processors.ssh.SshProcessor()
 
     def test_can_handle_non_interactive_ssh(self):
         assert self.p.can_handle("ssh host 'ls -la'")
         assert self.p.can_handle('ssh host "uname -a"')
-        assert self.p.can_handle("ssh -o StrictHostKeyChecking=no host 'uptime'")
+        assert self.p.can_handle(
+            "ssh -o StrictHostKeyChecking=no host 'uptime'"
+        )
 
     def test_cannot_handle_interactive_ssh(self):
         assert not self.p.can_handle("ssh host")
@@ -4044,7 +4367,9 @@ class TestSshProcessor:
                 "file2.tar.gz  100%  100MB  5.0MB/s    00:20",
             ]
         )
-        result = self.p.process("scp file1.tar.gz file2.tar.gz host:/tmp/", output)
+        result = self.p.process(
+            "scp file1.tar.gz file2.tar.gz host:/tmp/", output
+        )
         assert len(result) < len(output)
 
     def test_scp_keeps_errors(self):
@@ -4063,7 +4388,7 @@ class TestSshProcessor:
 
 class TestJqYqProcessor:
     def setup_method(self):
-        self.p = JqYqProcessor()
+        self.p = src.processors.jq_yq.JqYqProcessor()
 
     def test_can_handle_jq(self):
         assert self.p.can_handle("jq . file.json")
@@ -4093,7 +4418,8 @@ class TestJqYqProcessor:
         import json
 
         data = [
-            {"id": i, "name": f"item-{i}", "data": {"nested": "value" * 10}} for i in range(100)
+            {"id": i, "name": f"item-{i}", "data": {"nested": "value" * 10}}
+            for i in range(100)
         ]
         output = json.dumps(data, indent=2)
         assert len(output.splitlines()) > 50
@@ -4131,7 +4457,7 @@ class TestJqYqProcessor:
 
 class TestPythonInstallProcessor:
     def setup_method(self):
-        self.p = PythonInstallProcessor()
+        self.p = src.processors.python_install.PythonInstallProcessor()
 
     def test_can_handle_pip_install(self):
         assert self.p.can_handle("pip install flask")
@@ -4162,9 +4488,17 @@ class TestPythonInstallProcessor:
         for i in range(30):
             lines.append(f"Collecting package-{i}>=1.0")
         for i in range(30):
-            lines.append(f"  Downloading package_{i}-1.2.3-py3-none-any.whl (10 kB)")
-        lines.append("Installing collected packages: " + ", ".join(f"p{i}" for i in range(30)))
-        lines.append("Successfully installed " + " ".join(f"package-{i}-1.2.3" for i in range(30)))
+            lines.append(
+                f"  Downloading package_{i}-1.2.3-py3-none-any.whl (10 kB)"
+            )
+        lines.append(
+            "Installing collected packages: "
+            + ", ".join(f"p{i}" for i in range(30))
+        )
+        lines.append(
+            "Successfully installed "
+            + " ".join(f"package-{i}-1.2.3" for i in range(30))
+        )
         output = "\n".join(lines)
 
         result = self.p.process("pip install -r requirements.txt", output)
@@ -4184,7 +4518,10 @@ class TestPythonInstallProcessor:
         assert "Could not find" in result
 
     def test_pip_already_satisfied(self):
-        lines = [f"Requirement already satisfied: pkg-{i} in /usr/lib" for i in range(20)]
+        lines = [
+            f"Requirement already satisfied: pkg-{i} in /usr/lib"
+            for i in range(20)
+        ]
         output = "\n".join(lines)
         result = self.p.process("pip install flask", output)
         assert "20 already satisfied" in result
@@ -4219,7 +4556,7 @@ class TestPythonInstallProcessor:
 
 class TestCargoClippyProcessor:
     def setup_method(self):
-        self.p = CargoClippyProcessor()
+        self.p = src.processors.cargo_clippy.CargoClippyProcessor()
 
     def test_can_handle_cargo_clippy(self):
         assert self.p.can_handle("cargo clippy")
@@ -4237,7 +4574,9 @@ class TestCargoClippyProcessor:
         lines = []
         # 5 warnings of same rule
         for i in range(5):
-            lines.append("warning[clippy::needless_return]: unneeded `return` statement")
+            lines.append(
+                "warning[clippy::needless_return]: unneeded `return` statement"
+            )
             lines.append(f"  --> src/file{i}.rs:10:5")
             lines.append("   |")
             lines.append("10 |     return x;")
@@ -4299,7 +4638,7 @@ class TestCargoClippyProcessor:
 
 class TestMavenGradleProcessor:
     def setup_method(self):
-        self.p = MavenGradleProcessor()
+        self.p = src.processors.maven_gradle.MavenGradleProcessor()
 
     def test_can_handle_mvn(self):
         assert self.p.can_handle("mvn clean install")
@@ -4322,10 +4661,12 @@ class TestMavenGradleProcessor:
         lines = []
         for i in range(50):
             lines.append(
-                f"[INFO] Downloading from central: https://repo.maven.org/artifact-{i}.jar"
+                f"[INFO] Downloading from central: "
+                f"https://repo.maven.org/artifact-{i}.jar"
             )
             lines.append(
-                f"[INFO] Downloaded from central: https://repo.maven.org/artifact-{i}.jar (10 kB)"
+                f"[INFO] Downloaded from central: "
+                f"https://repo.maven.org/artifact-{i}.jar (10 kB)"
             )
         lines.append("[INFO] Building my-project 1.0.0 [1/3]")
         lines.append("[INFO] BUILD SUCCESS")
@@ -4394,7 +4735,9 @@ class TestMavenGradleProcessor:
         assert "BUILD FAILED" in result
 
     def test_gradle_test_results(self):
-        output = "> Task :test\n10 tests completed, 2 failed\n\nBUILD FAILED in 8s"
+        output = (
+            "> Task :test\n10 tests completed, 2 failed\n\nBUILD FAILED in 8s"
+        )
         result = self.p.process("gradle test", output)
         assert "10 tests completed, 2 failed" in result
 
@@ -4406,7 +4749,7 @@ class TestMavenGradleProcessor:
 
 class TestStructuredLogProcessor:
     def setup_method(self):
-        self.p = StructuredLogProcessor()
+        self.p = src.processors.structured_log.StructuredLogProcessor()
 
     def test_can_handle_stern(self):
         assert self.p.can_handle("stern my-pod")
@@ -4473,7 +4816,9 @@ class TestStructuredLogProcessor:
         lines = []
         for i in range(10):
             lines.append(json.dumps({"level": "info", "msg": f"ok {i}"}))
-        lines.append(json.dumps({"level": "error", "msg": "database connection failed"}))
+        lines.append(
+            json.dumps({"level": "error", "msg": "database connection failed"})
+        )
         output = "\n".join(lines)
 
         result = self.p.process("stern my-pod", output)
@@ -4482,7 +4827,7 @@ class TestStructuredLogProcessor:
 
 class TestBunProcessor:
     def setup_method(self):
-        self.p = BunProcessor()
+        self.p = src.processors.bun.BunProcessor()
 
     def test_can_handle(self):
         assert self.p.can_handle("bun install")
@@ -4518,7 +4863,7 @@ class TestBunProcessor:
 
 class TestJustProcessor:
     def setup_method(self):
-        self.p = JustProcessor()
+        self.p = src.processors.just.JustProcessor()
 
     def test_can_handle_listing_only(self):
         assert self.p.can_handle("just --list")
@@ -4544,7 +4889,7 @@ class TestJustProcessor:
 
 class TestPulumiProcessor:
     def setup_method(self):
-        self.p = PulumiProcessor()
+        self.p = src.processors.pulumi.PulumiProcessor()
 
     def test_can_handle(self):
         assert self.p.can_handle("pulumi up")
@@ -4559,7 +4904,11 @@ class TestPulumiProcessor:
     def test_keeps_resource_ops_and_summary(self):
         lines = ["Updating (dev):"]
         lines += [f"unchanged resource {i}" for i in range(30)]
-        lines += ["    + aws:s3:Bucket my-bucket create", "Resources:", "    + 1 created"]
+        lines += [
+            "    + aws:s3:Bucket my-bucket create",
+            "Resources:",
+            "    + 1 created",
+        ]
         out = "\n".join(lines)
         result = self.p.process("pulumi up", out)
         assert "+ aws:s3:Bucket my-bucket create" in result
@@ -4578,7 +4927,7 @@ class TestPulumiProcessor:
 
 class TestCdktfProcessor:
     def setup_method(self):
-        self.p = CdktfProcessor()
+        self.p = src.processors.cdktf.CdktfProcessor()
 
     def test_can_handle(self):
         assert self.p.can_handle("cdktf deploy")
@@ -4600,7 +4949,7 @@ class TestCdktfProcessor:
 
 class TestNixProcessor:
     def setup_method(self):
-        self.p = NixProcessor()
+        self.p = src.processors.nix.NixProcessor()
 
     def test_can_handle(self):
         assert self.p.can_handle("nix build")
@@ -4627,7 +4976,7 @@ class TestNixProcessor:
 
 class TestMiseProcessor:
     def setup_method(self):
-        self.p = MiseProcessor()
+        self.p = src.processors.mise.MiseProcessor()
 
     def test_can_handle(self):
         assert self.p.can_handle("mise install")
@@ -4651,7 +5000,7 @@ class TestMiseProcessor:
 
 class TestActProcessor:
     def setup_method(self):
-        self.p = ActProcessor()
+        self.p = src.processors.act.ActProcessor()
 
     def test_can_handle(self):
         assert self.p.can_handle("act")
@@ -4664,7 +5013,11 @@ class TestActProcessor:
 
     def test_hides_docker_chrome_keeps_status(self):
         lines = ["🐳 docker pull node"] * 20
-        lines += ["⭐ Run Main step", "✅ Success - Main step", "🏁 Job succeeded"]
+        lines += [
+            "⭐ Run Main step",
+            "✅ Success - Main step",
+            "🏁 Job succeeded",
+        ]
         out = "\n".join(lines)
         result = self.p.process("act", out)
         assert "Run Main step" in result
@@ -4688,43 +5041,55 @@ class TestPathGroupingHelpers:
     """
 
     def test_groups_by_parent_directory(self):
-        grouped = group_paths_by_dir(["src/a.py", "src/b.py", "tests/c.py"])
+        grouped = src.processors.utils.group_paths_by_dir(
+            ["src/a.py", "src/b.py", "tests/c.py"]
+        )
         assert dict(grouped) == {"src": ["a.py", "b.py"], "tests": ["c.py"]}
 
     def test_bare_filename_goes_to_dot(self):
-        assert dict(group_paths_by_dir(["main.py"])) == {".": ["main.py"]}
+        assert dict(src.processors.utils.group_paths_by_dir(["main.py"])) == {
+            ".": ["main.py"]
+        }
 
     def test_root_path_keeps_its_empty_parent(self):
         # Renders as "/etc.conf", not "./etc.conf".
-        assert dict(group_paths_by_dir(["/etc.conf"])) == {"": ["etc.conf"]}
+        assert dict(src.processors.utils.group_paths_by_dir(["/etc.conf"])) == {
+            "": ["etc.conf"]
+        }
 
     def test_blank_lines_are_dropped_and_paths_stripped(self):
-        assert dict(group_paths_by_dir(["  src/a.py  ", "", "   "])) == {"src": ["a.py"]}
+        assert dict(
+            src.processors.utils.group_paths_by_dir(["  src/a.py  ", "", "   "])
+        ) == {"src": ["a.py"]}
 
     def test_small_group_is_listed_in_full(self):
-        assert format_dir_group("src", ["a.py", "b.py"]) == ["  src/a.py", "  src/b.py"]
+        assert src.processors.utils.format_dir_group(
+            "src", ["a.py", "b.py"]
+        ) == ["  src/a.py", "  src/b.py"]
 
     def test_medium_group_is_sampled(self):
         files = [f"f{i}.py" for i in range(8)]
-        (line,) = format_dir_group("src", files)
+        (line,) = src.processors.utils.format_dir_group("src", files)
         assert line == "  src/ (8 files): f0.py, f1.py, f2.py ..."
 
     def test_large_group_becomes_an_extension_histogram(self):
         files = [f"f{i}.py" for i in range(9)] + [f"g{i}.md" for i in range(4)]
-        (line,) = format_dir_group("src", files)
+        (line,) = src.processors.utils.format_dir_group("src", files)
         assert line == "  src/ (13 files: *.py:9, *.md:4)"
 
     def test_extension_threshold_is_per_caller(self):
-        """find keeps listing longer than fd does — that is deliberate."""
+        """Find keeps listing longer than fd does — that is deliberate."""
         files = [f"f{i}.py" for i in range(12)]
         # fd's threshold (10): 12 files tips into the histogram form.
-        assert format_dir_group("src", files, ext_threshold=10) == ["  src/ (12 files: *.py:12)"]
+        assert src.processors.utils.format_dir_group(
+            "src", files, ext_threshold=10
+        ) == ["  src/ (12 files: *.py:12)"]
         # find's threshold (20): the same 12 files still get the sample form.
-        assert format_dir_group("src", files, ext_threshold=20) == [
-            "  src/ (12 files): f0.py, f1.py, f2.py ..."
-        ]
+        assert src.processors.utils.format_dir_group(
+            "src", files, ext_threshold=20
+        ) == ["  src/ (12 files): f0.py, f1.py, f2.py ..."]
 
     def test_extensionless_files_are_counted_as_none(self):
         files = [f"f{i}" for i in range(12)]
-        (line,) = format_dir_group("bin", files)
+        (line,) = src.processors.utils.format_dir_group("bin", files)
         assert line == "  bin/ (12 files: *.(none):12)"

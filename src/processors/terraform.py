@@ -1,26 +1,53 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Terraform output processor: plan, apply, init, output, state."""
 
 import re
 
-from .base import Processor
+from src.processors import base
 
 _TF_CMD_RE = re.compile(
-    r"\b(terraform|tofu)\s+(plan|apply|destroy|init|output|validate|fmt|state\s+(?:list|show))\b"
+    r"\b(terraform|tofu)\s+(plan|apply|destroy|init|output|validate|fmt|"
+    r"state\s+(?:list|show))\b"
 )
 
 
-class TerraformProcessor(Processor):
+class TerraformProcessor(base.Processor):
+    """Summarize Terraform resource changes, initialization, and state."""
+
     priority = 33
     handles_failure = True
     hook_patterns = [
-        r"^(terraform|tofu)\s+(plan|apply|destroy|init|output|validate|fmt|state\s+(list|show))\b",
+        (
+            r"^(terraform|tofu)\s+(plan|apply|destroy|init|output|validate|fmt|"
+            r"state\s+(list|show))\b"
+        ),
     ]
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "terraform"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         return bool(_TF_CMD_RE.search(command))
 
     def _get_subcmd(self, command: str) -> str | None:
@@ -29,6 +56,15 @@ class TerraformProcessor(Processor):
         return m.group(2) if m else None
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
@@ -46,6 +82,23 @@ class TerraformProcessor(Processor):
 
         return self._process_plan_apply(lines)
 
+    def process_plan_apply(self, lines: list[str]) -> str:
+        """Summarize already selected Terraform plan, apply, or destroy lines.
+
+        Adapters such as CDKTF apply their own size threshold before calling
+        this method. It preserves their line boundaries without splitting the
+        text again or applying another threshold.
+
+        Args:
+            lines: Captured lines after adapter-specific progress is removed.
+                The list is read without modification.
+
+        Returns:
+            Summarized resource changes and diagnostics, or the lines joined
+            with newlines when no recognized content can be selected.
+        """
+        return self._process_plan_apply(lines)
+
     def _process_plan_apply(self, lines: list[str]) -> str:
         """Compress terraform plan/apply/destroy output."""
         result = []
@@ -56,17 +109,24 @@ class TerraformProcessor(Processor):
             stripped = line.strip()
 
             # Provider initialization -- skip
-            if re.match(r"^(Initializing|Acquiring|Installing|Reusing)\s+", stripped):
+            if re.match(
+                r"^(Initializing|Acquiring|Installing|Reusing)\s+", stripped
+            ):
                 continue
             if re.match(r"^-\s+Installed\s+", stripped):
                 continue
 
             # Backend/state info -- skip
-            if re.match(r"^(Initializing the backend|Successfully configured)", stripped):
+            if re.match(
+                r"^(Initializing the backend|Successfully configured)", stripped
+            ):
                 continue
 
-            # Resource change header: # resource.name will be created/destroyed/updated
-            if re.match(r"^#\s+\S+", stripped) or re.match(r"^\s+#\s+\S+", stripped):
+            # Resource change header: # resource.name will be
+            # created/destroyed/updated
+            if re.match(r"^#\s+\S+", stripped) or re.match(
+                r"^\s+#\s+\S+", stripped
+            ):
                 in_resource_block = True
                 resource_action = ""
                 result.append(line)
@@ -75,12 +135,17 @@ class TerraformProcessor(Processor):
                     resource_action = "+"
                 elif "will be destroyed" in stripped:
                     resource_action = "-"
-                elif "will be updated" in stripped or "must be replaced" in stripped:
+                elif (
+                    "will be updated" in stripped
+                    or "must be replaced" in stripped
+                ):
                     resource_action = "~"
                 continue
 
             # Resource block boundary
-            if in_resource_block and re.match(r"^\s*[+~-]\s+resource\s+", stripped):
+            if in_resource_block and re.match(
+                r"^\s*[+~-]\s+resource\s+", stripped
+            ):
                 result.append(line)
                 continue
             if in_resource_block and stripped == "}":
@@ -121,7 +186,9 @@ class TerraformProcessor(Processor):
             if re.match(r"^Plan:", stripped):
                 result.append(line)
                 continue
-            if re.match(r"^(Apply complete|Destroy complete|No changes)", stripped):
+            if re.match(
+                r"^(Apply complete|Destroy complete|No changes)", stripped
+            ):
                 result.append(line)
                 continue
 
@@ -146,13 +213,18 @@ class TerraformProcessor(Processor):
                 continue
 
             # Blank lines between resources
-            if not stripped and in_resource_block is False and result and result[-1].strip():
+            if (
+                not stripped
+                and in_resource_block is False
+                and result
+                and result[-1].strip()
+            ):
                 result.append(line)
 
         return "\n".join(result) if result else "\n".join(lines)
 
     def _process_init(self, output: str) -> str:
-        """Compress terraform init: keep providers, warnings, errors, success."""
+        """Retain provider details, diagnostics, and initialization status."""
         lines = output.splitlines()
         if len(lines) <= 20:
             return output
@@ -161,14 +233,20 @@ class TerraformProcessor(Processor):
         for line in lines:
             stripped = line.strip()
 
-            # Keep provider version info: "- Installed hashicorp/aws v5.31.0 ..."
-            if re.search(r"\bv\d+\.\d+", stripped) and re.match(r"^-\s+", stripped):
+            # Keep provider version info: "- Installed hashicorp/aws v5.31.0
+            # ..."
+            if re.search(r"\bv\d+\.\d+", stripped) and re.match(
+                r"^-\s+", stripped
+            ):
                 result.append(stripped)
                 continue
 
             # Keep final result
             if re.search(
-                r"(successfully initialized|has been successfully|Terraform has been)",
+                (
+                    r"(successfully initialized|has been successfully|"
+                    r"Terraform has been)"
+                ),
                 stripped,
                 re.I,
             ):
@@ -181,12 +259,22 @@ class TerraformProcessor(Processor):
                 continue
 
             # Keep upgrade/reinitialization notices
-            if re.search(r"(upgrade available|new version|rerun with -upgrade)", stripped, re.I):
+            if re.search(
+                r"(upgrade available|new version|rerun with -upgrade)",
+                stripped,
+                re.I,
+            ):
                 result.append(stripped)
                 continue
 
             # Skip verbose initialization messages
-            if re.match(r"^(Initializing|Acquiring|Installing|Reusing|Finding|Using)\s+", stripped):
+            if re.match(
+                (
+                    r"^(Initializing|Acquiring|Installing|Reusing|Finding|"
+                    r"Using)\s+"
+                ),
+                stripped,
+            ):
                 continue
 
         if not result:
@@ -205,7 +293,9 @@ class TerraformProcessor(Processor):
             if len(line) > 200:
                 key_match = re.match(r"^(\S+\s*=\s*)", line)
                 if key_match:
-                    result.append(f"{key_match.group(1)}... ({len(line)} chars)")
+                    result.append(
+                        f"{key_match.group(1)}... ({len(line)} chars)"
+                    )
                 else:
                     result.append(line[:150] + f"... ({len(line)} chars)")
             else:
@@ -247,12 +337,17 @@ class TerraformProcessor(Processor):
             if len(line) > 200:
                 key_match = re.match(r"^(\s*\S+\s*=\s*)", line)
                 if key_match:
-                    result.append(f"{key_match.group(1)}... ({len(line)} chars)")
+                    result.append(
+                        f"{key_match.group(1)}... ({len(line)} chars)"
+                    )
                 else:
                     result.append(line[:150] + f"... ({len(line)} chars)")
             else:
                 result.append(line)
 
         if len(result) > 80:
-            return "\n".join(result[:60]) + f"\n... ({len(result) - 60} more lines)"
+            return (
+                "\n".join(result[:60])
+                + f"\n... ({len(result) - 60} more lines)"
+            )
         return "\n".join(result)

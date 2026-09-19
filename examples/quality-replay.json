@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "max_total_tokens": 4000,
+  "cases": [
+    {
+      "name": "git changes remain visible",
+      "command": "git diff",
+      "input": "fixtures/large_git_diff.txt",
+      "exit_code": 0,
+      "max_tokens": 3500,
+      "must_preserve": ["+import hmac", "+DEFAULT_MAX_ATTEMPTS = 5"]
+    },
+    {
+      "name": "test failures remain actionable",
+      "command": "pytest -v",
+      "input": "fixtures/pytest_output.txt",
+      "exit_code": 1,
+      "max_tokens": 1500,
+      "min_savings_percent": 20,
+      "must_preserve": ["AssertionError"]
+    }
+  ]
+}

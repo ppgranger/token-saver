@@ -1,10 +1,22 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Go processor: go build, vet, mod, generate, install."""
 
+import collections
 import re
-from collections import defaultdict
 
-from .. import config
-from .base import Processor
+from src import config
+from src.processors import base
 
 _GO_CMD_RE = re.compile(r"\bgo\s+(build|vet|mod|generate|install)\b")
 _GO_ERROR_RE = re.compile(r"^(\S+\.go):(\d+):(\d+):\s+(.+)$")
@@ -14,7 +26,9 @@ _GO_MOD_ACTION_RE = re.compile(r"^go:\s+(added|upgraded|downgraded|removed)\s+")
 _GO_GENERATE_RUN_RE = re.compile(r"^(\S+\.go):\d+:\s+running\s+")
 
 
-class GoProcessor(Processor):
+class GoProcessor(base.Processor):
+    """Summarize Go builds, vet warnings, modules, and code generation."""
+
     priority = 23
     handles_failure = True
     hook_patterns = [
@@ -23,9 +37,18 @@ class GoProcessor(Processor):
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "go"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         if re.search(r"\bgo\s+test\b", command):
             return False
         if re.search(r"\bgolangci-lint\b", command):
@@ -33,6 +56,15 @@ class GoProcessor(Processor):
         return bool(_GO_CMD_RE.search(command))
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
@@ -54,6 +86,7 @@ class GoProcessor(Processor):
         return output
 
     def _process_go_build(self, output: str) -> str:
+        """Retain Go compiler diagnostics and summarize routine build output."""
         lines = output.splitlines()
         result: list[str] = []
         package_lines: list[str] = []
@@ -86,6 +119,7 @@ class GoProcessor(Processor):
         return "\n".join(result) if result else output
 
     def _categorize_vet_warning(self, msg: str) -> str:
+        """Return a stable category for a recognized Go vet diagnostic."""
         msg_lower = msg.lower()
         if "printf" in msg_lower:
             return "printf"
@@ -102,8 +136,9 @@ class GoProcessor(Processor):
         return "other"
 
     def _process_go_vet(self, output: str) -> str:
+        """Group Go vet diagnostics and retain representative locations."""
         lines = output.splitlines()
-        warnings_by_type: dict[str, list[str]] = defaultdict(list)
+        warnings_by_type: dict[str, list[str]] = collections.defaultdict(list)
         package_lines: list[str] = []
 
         for line in lines:
@@ -126,7 +161,9 @@ class GoProcessor(Processor):
         if package_lines:
             result.extend(package_lines[:2])
 
-        for wtype, warnings in sorted(warnings_by_type.items(), key=lambda x: -len(x[1])):
+        for wtype, warnings in sorted(
+            warnings_by_type.items(), key=lambda x: -len(x[1])
+        ):
             count = len(warnings)
             if count >= group_threshold:
                 result.append(f"{wtype}: {count} warnings")
@@ -140,6 +177,7 @@ class GoProcessor(Processor):
         return "\n".join(result) if result else output
 
     def _process_go_mod(self, output: str) -> str:
+        """Group module changes, retaining download and resolution errors."""
         lines = output.splitlines()
         download_count = 0
         action_lines: list[str] = []
@@ -163,6 +201,7 @@ class GoProcessor(Processor):
         return "\n".join(result) if result else output
 
     def _process_go_generate(self, output: str) -> str:
+        """Summarize generated files while retaining generator diagnostics."""
         lines = output.splitlines()
         generate_count = 0
         result: list[str] = []

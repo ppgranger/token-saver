@@ -1,12 +1,24 @@
-"""Structured log processor: JSON Lines output from stern, kubetail, and similar tools."""
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
+"""Summarize JSON Lines logs from stern, kubetail, and related tools."""
+
+import collections
 import json
 import re
-from collections import defaultdict
 
-from .. import config
-from .base import Processor
-from .utils import compress_log_lines
+from src import config
+from src.processors import base
+from src.processors import utils
 
 _STERN_RE = re.compile(r"\b(stern|kubetail)\b")
 
@@ -15,11 +27,22 @@ _LEVEL_KEYS = ("level", "severity", "log_level", "loglevel", "lvl", "log.level")
 _MESSAGE_KEYS = ("msg", "message", "text", "log", "body")
 _TIMESTAMP_KEYS = ("timestamp", "time", "ts", "@timestamp", "datetime", "date")
 
-_ERROR_LEVELS = {"error", "fatal", "critical", "panic", "err", "crit", "emerg", "alert"}
+_ERROR_LEVELS = {
+    "error",
+    "fatal",
+    "critical",
+    "panic",
+    "err",
+    "crit",
+    "emerg",
+    "alert",
+}
 _WARN_LEVELS = {"warn", "warning"}
 
 
-class StructuredLogProcessor(Processor):
+class StructuredLogProcessor(base.Processor):
+    """Summarize repeated JSON log structures and retain error entries."""
+
     priority = 45
     handles_failure = True
     hook_patterns = [
@@ -28,12 +51,30 @@ class StructuredLogProcessor(Processor):
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "structured_log"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         return bool(_STERN_RE.search(command))
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
@@ -64,13 +105,18 @@ class StructuredLogProcessor(Processor):
         if non_empty == 0 or json_count / non_empty < 0.5:
             keep_head = config.get("kubectl_keep_head")
             keep_tail = config.get("kubectl_keep_tail")
-            return compress_log_lines(lines, keep_head=keep_head, keep_tail=keep_tail)
+            return utils.compress_log_lines(
+                lines, keep_head=keep_head, keep_tail=keep_tail
+            )
 
         return self._process_json_lines(lines, parsed_lines)
 
-    def _process_json_lines(self, raw_lines: list[str], parsed: list[dict | None]) -> str:
+    def _process_json_lines(
+        self, raw_lines: list[str], parsed: list[dict | None]
+    ) -> str:
         # Group by level
-        level_counts: dict[str, int] = defaultdict(int)
+        """Group repeated JSON messages and retain error entries and context."""
+        level_counts: dict[str, int] = collections.defaultdict(int)
         error_lines: list[str] = []
         total = 0
 

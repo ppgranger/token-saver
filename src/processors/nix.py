@@ -1,11 +1,24 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Nix processor: nix build/develop/eval/run, nix-build, nix-shell."""
 
 import re
 
-from .base import Processor
+from src.processors import base
 
 _NIX_CMD_RE = re.compile(
-    r"\b(nix\s+(build|develop|run|eval|shell|flake\s+\w+)|nix-build|nix-shell|nix-env)\b"
+    r"\b(nix\s+(build|develop|run|eval|shell|flake\s+\w+)|nix-build|"
+    r"nix-shell|nix-env)\b"
 )
 _BUILDING_RE = re.compile(r"^\s*building\s+'/nix/store/")
 _COPYING_RE = re.compile(r"^\s*copying path\s+'/nix/store/")
@@ -21,21 +34,44 @@ _KEEP_RE = re.compile(
 _ERROR_RE = re.compile(r"\b(error|Error|failed|Failed|cannot|panic)\b")
 
 
-class NixProcessor(Processor):
+class NixProcessor(base.Processor):
+    """Summarize Nix builds while preserving recognized diagnostics."""
+
     priority = 48
     handles_failure = True
     hook_patterns = [
-        r"^(nix\s+(build|develop|run|eval|shell|flake\s+\w+)|nix-build|nix-shell|nix-env)\b",
+        (
+            r"^(nix\s+(build|develop|run|eval|shell|flake\s+\w+)|nix-build|"
+            r"nix-shell|nix-env)\b"
+        ),
     ]
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "nix"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         return bool(_NIX_CMD_RE.search(command))
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 

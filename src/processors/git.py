@@ -1,13 +1,26 @@
-"""Git output processor: status, diff, log, show, push/pull/fetch, reflog, branch, blame."""
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Summarize Git status, changes, history, transfers, and branches."""
 
 import re
 
-from .. import config
-from .base import Processor
-from .utils import compress_diff
+from src import config
+from src.processors import base
+from src.processors import utils
 
 # Optional git global options that may appear between 'git' and the subcommand.
-# Covers: -C <path>, --no-pager, -c <key>=<val>, --git-dir <path>, --work-tree <path>
+# Covers: -C <path>, --no-pager, -c <key>=<val>, --git-dir <path>, --work-tree
+# <path>
 _GIT_OPTS = (
     r"(?:-C\s+\S+\s+|--no-pager\s+|-c\s+\S+\s+"
     r"|--git-dir(?:=|\s+)\S+\s+|--work-tree(?:=|\s+)\S+\s+)*"
@@ -20,18 +33,32 @@ _GIT_SUBCMDS = (
 _GIT_CMD_RE = re.compile(rf"\bgit\s+{_GIT_OPTS}{_GIT_SUBCMDS}\b")
 
 
-class GitProcessor(Processor):
+class GitProcessor(base.Processor):
+    """Summarize Git changes, history, transfers, and repository status."""
+
     priority = 20
     handles_failure = True
     hook_patterns = [
-        rf"^git\s+{_GIT_OPTS}(status|diff|log|show|push|pull|fetch|clone|branch|stash|reflog|remote|blame|cherry-pick|rebase|merge)\b",
+        (
+            rf"^git\s+{_GIT_OPTS}(status|diff|log|show|push|pull|fetch|clone|"
+            rf"branch|stash|reflog|remote|blame|cherry-pick|rebase|merge)\b"
+        ),
     ]
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "git"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         return bool(_GIT_CMD_RE.search(command))
 
     def _get_subcmd(self, command: str) -> str | None:
@@ -40,6 +67,15 @@ class GitProcessor(Processor):
         return m.group(1) if m else None
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
         subcmd = self._get_subcmd(command)
@@ -70,6 +106,7 @@ class GitProcessor(Processor):
         return output
 
     def _process_status(self, output: str) -> str:
+        """Group changes while retaining branch and conflict details."""
         lines = output.strip().splitlines()
         counts: dict[str, int] = {}
         files_by_dir: dict[str, list[str]] = {}
@@ -88,7 +125,9 @@ class GitProcessor(Processor):
                 continue
 
             # Header lines
-            if stripped.startswith(("On branch", "Your branch", "HEAD detached")):
+            if stripped.startswith(
+                ("On branch", "Your branch", "HEAD detached")
+            ):
                 header_lines.append(stripped)
                 in_untracked = False
                 continue
@@ -137,11 +176,14 @@ class GitProcessor(Processor):
                 code, filepath = "UD", stripped.split(":", 1)[1].strip()
             # Parse short-format status: XY filename
             # Supports all status codes: M, A, D, R, C, U, ?, !
-            elif status_m := re.match(r"^([MADRCTU?! ]{1,2})\s+(.+)$", stripped):
+            elif status_m := re.match(
+                r"^([MADRCTU?! ]{1,2})\s+(.+)$", stripped
+            ):
                 code_raw = status_m.group(1).strip()
                 filepath = status_m.group(2).strip().strip('"')
                 code = code_raw[0] if code_raw[0] != " " else code_raw[-1]
-            # Untracked files section: just bare filenames (tab-indented in raw output)
+            # Untracked files section: just bare filenames (tab-indented in raw
+            # output)
             elif in_untracked and not stripped.startswith("("):
                 code, filepath = "?", stripped
             else:
@@ -190,6 +232,7 @@ class GitProcessor(Processor):
     }
 
     def _process_diff(self, output: str, command: str = "") -> str:
+        """Compress hunks or dispatch to the requested diff format."""
         lines = output.splitlines()
 
         # Detect --name-only or --name-status format
@@ -214,7 +257,9 @@ class GitProcessor(Processor):
                 # Flush previous lockfile summary
                 if in_lockfile and current_file:
                     lockfile_summaries.append(f"diff --git {current_file}")
-                    lockfile_summaries.append(f"  (lockfile changed, {current_file_lines} lines)")
+                    lockfile_summaries.append(
+                        f"  (lockfile changed, {current_file_lines} lines)"
+                    )
                 # Detect new file
                 m = re.match(r"^diff --git a/(.+?) b/", line)
                 filename = m.group(1).rsplit("/", 1)[-1] if m else ""
@@ -235,7 +280,9 @@ class GitProcessor(Processor):
         # Flush last lockfile
         if in_lockfile and current_file:
             lockfile_summaries.append(f"diff --git {current_file}")
-            lockfile_summaries.append(f"  (lockfile changed, {current_file_lines} lines)")
+            lockfile_summaries.append(
+                f"  (lockfile changed, {current_file_lines} lines)"
+            )
 
         # Compress the non-lockfile lines, then append lockfile summaries
         max_hunk = config.get("max_diff_hunk_lines")
@@ -246,7 +293,7 @@ class GitProcessor(Processor):
         if len(non_lock_lines) < 200:
             max_context = min(max_context, 1)
         if any(line.startswith("diff --git") for line in non_lock_lines):
-            result = compress_diff(non_lock_lines, max_hunk, max_context)
+            result = utils.compress_diff(non_lock_lines, max_hunk, max_context)
             result.extend(lockfile_summaries)
             return "\n".join(result)
         if lockfile_summaries:
@@ -284,9 +331,11 @@ class GitProcessor(Processor):
         return "\n".join(result)
 
     def _process_diff_stat(self, lines: list[str]) -> str:
-        """Compress `git diff --stat` output: strip visual bars, group when many files."""
+        """Strip diff statistic bars and group large file lists."""
         # Count stat lines (exclude summary line)
-        stat_lines = [line for line in lines if re.match(r"^\s*.+?\s+\|\s+\d+", line)]
+        stat_lines = [
+            line for line in lines if re.match(r"^\s*.+?\s+\|\s+\d+", line)
+        ]
 
         if len(stat_lines) > 20:
             return self._group_stat_by_dir(lines)
@@ -328,9 +377,14 @@ class GitProcessor(Processor):
         for dir_name, files in sorted(by_dir.items(), key=lambda x: -len(x[1])):
             if len(files) > 5:
                 total_changes = sum(
-                    int(s.group(1)) for _, stats in files if (s := re.search(r"(\d+)", stats))
+                    int(s.group(1))
+                    for _, stats in files
+                    if (s := re.search(r"(\d+)", stats))
                 )
-                result.append(f" {dir_name}/ ({len(files)} files, ~{total_changes} changes)")
+                result.append(
+                    f" {dir_name}/ ({len(files)} files, ~{total_changes} "
+                    f"changes)"
+                )
             else:
                 for filepath, stats in files:
                     # Strip +/- visual bars from stats
@@ -342,13 +396,15 @@ class GitProcessor(Processor):
         return "\n".join(result)
 
     def _process_log(self, output: str, command: str = "") -> str:
+        """Retain commit identifiers and subjects, truncating long histories."""
         max_entries = config.get("max_log_entries")
         lines = output.splitlines()
 
         # Detect --graph format (ASCII art: |, *, /, \)
         # Only match lines that contain graph chars (not just spaces)
         has_graph = re.search(r"--graph\b", command) or (
-            lines and any(re.match(r"^[|*/\\ ]*[|*/\\]", line) for line in lines[:10])
+            lines
+            and any(re.match(r"^[|*/\\ ]*[|*/\\]", line) for line in lines[:10])
         )
         if has_graph:
             # Graph format: truncate but preserve structure
@@ -362,7 +418,10 @@ class GitProcessor(Processor):
         if lines and not lines[0].startswith("commit "):
             # Already compact format -- just truncate
             if len(lines) > max_entries:
-                return "\n".join(lines[:max_entries]) + f"\n... ({len(lines) - max_entries} more)"
+                return (
+                    "\n".join(lines[:max_entries])
+                    + f"\n... ({len(lines) - max_entries} more)"
+                )
             return output
 
         entries = []
@@ -399,6 +458,7 @@ class GitProcessor(Processor):
 
     def _process_show(self, output: str) -> str:
         # git show is like log + diff -- process the diff portion
+        """Separate the commit header from its compressed patch body."""
         lines = output.splitlines()
         header = []
         diff_start = -1
@@ -418,12 +478,15 @@ class GitProcessor(Processor):
         compact_header = []
         for line in header:
             stripped = line.strip()
-            if stripped and not stripped.startswith(("Merge:", "Author:", "Date:")):
+            if stripped and not stripped.startswith(
+                ("Merge:", "Author:", "Date:")
+            ):
                 compact_header.append(line)
 
         return "\n".join(compact_header) + "\n" + compressed_diff
 
     def _process_transfer(self, output: str) -> str:
+        """Remove transfer progress and retain remote status and diagnostics."""
         lines = output.splitlines()
         important = []
         for line in lines:
@@ -449,6 +512,7 @@ class GitProcessor(Processor):
         return output
 
     def _process_branch(self, output: str) -> str:
+        """Retain the current branch and summarize long branch listings."""
         lines = output.strip().splitlines()
         threshold = config.get("git_branch_threshold")
         if len(lines) <= threshold:
@@ -471,18 +535,26 @@ class GitProcessor(Processor):
         return "\n".join(result)
 
     def _process_stash_list(self, output: str) -> str:
+        """Retain the newest stash entries and mark omitted entries."""
         lines = output.strip().splitlines()
         threshold = config.get("git_stash_threshold")
         if len(lines) <= threshold:
             return output
-        return "\n".join(lines[:threshold]) + f"\n... ({len(lines) - threshold} more stashes)"
+        return (
+            "\n".join(lines[:threshold])
+            + f"\n... ({len(lines) - threshold} more stashes)"
+        )
 
     def _process_reflog(self, output: str) -> str:
+        """Retain recent reflog entries and mark omitted history."""
         lines = output.strip().splitlines()
         max_entries = config.get("max_log_entries")
         if len(lines) <= max_entries:
             return output
-        return "\n".join(lines[:max_entries]) + f"\n... ({len(lines) - max_entries} more entries)"
+        return (
+            "\n".join(lines[:max_entries])
+            + f"\n... ({len(lines) - max_entries} more entries)"
+        )
 
     def _process_remote(self, output: str) -> str:
         """Compress git remote -v: deduplicate fetch/push lines."""
@@ -500,7 +572,9 @@ class GitProcessor(Processor):
                 seen.add(key)
                 result.append(stripped)
         if len(result) < len(lines):
-            result.append(f"({len(lines)} total lines, fetch/push deduplicated)")
+            result.append(
+                f"({len(lines)} total lines, fetch/push deduplicated)"
+            )
         return "\n".join(result)
 
     def _process_blame(self, output: str) -> str:
@@ -513,7 +587,8 @@ class GitProcessor(Processor):
         recent_lines: list[str] = []
 
         for line in lines:
-            # Standard blame format: hash (Author YYYY-MM-DD HH:MM:SS +TZ  linenum) content
+            # Standard blame format: hash (Author YYYY-MM-DD HH:MM:SS +TZ
+            # linenum) content
             m = re.match(r"^[0-9a-f]+\s+\((.+?)\s+\d{4}-\d{2}-\d{2}\s+", line)
             if m:
                 author = m.group(1).strip()
@@ -528,7 +603,10 @@ class GitProcessor(Processor):
         if not by_author:
             # Porcelain or unrecognized format -- truncate
             if len(lines) > 50:
-                return "\n".join(lines[:40]) + f"\n... ({len(lines) - 40} more lines)"
+                return (
+                    "\n".join(lines[:40])
+                    + f"\n... ({len(lines) - 40} more lines)"
+                )
             return output
 
         # Show last 10 lines for recent context

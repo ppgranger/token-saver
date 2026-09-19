@@ -1,27 +1,33 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Claude Code specific installer logic for Token-Saver.
 
-v2.0: Registers as a native Claude Code plugin instead of injecting hooks
-into settings.json. The manual installer registers the GitHub repo as a
-known marketplace and writes installed_plugins.json in the v2 format that
-Claude Code expects.
+v2.0: Registers as a native Claude Code plugin instead of injecting hooks into
+settings.json. The manual installer registers the GitHub repo as a known
+marketplace and writes installed_plugins.json in the v2 format that Claude Code
+expects.
 """
 
+import datetime
 import json
 import os
 import shutil
+from typing import Any
 
-from .common import (
-    HOOK_MARKER,
-    IS_WINDOWS,
-    SHARED_FILES,
-    home,
-    install_files,
-    stamp_version,
-    uninstall_dir,
-)
+from installers import common
 
 CLAUDE_FILES = [
-    *SHARED_FILES,
+    *common.SHARED_FILES,
     # Plugin metadata
     ".claude-plugin/plugin.json",
     ".claude-plugin/marketplace.json",
@@ -45,15 +51,25 @@ _GITHUB_REPO = "ppgranger/token-saver"
 
 
 def _settings_dir():
-    """Return Claude Code settings directory."""
-    if IS_WINDOWS:
-        appdata = os.environ.get("APPDATA", os.path.join(home(), "AppData", "Roaming"))
+    """Return Claude Code settings directory.
+
+    Returns:
+        Platform-specific Claude Code configuration directory.
+    """
+    if common.IS_WINDOWS:
+        appdata = os.environ.get(
+            "APPDATA", os.path.join(common.home(), "AppData", "Roaming")
+        )
         return os.path.join(appdata, "claude")
-    return os.path.join(home(), ".claude")
+    return os.path.join(common.home(), ".claude")
 
 
 def _plugin_dir():
-    """Return the OLD v1.x plugin install directory (for migration/cleanup only)."""
+    """Return the legacy v1.x directory used during migration and cleanup.
+
+    Returns:
+        Legacy unversioned plugin directory used only during cleanup.
+    """
     return os.path.join(_settings_dir(), "plugins", "token-saver")
 
 
@@ -61,6 +77,12 @@ def _plugin_cache_dir(version):
     """Return the Claude Code plugin cache directory for token-saver.
 
     Claude Code stores plugins at .../cache/<marketplace>/<plugin>/<version>/.
+
+    Args:
+        version: Release version used for the tag or installation path.
+
+    Returns:
+        Versioned cache path for the specified release.
     """
     return os.path.join(
         _settings_dir(),
@@ -75,59 +97,102 @@ def _plugin_cache_dir(version):
 def _marketplace_dir():
     """Return the marketplace directory for token-saver.
 
-    Claude Code reads .claude-plugin/marketplace.json from this path to
-    discover available plugins.  This mirrors the layout produced by
-    ``/plugin marketplace add``.
+    Claude Code reads .claude-plugin/marketplace.json from this path to discover
+    available plugins.  This mirrors the layout produced by ``/plugin
+    marketplace add``.
+
+    Returns:
+        Path containing the installed marketplace catalog.
     """
-    return os.path.join(_settings_dir(), "plugins", "marketplaces", _MARKETPLACE_NAME)
+    return os.path.join(
+        _settings_dir(), "plugins", "marketplaces", _MARKETPLACE_NAME
+    )
 
 
 def _settings_path():
-    """Return path to Claude Code settings.json."""
+    """Return path to Claude Code settings.json.
+
+    Returns:
+        Path of Claude Code settings.json.
+    """
     return os.path.join(_settings_dir(), "settings.json")
 
 
 def _installed_plugins_path():
-    """Return path to Claude Code's installed plugins registry."""
+    """Return path to Claude Code's installed plugins registry.
+
+    Returns:
+        Path of installed_plugins.json in the plugins directory.
+    """
     return os.path.join(_settings_dir(), "plugins", "installed_plugins.json")
 
 
 def _known_marketplaces_path():
-    """Return path to Claude Code's known marketplaces registry."""
+    """Return path to Claude Code's known marketplaces registry.
+
+    Returns:
+        Path of known_marketplaces.json in the plugins directory.
+    """
     return os.path.join(_settings_dir(), "plugins", "known_marketplaces.json")
 
 
 def _hook_belongs_to_us(hook_entry):
-    """Check if a hook entry (new format) belongs to token-saver."""
+    """Check if a hook entry (new format) belongs to token-saver.
+
+    Args:
+        hook_entry: Hook registration containing the command entries to inspect.
+
+    Returns:
+        Whether a command marker identifies the hook as belonging to
+        Token-Saver.
+    """
     for h in hook_entry.get("hooks", []):
         cmd = h.get("command", "")
-        if HOOK_MARKER in cmd or "hook_pretool" in cmd or "hook_session" in cmd:
+        if (
+            common.HOOK_MARKER in cmd
+            or "hook_pretool" in cmd
+            or "hook_session" in cmd
+        ):
             return True
     return False
 
 
 def _read_version():
-    """Read the current token-saver version from src/__init__.py."""
-    from .common import _read_version as _rv  # noqa: PLC0415
+    """Read the current token-saver version from src/__init__.py.
 
-    return _rv()
+    Returns:
+        The version literal declared in src/__init__.py.
+    """
+    # Preserve the shared version-reader API used by existing installers.
+    # pylint: disable-next=protected-access
+    return common._read_version()
 
 
 def _iso_now():
-    """Return current UTC time in ISO 8601 format."""
-    from datetime import datetime, timezone  # noqa: PLC0415
+    """Return current UTC time in ISO 8601 format.
 
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+    Returns:
+        An ISO 8601 UTC timestamp with millisecond precision.
+    """
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(
+        timespec="milliseconds"
+    )
 
 
 def _register_plugin(marketplace_dir, cache_dir, version):
     """Register token-saver as a native Claude Code plugin.
 
     Registers the GitHub repo as a known marketplace (pointing
-    ``installLocation`` at *marketplace_dir* so Claude Code can find
-    ``.claude-plugin/marketplace.json``), writes the plugin entry in
-    installed_plugins.json (v2 format, ``installPath`` → *cache_dir*),
-    and enables it in settings.json.
+    ``installLocation`` at *marketplace_dir* so Claude Code can find ``.claude-
+    plugin/marketplace.json``), writes the plugin entry in
+    installed_plugins.json (v2 format, ``installPath`` → *cache_dir*), and
+    enables it in settings.json.
+
+    Args:
+        marketplace_dir: Installed marketplace directory used for plugin
+            discovery.
+        cache_dir: Versioned plugin directory used at runtime.
+        version: Release version used for the tag or installation path.
     """
     plugins_dir = os.path.join(_settings_dir(), "plugins")
     os.makedirs(plugins_dir, exist_ok=True)
@@ -161,7 +226,7 @@ def _register_plugin(marketplace_dir, cache_dir, version):
     # --- 2. Update installed_plugins.json (v2 format) ---
     plugins_path = _installed_plugins_path()
 
-    registry = {"version": 2, "plugins": {}}
+    registry: dict[str, Any] = {"version": 2, "plugins": {}}
     if os.path.exists(plugins_path):
         try:
             with open(plugins_path, encoding="utf-8") as f:
@@ -191,14 +256,18 @@ def _register_plugin(marketplace_dir, cache_dir, version):
     settings = {}
     if os.path.exists(settings_path):
         # A corrupt/hand-edited settings.json must not abort installation —
-        # fall back to an empty object (matching the unregister path's leniency).
+        # fall back to an empty object (matching the unregister path's
+        # leniency).
         try:
             with open(settings_path, encoding="utf-8") as f:
                 settings = json.load(f)
             if not isinstance(settings, dict):
                 settings = {}
         except (json.JSONDecodeError, ValueError, OSError):
-            print("  WARNING: settings.json unreadable — recreating enabledPlugins")
+            print(
+                "  WARNING: settings.json unreadable — "
+                "recreating enabledPlugins"
+            )
             settings = {}
 
     enabled = settings.setdefault("enabledPlugins", {})
@@ -214,8 +283,8 @@ def _register_plugin(marketplace_dir, cache_dir, version):
 def _unregister_plugin():
     """Unregister token-saver from Claude Code's plugin system.
 
-    Removes from known_marketplaces.json, installed_plugins.json,
-    disables in enabledPlugins, and cleans up any legacy v1.x hooks.
+    Removes from known_marketplaces.json, installed_plugins.json, disables in
+    enabledPlugins, and cleans up any legacy v1.x hooks.
     """
     # --- 1. Remove from known_marketplaces.json ---
     km_path = _known_marketplaces_path()
@@ -232,7 +301,8 @@ def _unregister_plugin():
         except (json.JSONDecodeError, ValueError):
             pass
 
-    # --- 2. Remove from installed_plugins.json (handle both v1 and v2 formats) ---
+    # --- 2. Remove from installed_plugins.json (handle both v1 and v2 formats)
+    # ---
     plugins_path = _installed_plugins_path()
     if os.path.exists(plugins_path):
         try:
@@ -261,7 +331,8 @@ def _unregister_plugin():
         except (json.JSONDecodeError, ValueError):
             pass
 
-    # --- 3. Remove from enabledPlugins + clean legacy hooks from settings.json ---
+    # --- 3. Remove from enabledPlugins + clean legacy hooks from settings.json
+    # ---
     settings_path = _settings_path()
     if os.path.exists(settings_path):
         with open(settings_path, encoding="utf-8") as f:
@@ -284,7 +355,11 @@ def _unregister_plugin():
             if not isinstance(hooks[event], list):
                 continue
             original_len = len(hooks[event])
-            hooks[event] = [entry for entry in hooks[event] if not _hook_belongs_to_us(entry)]
+            hooks[event] = [
+                entry
+                for entry in hooks[event]
+                if not _hook_belongs_to_us(entry)
+            ]
             if len(hooks[event]) != original_len:
                 changed = True
             if not hooks[event]:
@@ -303,10 +378,13 @@ def _migrate_from_v1():
     """Detect and clean up v1.x hook-injection installation.
 
     v1.x injected hooks directly into ~/.claude/settings.json with absolute
-    paths to claude/hook_pretool.py and src/hook_session.py. v2.0 registers
-    as a native plugin instead. Remove old hooks and old directories.
+    paths to claude/hook_pretool.py and src/hook_session.py. v2.0 registers as a
+    native plugin instead. Remove old hooks and old directories.
 
     Returns True if migration was performed.
+
+    Returns:
+        Whether any legacy hook or plugin layout was removed.
     """
     had_changes = False
 
@@ -324,7 +402,11 @@ def _migrate_from_v1():
             if not isinstance(hooks[event], list):
                 continue
             original_len = len(hooks[event])
-            hooks[event] = [entry for entry in hooks[event] if not _hook_belongs_to_us(entry)]
+            hooks[event] = [
+                entry
+                for entry in hooks[event]
+                if not _hook_belongs_to_us(entry)
+            ]
             if len(hooks[event]) != original_len:
                 had_changes = True
             if not hooks[event]:
@@ -363,7 +445,9 @@ def _migrate_from_v1():
         # Check if this is the flat (no-version) layout by looking for
         # .claude-plugin directly inside it (the versioned layout would
         # have a version subdirectory containing .claude-plugin instead)
-        has_flat_layout = os.path.isdir(os.path.join(old_cache, ".claude-plugin")) and not any(
+        has_flat_layout = os.path.isdir(
+            os.path.join(old_cache, ".claude-plugin")
+        ) and not any(
             os.path.isdir(os.path.join(old_cache, d, ".claude-plugin"))
             for d in os.listdir(old_cache)
             if os.path.isdir(os.path.join(old_cache, d))
@@ -384,8 +468,11 @@ def install(use_symlink=False):
       /plugin install token-saver
 
     Files are installed to the plugin cache directory (with version in the
-    path), the GitHub repo is registered as a known marketplace, and the
-    plugin is added to installed_plugins.json (v2 format) and enabledPlugins.
+    path), the GitHub repo is registered as a known marketplace, and the plugin
+    is added to installed_plugins.json (v2 format) and enabledPlugins.
+
+    Args:
+        use_symlink: Whether to link source files instead of copying them.
     """
     # 1. Migrate from v1.x (clean old hooks, old directories)
     _migrate_from_v1()
@@ -394,22 +481,23 @@ def install(use_symlink=False):
     version = _read_version()
     cache_dir = _plugin_cache_dir(version)
     print(f"\n--- Claude Code (cache: {cache_dir}) ---")
-    install_files(cache_dir, CLAUDE_FILES, use_symlink)
+    common.install_files(cache_dir, CLAUDE_FILES, use_symlink)
 
     # 3. Install files to the marketplace directory (for plugin discovery)
     mkt_dir = _marketplace_dir()
     print(f"--- Claude Code (marketplace: {mkt_dir}) ---")
-    install_files(mkt_dir, CLAUDE_FILES, use_symlink)
+    common.install_files(mkt_dir, CLAUDE_FILES, use_symlink)
 
     # 4. Stamp version in BOTH plugin.json and marketplace.json (in both dirs)
     version_files = [
         ".claude-plugin/plugin.json",
         ".claude-plugin/marketplace.json",
     ]
-    stamp_version(cache_dir, version_files)
-    stamp_version(mkt_dir, version_files)
+    common.stamp_version(cache_dir, version_files)
+    common.stamp_version(mkt_dir, version_files)
 
-    # 5. Register marketplace + plugin (marketplace dir for discovery, cache for runtime)
+    # 5. Register marketplace + plugin (marketplace dir for discovery, cache for
+    # runtime)
     _register_plugin(mkt_dir, cache_dir, version)
 
     print("  Plugin registered. Restart Claude Code, then /plugin to manage.")
@@ -428,14 +516,14 @@ def uninstall():
         _MARKETPLACE_NAME,
     )
     if os.path.isdir(cache_root):
-        uninstall_dir(cache_root)
+        common.uninstall_dir(cache_root)
 
     # Remove marketplace discovery directory
     mkt_dir = _marketplace_dir()
     if os.path.isdir(mkt_dir):
-        uninstall_dir(mkt_dir)
+        common.uninstall_dir(mkt_dir)
 
     # Also remove old v1 location if it still exists
     old_dir = _plugin_dir()
     if os.path.isdir(old_dir):
-        uninstall_dir(old_dir)
+        common.uninstall_dir(old_dir)

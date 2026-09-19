@@ -1,291 +1,106 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """CLI entry point for token-saver: version, stats, update, benchmark."""
 
 import argparse
 import json as json_mod
 import os
-import shutil
 import subprocess
 import sys
-import tarfile
-import tempfile
 import time
-import urllib.error
-import urllib.request
 
-from src import __version__
-from src.console import use_utf8_io
-from src.version_check import _fetch_latest_version, _parse_version
+import src
+from src import console
+from src import updater
 
 
 def _repo_dir():
-    """Return the repository root directory (parent of src/)."""
+    """Return the repository root directory (parent of src/).
+
+    Returns:
+        Absolute path containing the running src package.
+    """
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def _is_marketplace_managed(repo_dir: str) -> bool:
-    """True if this install lives under a Claude Code plugin marketplace cache.
+# Keep the historical helper names callable without coupling update execution
+# to the CLI module. Patch updater operations through their owning module.
+# pylint: disable=invalid-name
+_is_marketplace_managed = updater.is_marketplace_managed
+_is_within_directory = updater.is_within_directory
+_safe_extractall = updater.safe_extractall
+_detect_installed_targets = updater.detect_installed_targets
+_update_via_git = updater.update_via_git
+_update_via_tarball = updater.update_via_tarball
+# pylint: enable=invalid-name
 
-    Marketplace-managed installs live at
-    ``~/.claude/plugins/cache/<marketplace>/token-saver`` (or the Windows
-    %APPDATA% equivalent).  Self-updating those via git/tarball fights the
-    marketplace, so ``token-saver update`` should defer to ``/plugin update``.
+
+def cmd_version(unused_args):  # noqa: ARG001 — argparse callback contract
+    """Print current version.
+
+    Args:
+        unused_args: Unused namespace required by the command-handler API.
     """
-    parts = [p.lower() for p in os.path.normpath(os.path.abspath(repo_dir)).split(os.sep)]
-    return any(parts[i] == "plugins" and parts[i + 1] == "cache" for i in range(len(parts) - 1))
-
-
-def _is_within_directory(directory: str, target: str) -> bool:
-    """True if ``target`` resolves to a path inside ``directory``."""
-    abs_dir = os.path.abspath(directory)
-    abs_target = os.path.abspath(target)
-    return os.path.commonpath([abs_dir]) == os.path.commonpath([abs_dir, abs_target])
-
-
-def _safe_extractall(tar: "tarfile.TarFile", dest: str) -> None:
-    """Extract a tarball, rejecting members that escape ``dest``.
-
-    Prefers the stdlib ``data`` filter (Python 3.12+), which blocks path
-    traversal, absolute paths, and special files.  Falls back to manual member
-    validation on older interpreters.
-    """
-    try:
-        tar.extractall(dest, filter="data")
-        return
-    except TypeError:
-        pass  # `filter` kwarg unavailable (< 3.12) — validate manually
-
-    for member in tar.getmembers():
-        member_path = os.path.join(dest, member.name)
-        if not _is_within_directory(dest, member_path):
-            raise RuntimeError(f"Unsafe path in release tarball: {member.name!r}")
-        if member.issym() or member.islnk():
-            link_target = os.path.join(dest, os.path.dirname(member.name), member.linkname)
-            if not _is_within_directory(dest, link_target):
-                raise RuntimeError(f"Unsafe link in release tarball: {member.name!r}")
-    tar.extractall(dest)  # noqa: S202
-
-
-def cmd_version(_args):
-    """Print current version."""
-    print(f"token-saver v{__version__}")
+    print(f"token-saver v{src.__version__}")
 
 
 def cmd_stats(args):
-    """Display savings statistics, delegating to src/stats.py."""
-    from src.stats import main as stats_main  # noqa: PLC0415
+    """Display savings statistics, delegating to src/stats.py.
 
-    # Patch sys.argv so stats.main() sees --json if passed
-    original_argv = sys.argv
-    sys.argv = ["stats"]
-    if args.json:
-        sys.argv.append("--json")
-    try:
-        stats_main()
-    finally:
-        sys.argv = original_argv
-
-
-def cmd_update(_args):
-    """Check for updates, then always refresh the local install.
-
-    Remote fetch is best-effort: if it fails or matches the local version,
-    we still re-run the installer so the Claude/Antigravity plugin caches stay
-    in sync with the source files on disk.
+    Args:
+        args: Parsed command-line arguments for this subcommand.
     """
-    repo_dir = _repo_dir()
-    print(f"token-saver v{__version__}")
+    # Defer this adapter dependency until its command or hook is used.
+    # pylint: disable-next=import-outside-toplevel
+    from src import stats  # noqa: PLC0415
 
-    if _is_marketplace_managed(repo_dir):
-        print(
-            "This install is managed by the Claude Code plugin marketplace.\n"
-            "Run '/plugin update token-saver' from within Claude Code to update."
-        )
-        return
-
-    print("Checking for updates...")
-    latest = None
-    try:
-        latest = _fetch_latest_version(timeout=10)
-    except urllib.error.HTTPError as e:
-        print(f"Could not check remote: HTTP {e.code} (continuing with local refresh)")
-    except Exception as e:
-        print(f"Could not check remote: {e} (continuing with local refresh)")
-
-    is_newer = False
-    if latest is not None:
-        try:
-            is_newer = _parse_version(latest) > _parse_version(__version__)
-        except (ValueError, TypeError):
-            print(f"Could not compare versions: local={__version__}, remote={latest}")
-
-    if is_newer:
-        print(f"Update available: v{__version__} -> v{latest}")
-        git_dir = os.path.join(repo_dir, ".git")
-        if os.path.isdir(git_dir):
-            _update_via_git(repo_dir, latest)
-        else:
-            _update_via_tarball(repo_dir, latest)
-    elif latest is not None:
-        print(f"Already on v{__version__} (no remote update).")
-
-    targets = _detect_installed_targets()
-    print(f"Refreshing plugin install for: {targets}...")
-    install_script = os.path.join(repo_dir, "install.py")
-    subprocess.run(  # noqa: S603
-        [sys.executable, install_script, "--target", targets],
-        check=True,
-    )
-
-    final_version = latest if is_newer else __version__
-    print(f"Done. Running v{final_version}.")
+    stats.main(["--json"] if args.json else [])
 
 
-def _detect_installed_targets():
-    """Detect which platforms are currently installed and return the --target value."""
-    h = os.path.expanduser("~")
-    if os.name == "nt":
-        appdata = os.environ.get("APPDATA", os.path.join(h, "AppData", "Roaming"))
-        claude_old = os.path.join(appdata, "claude", "plugins", "token-saver")
-        claude_cache = os.path.join(
-            appdata, "claude", "plugins", "cache", "token-saver-marketplace", "token-saver"
-        )
-        antigravity_dir = os.path.join(
-            appdata, "gemini", "antigravity-cli", "plugins", "token-saver"
-        )
-    else:
-        claude_old = os.path.join(h, ".claude", "plugins", "token-saver")
-        claude_cache = os.path.join(
-            h, ".claude", "plugins", "cache", "token-saver-marketplace", "token-saver"
-        )
-        antigravity_dir = os.path.join(h, ".gemini", "antigravity-cli", "plugins", "token-saver")
+def cmd_update(unused_args):  # noqa: ARG001 — argparse callback contract
+    """Delegate release application and local refresh to the update adapter.
 
-    claude_installed = os.path.isdir(claude_old) or os.path.isdir(claude_cache)
-    antigravity_installed = os.path.isdir(antigravity_dir)
+    Args:
+        unused_args: Unused namespace required by the command-handler API.
 
-    if claude_installed and antigravity_installed:
-        return "both"
-    if antigravity_installed:
-        return "antigravity"
-    # Default to claude (most common, and safe even if dir was just cleaned)
-    return "claude"
-
-
-def _update_via_git(repo_dir, version):
-    """Update using git fetch + merge tag into current branch."""
-    print("Updating via git...")
-    subprocess.run(  # noqa: S603
-        ["git", "-C", repo_dir, "fetch", "--tags", "origin"],  # noqa: S607
-        check=True,
-    )
-    # Try to merge the tag into the current branch (avoids detached HEAD)
-    for tag in (f"v{version}", version):
-        result = subprocess.run(  # noqa: S603
-            ["git", "-C", repo_dir, "merge", tag, "--ff-only"],  # noqa: S607
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode == 0:
-            print(f"Merged {tag} into current branch.")
-            return
-    # Fallback: pull latest main
-    print(f"Warning: could not fast-forward to v{version}, pulling latest main")
-    subprocess.run(  # noqa: S603
-        ["git", "-C", repo_dir, "pull", "origin", "main"],  # noqa: S607
-        check=True,
-    )
-
-
-def _update_via_tarball(repo_dir, version):
-    """Update by downloading and extracting release tarball."""
-    print("Downloading update...")
-
-    # Try both tag formats: v1.2.0 and 1.2.0 (mirrors _update_via_git behavior)
-    urls = [
-        f"https://github.com/ppgranger/token-saver/archive/refs/tags/v{version}.tar.gz",
-        f"https://github.com/ppgranger/token-saver/archive/refs/tags/{version}.tar.gz",
-    ]
-
-    tarball_data = None
-    for url in urls:
-        req = urllib.request.Request(url, headers={"User-Agent": "token-saver"})  # noqa: S310
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
-                tarball_data = resp.read()
-            break
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                continue
-            raise
-
-    if tarball_data is None:
-        print(f"Error: could not download release v{version} from GitHub")
-        sys.exit(1)
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tarball_path = os.path.join(tmpdir, "release.tar.gz")
-        with open(tarball_path, "wb") as f:
-            f.write(tarball_data)
-
-        with tarfile.open(tarball_path, "r:gz") as tar:
-            _safe_extractall(tar, tmpdir)
-
-        # Find the extracted directory (e.g., token-saver-1.2.0/)
-        extracted = [
-            d
-            for d in os.listdir(tmpdir)
-            if os.path.isdir(os.path.join(tmpdir, d)) and d != "release.tar.gz"
-        ]
-        if not extracted:
-            print("Error: could not find extracted release directory")
-            sys.exit(1)
-
-        src_dir = os.path.join(tmpdir, extracted[0])
-
-        # Overlay known source directories only (preserve .git, local config, etc.)
-        overlay_items = (
-            "src",
-            "installers",
-            "scripts",
-            ".claude-plugin",
-            "hooks",
-            "skills",
-            "commands",
-            "antigravity",
-            "bin",
-            "install.py",
-            "pyproject.toml",
-            "CLAUDE.md",
-        )
-        for item in overlay_items:
-            s = os.path.join(src_dir, item)
-            if not os.path.exists(s):
-                continue
-            d = os.path.join(repo_dir, item)
-            if os.path.isdir(s):
-                if os.path.exists(d):
-                    shutil.rmtree(d)
-                shutil.copytree(s, d)
-            else:
-                shutil.copy2(s, d)
-
-        # Clean up legacy claude/ directory from v1.x
-        legacy_claude = os.path.join(repo_dir, "claude")
-        if os.path.isdir(legacy_claude):
-            shutil.rmtree(legacy_claude)
-            print("Removed legacy claude/ directory.")
-
-        print("Files updated from tarball.")
+    Raises:
+        subprocess.CalledProcessError: Updating or refreshing the installation
+            fails.
+    """
+    updater.update(_repo_dir())
 
 
 def cmd_benchmark(args):
-    """Benchmark compression on a real or dry-run command."""
+    """Benchmark compression on a real or dry-run command.
+
+    Args:
+        args: Parsed command-line arguments for this subcommand.
+    """
+    # Defer this adapter dependency until its command or hook is used.
+    # pylint: disable-next=import-outside-toplevel
     from src import config  # noqa: PLC0415
-    from src.diffstat import format_summary, summarize  # noqa: PLC0415
-    from src.engine import CompressionEngine  # noqa: PLC0415
+
+    # Defer this adapter dependency until its command or hook is used.
+    # pylint: disable-next=import-outside-toplevel
+    from src import diffstat  # noqa: PLC0415
+
+    # Defer this adapter dependency until its command or hook is used.
+    # pylint: disable-next=import-outside-toplevel
+    from src import engine as engine_lib  # noqa: PLC0415
 
     command = args.command_str
     chars_per_token = config.get("chars_per_token")
-    engine = CompressionEngine()
+    engine = engine_lib.CompressionEngine()
 
     if args.dry_run:
         # Dry-run: show which processor would handle it, without executing
@@ -311,7 +126,9 @@ def cmd_benchmark(args):
             print("=" * 40)
             print(f"Command:     {command}")
             print(f"Processor:   {processor_name}")
-            print("(no execution — use without --dry-run to measure compression)")
+            print(
+                "(no execution — use without --dry-run to measure compression)"
+            )
         return
 
     if getattr(args, "stdin", False):
@@ -341,17 +158,27 @@ def cmd_benchmark(args):
             raw_output += result.stderr
 
     compress_start = time.monotonic()
-    compressed, processor_name, was_compressed = engine.compress(command, raw_output)
+    compressed, processor_name, was_compressed = engine.compress(
+        command, raw_output
+    )
     compress_elapsed = time.monotonic() - compress_start
 
     orig_chars = len(raw_output)
     comp_chars = len(compressed)
-    orig_tokens = max(1, round(orig_chars / chars_per_token)) if orig_chars > 0 else 0
-    comp_tokens = max(1, round(comp_chars / chars_per_token)) if comp_chars > 0 else 0
-    savings_pct = (orig_chars - comp_chars) / orig_chars * 100 if orig_chars > 0 else 0
+    orig_tokens = (
+        max(1, round(orig_chars / chars_per_token)) if orig_chars > 0 else 0
+    )
+    comp_tokens = (
+        max(1, round(comp_chars / chars_per_token)) if comp_chars > 0 else 0
+    )
+    savings_pct = (
+        (orig_chars - comp_chars) / orig_chars * 100 if orig_chars > 0 else 0
+    )
 
     show_removed = getattr(args, "show_removed", False)
-    diff_summary = summarize(raw_output, compressed) if show_removed else None
+    diff_summary = (
+        diffstat.summarize(raw_output, compressed) if show_removed else None
+    )
 
     if args.format == "json":
         payload = {
@@ -378,23 +205,34 @@ def cmd_benchmark(args):
         print(f"Original:    {orig_chars:,} chars (~{orig_tokens:,} tokens)")
         print(f"Compressed:  {comp_chars:,} chars (~{comp_tokens:,} tokens)")
         print(f"Savings:     {savings_pct:.1f}%")
-        print(f"Time:        {exec_elapsed:.2f}s (exec) + {compress_elapsed:.3f}s (compress)")
+        print(
+            f"Time:        {exec_elapsed:.2f}s (exec) + "
+            f"{compress_elapsed:.3f}s (compress)"
+        )
         if diff_summary is not None:
-            print(format_summary(diff_summary))
+            print(diffstat.format_summary(diff_summary))
 
 
 def cmd_explain(args):
-    """Explain how a command would be routed: processor, regex, exclusion."""
-    from scripts.hook_pretool import explain_decision  # noqa: PLC0415
-    from src.chain_utils import extract_primary_command  # noqa: PLC0415
-    from src.engine import CompressionEngine  # noqa: PLC0415
+    """Explain how a command would be routed: processor, regex, exclusion.
+
+    Args:
+        args: Parsed command-line arguments for this subcommand.
+    """
+    # Load routing and processor discovery only for the explanation command.
+    # pylint: disable=import-outside-toplevel
+    from src import chain_utils  # noqa: PLC0415
+    from src import command_policy  # noqa: PLC0415
+    from src import engine as engine_lib  # noqa: PLC0415
+
+    # pylint: enable=import-outside-toplevel
 
     command = args.command_str
-    decision = explain_decision(command)
+    decision = command_policy.explain_decision(command)
 
     # Which processor would handle the primary command (first match wins).
-    primary = extract_primary_command(command)
-    engine = CompressionEngine()
+    primary = chain_utils.extract_primary_command(command)
+    engine = engine_lib.CompressionEngine()
     processor_name = "none"
     processor_patterns: list[str] = []
     for p in engine.processors:
@@ -444,31 +282,54 @@ def cmd_explain(args):
 
 def main():
     """CLI entry point."""
-    use_utf8_io()
+    # Defer this adapter dependency until its command or hook is used.
+    # pylint: disable-next=import-outside-toplevel
+    from src import delta_cli  # noqa: PLC0415
+
+    # Keep optional CLI adapters out of library imports.
+    # pylint: disable-next=import-outside-toplevel
+    from src import quality_cli  # noqa: PLC0415
+
+    console.use_utf8_io()
     parser = argparse.ArgumentParser(
         prog="token-saver",
         description="Token-Saver: compress verbose tool outputs to save tokens",
     )
     subparsers = parser.add_subparsers(dest="command")
+    quality_cli.add_quality_parsers(subparsers)
+    delta_cli.add_delta_parsers(subparsers)
 
     # version
     subparsers.add_parser("version", help="Show current version")
 
     # stats
-    stats_parser = subparsers.add_parser("stats", help="Show savings statistics")
-    stats_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    stats_parser = subparsers.add_parser(
+        "stats", help="Show savings statistics"
+    )
+    stats_parser.add_argument(
+        "--json", action="store_true", help="Output as JSON"
+    )
 
     # update
     subparsers.add_parser("update", help="Check for and apply updates")
 
     # benchmark
-    bench_parser = subparsers.add_parser("benchmark", help="Benchmark compression on a command")
-    bench_parser.add_argument("command_str", help="Command to benchmark (quote if needed)")
-    bench_parser.add_argument(
-        "--format", choices=["text", "json"], default="text", help="Output format"
+    bench_parser = subparsers.add_parser(
+        "benchmark", help="Benchmark compression on a command"
     )
     bench_parser.add_argument(
-        "--dry-run", action="store_true", help="Show processor match without executing"
+        "command_str", help="Command to benchmark (quote if needed)"
+    )
+    bench_parser.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format",
+    )
+    bench_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show processor match without executing",
     )
     bench_parser.add_argument(
         "--show-removed",
@@ -485,9 +346,14 @@ def main():
     explain_parser = subparsers.add_parser(
         "explain", help="Explain how a command would be routed/excluded"
     )
-    explain_parser.add_argument("command_str", help="Command to explain (quote if needed)")
     explain_parser.add_argument(
-        "--format", choices=["text", "json"], default="text", help="Output format"
+        "command_str", help="Command to explain (quote if needed)"
+    )
+    explain_parser.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format",
     )
 
     args = parser.parse_args()
@@ -503,7 +369,8 @@ def main():
         "benchmark": cmd_benchmark,
         "explain": cmd_explain,
     }
-    commands[args.command](args)
+    handler = getattr(args, "handler", None) or commands[args.command]
+    handler(args)
 
 
 if __name__ == "__main__":

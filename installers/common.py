@@ -1,4 +1,16 @@
-"""Shared constants, file lists, and utility functions for Token-Saver installers."""
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Shared file lists, paths, and installer operations for Token-Saver."""
 
 import contextlib
 import glob
@@ -18,8 +30,11 @@ def _processor_files():
     """All processor modules under src/processors, discovered from disk.
 
     Globbing instead of hardcoding keeps the install list from drifting out of
-    sync with the package (the registry auto-discovers processors at runtime,
-    so a missing file here means a silently-absent processor).
+    sync with the package (the registry auto-discovers processors at runtime, so
+    a missing file here means a silently-absent processor).
+
+    Returns:
+        Sorted repository-relative paths of shipped processor modules.
     """
     proc_dir = os.path.join(EXTENSION_DIR, "src", "processors")
     rels = []
@@ -32,14 +47,20 @@ def _processor_files():
 
 
 def _src_files():
-    """All top-level src/*.py modules (plus the py.typed marker), discovered from disk.
+    """Discover top-level runtime modules and the optional py.typed marker.
 
     Globbing instead of hardcoding keeps the install list from drifting out of
     sync with the package.  A hardcoded list previously shipped installs missing
     src/core.py and src/diffstat.py, which broke scripts/wrap.py at import time.
+
+    Returns:
+        Sorted runtime module paths, followed by py.typed when present.
     """
     src_dir = os.path.join(EXTENSION_DIR, "src")
-    rels = [f"src/{os.path.basename(p)}" for p in sorted(glob.glob(os.path.join(src_dir, "*.py")))]
+    rels = [
+        f"src/{os.path.basename(p)}"
+        for p in sorted(glob.glob(os.path.join(src_dir, "*.py")))
+    ]
     if os.path.exists(os.path.join(src_dir, "py.typed")):
         rels.append("src/py.typed")
     return rels
@@ -52,12 +73,20 @@ SHARED_FILES = [
 
 
 def home():
-    """Return user home directory, works on all platforms."""
+    """Return user home directory, works on all platforms.
+
+    Returns:
+        Expanded home directory path for the current user.
+    """
     return os.path.expanduser("~")
 
 
 def python_cmd():
-    """Return python command appropriate for the platform."""
+    """Return python command appropriate for the platform.
+
+    Returns:
+        python on Windows, otherwise python3.
+    """
     if IS_WINDOWS:
         return "python"
     return "python3"
@@ -69,20 +98,38 @@ def token_saver_data_dir():
     Delegates to the canonical ``src.data_dir()`` so the path logic lives in a
     single place; falls back to a local computation only if ``src`` can't be
     imported (e.g. the installer is run in isolation from the package).
+
+    Returns:
+        Platform-specific directory shared by runtime data and the core install.
     """
     try:
-        from src import data_dir  # noqa: PLC0415
+        # The standalone installer must retain its missing-package fallback.
+        # pylint: disable-next=import-outside-toplevel
+        import src  # noqa: PLC0415
 
-        return data_dir()
+        return src.data_dir()
+    # Optional package detection and legacy cleanup must fail open.
+    # pylint: disable-next=broad-exception-caught
     except Exception:
         if IS_WINDOWS:
-            appdata = os.environ.get("APPDATA", os.path.join(home(), "AppData", "Roaming"))
+            appdata = os.environ.get(
+                "APPDATA", os.path.join(home(), "AppData", "Roaming")
+            )
             return os.path.join(appdata, "token-saver")
         return os.path.join(home(), ".token-saver")
 
 
 def install_files(target_dir, file_list, use_symlink=False):
-    """Copy or symlink extension files to the target directory."""
+    """Copy or symlink extension files to the target directory.
+
+    Args:
+        target_dir: Root directory of the installed plugin or core tree.
+        file_list: Repository-relative paths of files to copy or link.
+        use_symlink: Whether to link source files instead of copying them.
+
+    Raises:
+        OSError: A destination cannot be created, replaced, copied, or linked.
+    """
     os.makedirs(target_dir, exist_ok=True)
 
     for rel_path in file_list:
@@ -97,7 +144,9 @@ def install_files(target_dir, file_list, use_symlink=False):
         # install running from ~/.token-saver/ would otherwise delete then
         # copy).  realpath resolves symlinks; normcase handles Windows
         # case-insensitive paths.
-        if os.path.normcase(os.path.realpath(src)) == os.path.normcase(os.path.realpath(dst)):
+        if os.path.normcase(os.path.realpath(src)) == os.path.normcase(
+            os.path.realpath(dst)
+        ):
             print(f"  OK   {rel_path}")
             continue
 
@@ -118,7 +167,11 @@ def install_files(target_dir, file_list, use_symlink=False):
     # Fix hooks.json for Windows: replace python3 with python
     for hooks_rel in ("antigravity/hooks.json", "hooks/hooks.json"):
         hooks_path = os.path.join(target_dir, hooks_rel)
-        if IS_WINDOWS and os.path.exists(hooks_path) and not os.path.islink(hooks_path):
+        if (
+            IS_WINDOWS
+            and os.path.exists(hooks_path)
+            and not os.path.islink(hooks_path)
+        ):
             with open(hooks_path, encoding="utf-8") as f:
                 content = f.read()
             content = content.replace("python3 ", "python ")
@@ -128,7 +181,11 @@ def install_files(target_dir, file_list, use_symlink=False):
 
 
 def uninstall_dir(target_dir):
-    """Remove installed plugin/extension directory."""
+    """Remove installed plugin/extension directory.
+
+    Args:
+        target_dir: Root directory of the installed plugin or core tree.
+    """
     if os.path.exists(target_dir):
         shutil.rmtree(target_dir)
         print(f"  REMOVED {target_dir}")
@@ -157,13 +214,19 @@ _LEGACY_NAME = "token-saving"
 
 
 def _legacy_dirs():
-    """Return all possible legacy "token-saving" directories across platforms."""
+    """Return all possible legacy "token-saving" directories across platforms.
+
+    Returns:
+        Candidate paths owned by legacy token-saving installations.
+    """
     h = home()
     dirs = []
 
     # Claude Code plugin: ~/.claude/plugins/token-saving
     if IS_WINDOWS:
-        appdata = os.environ.get("APPDATA", os.path.join(h, "AppData", "Roaming"))
+        appdata = os.environ.get(
+            "APPDATA", os.path.join(h, "AppData", "Roaming")
+        )
         dirs.append(os.path.join(appdata, "claude", "plugins", _LEGACY_NAME))
         dirs.append(os.path.join(appdata, "gemini", "extensions", _LEGACY_NAME))
         dirs.append(os.path.join(appdata, _LEGACY_NAME))
@@ -180,6 +243,9 @@ def migrate_from_legacy():
 
     Called before installing so the old name doesn't coexist with the new one.
     Also cleans up settings.json hooks that reference the old path.
+
+    Returns:
+        Whether any legacy directory or hook registration was removed.
     """
     found = False
     for legacy_dir in _legacy_dirs():
@@ -198,7 +264,9 @@ def migrate_from_legacy():
 
     # Clean old "token-saving" references from Claude Code settings.json
     if IS_WINDOWS:
-        appdata = os.environ.get("APPDATA", os.path.join(home(), "AppData", "Roaming"))
+        appdata = os.environ.get(
+            "APPDATA", os.path.join(home(), "AppData", "Roaming")
+        )
         settings_path = os.path.join(appdata, "claude", "settings.json")
     else:
         settings_path = os.path.join(home(), ".claude", "settings.json")
@@ -214,7 +282,9 @@ def migrate_from_legacy():
                     continue
                 original_len = len(hooks[event])
                 hooks[event] = [
-                    entry for entry in hooks[event] if _LEGACY_NAME not in json.dumps(entry)
+                    entry
+                    for entry in hooks[event]
+                    if _LEGACY_NAME not in json.dumps(entry)
                 ]
                 if len(hooks[event]) != original_len:
                     changed = True
@@ -228,6 +298,8 @@ def migrate_from_legacy():
                     f.write("\n")
                 print("  REMOVED legacy hooks from settings.json")
                 found = True
+        # Optional package detection and legacy cleanup must fail open.
+        # pylint: disable-next=broad-exception-caught
         except Exception:  # noqa: S110
             pass
 
@@ -237,7 +309,15 @@ def migrate_from_legacy():
 
 
 def _read_version():
-    """Read __version__ from src/__init__.py using regex."""
+    """Read __version__ from src/__init__.py using regex.
+
+    Returns:
+        The version literal declared in src/__init__.py.
+
+    Raises:
+        ValueError: The source file does not contain a version assignment.
+        OSError: The source version file cannot be read.
+    """
     init_path = os.path.join(EXTENSION_DIR, "src", "__init__.py")
     with open(init_path, encoding="utf-8") as f:
         content = f.read()
@@ -259,6 +339,10 @@ def stamp_version(target_dir, manifest_paths):
     Args:
         target_dir: Root directory of the installed plugin/extension.
         manifest_paths: List of relative paths to JSON manifests to stamp.
+
+    Raises:
+        ValueError: A manifest is invalid JSON or no source version can be read.
+        OSError: A source or destination file cannot be read or written.
     """
     version = _read_version()
     for rel_path in manifest_paths:
@@ -317,7 +401,11 @@ CORE_FILES = [
 
 
 def install_core(use_symlink=False):
-    """Install core files to ~/.token-saver/ so CLI and update work standalone."""
+    """Install core files to ~/.token-saver/ so CLI and update work standalone.
+
+    Args:
+        use_symlink: Whether to link source files instead of copying them.
+    """
     data_dir = token_saver_data_dir()
     print(f"\n--- Core ({data_dir}) ---")
 
@@ -332,7 +420,9 @@ def install_core(use_symlink=False):
     bin_path = os.path.join(data_dir, "bin", "token-saver")
     if os.path.exists(bin_path) and not os.path.islink(bin_path):
         st = os.stat(bin_path)
-        os.chmod(bin_path, st.st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+        os.chmod(
+            bin_path, st.st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH
+        )
 
 
 def uninstall_core():
@@ -343,19 +433,26 @@ def uninstall_core():
         if os.path.exists(full_path) or os.path.islink(full_path):
             os.remove(full_path)
     # Clean up empty directories (but leave data_dir itself for DB/config)
-    for dirpath, _dirnames, _filenames in os.walk(data_dir, topdown=False):
+    for dirpath, _, _ in os.walk(data_dir, topdown=False):
         if dirpath == data_dir:
             continue
-        # Check the actual filesystem — os.walk's dirnames/filenames can be stale
+        # Check the actual filesystem — os.walk's dirnames/filenames can be
+        # stale
         # after we removed child directories in earlier iterations.
         if not os.listdir(dirpath):
             os.rmdir(dirpath)
 
 
 def _cli_install_dir():
-    """Return the directory for CLI executable installation."""
+    """Return the directory for CLI executable installation.
+
+    Returns:
+        Platform-specific user executable directory.
+    """
     if IS_WINDOWS:
-        appdata = os.environ.get("APPDATA", os.path.join(home(), "AppData", "Roaming"))
+        appdata = os.environ.get(
+            "APPDATA", os.path.join(home(), "AppData", "Roaming")
+        )
         return os.path.join(appdata, "token-saver", "bin")
     return os.path.join(home(), ".local", "bin")
 
@@ -394,7 +491,10 @@ def install_cli(use_symlink=False):
         # Ensure executable on Unix
         if not IS_WINDOWS:
             st = os.stat(dst_path)
-            os.chmod(dst_path, st.st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+            os.chmod(
+                dst_path,
+                st.st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH,
+            )
         print(f"  COPY {src_name} -> {dst_path}")
 
     if IS_WINDOWS:

@@ -1,51 +1,57 @@
 ---
-title: Comparison
-description: Token-Saver vs cc_token_saver_mcp, token-optimizer-mcp, and Claude Context Mode — approach, latency, offline support, and whether they can run together.
+title: Token-Saver vs RTK and Context Mode
+description: Compare Token-Saver, RTK, and Context Mode by command compression, context retrieval, configuration, and how to evaluate them on your own logs.
 permalink: /comparison/
 nav_order: 4
 ---
 
-# How Token-Saver Compares
+# Token-Saver vs RTK and Context Mode
 
-Token-Saver focuses specifically on **command output compression** — it doesn't cache, delegate, or summarize via LLM. The tools below solve adjacent but different problems, and in many cases can be used alongside Token-Saver.
+Token-Saver reduces terminal output before it reaches an AI coding assistant.
+RTK addresses a similar problem; Context Mode also provides tools for retrieving
+information from large outputs and preserving session context. Their tradeoffs
+are easier to assess on your own commands than through unrelated headline
+savings percentages.
 
-## Comparison Table
+## Comparison
 
-| Feature | Token-Saver | cc_token_saver_mcp | token-optimizer-mcp | Claude Context Mode |
-|---------|------------|-------------------|--------------------|--------------------|
-| **Approach** | Deterministic compression per command type | Delegates simple tasks to local LLM | Caching + compression via MCP | Sandboxed execution + FTS5 indexing |
-| **Requires LLM calls** | No | Yes (local LLM) | Yes | No |
-| **Added latency** | ~60ms/command (regex/parsing only) | Variable (LLM inference) | Variable | ~0ms for sandbox, variable for indexing |
-| **Platform support** | Claude Code, Antigravity CLI | Claude Code only | Claude Code only | Claude Code only |
-| **Compression method** | 36 specialized processors (git, pytest, cargo, go, terraform, pulumi, docker, k8s...) | Task delegation (not output compression) | Response caching | Output sandboxing + summarization |
-| **Preserves all errors/traces** | Yes (precision-tested) | N/A | Depends on cache hit | Depends on summary |
-| **Works offline** | Yes | Needs local LLM running | No | Yes |
-| **Install complexity** | `python3 install.py` | MCP server config | MCP server config | MCP skill install |
+| Capability | Token-Saver | RTK | Context Mode |
+|---|---|---|---|
+| **Main approach** | Parse and compress command output locally | CLI proxy that filters and compresses command output | Sandbox outputs, index them, and retrieve relevant content |
+| **Compression method** | 36 specialized processors with configurable thresholds | Tool-specific filters in a Rust binary | Indexed retrieval through MCP tools, with platform hooks |
+| **Integration** | Claude Code and Antigravity CLI plugins; importable Python engine | Multiple coding-agent integrations | Multiple coding-agent integrations with platform-dependent hook support |
+| **Inspection** | Per-command statistics, processor reference, reproducible compression fixtures | Savings analytics through `rtk gain` | Searchable output and persistent session memory |
+| **Customization** | Python processors and project-level numeric thresholds | See RTK's current configuration documentation | See Context Mode's platform and routing documentation |
 
-## Key Differences
+Third-party descriptions were checked on **2026-09-19** against the projects'
+own documentation: [RTK repository](https://github.com/rtk-ai/rtk),
+[RTK savings analytics](https://www.rtk-ai.app/docs/analytics/gain/), and
+[Context Mode repository](https://github.com/mksglu/context-mode). Integration
+support changes; consult those sources before installing.
 
-### Token-Saver
+## When Token-Saver is useful
 
-Token-Saver intercepts command output and applies **deterministic, per-command compression** using 36 specialized processors. It understands the structure of `git diff`, `pytest`, `terraform plan`, and other common CLI outputs, and removes only noise (progress bars, passing tests, installation logs) while preserving all actionable information (errors, diffs, warnings).
+Choose Token-Saver when you want local, inspectable compression rules in Python,
+a documented account of what each processor keeps and drops, and fixtures that
+check both compression ratios and representative failure messages. Its
+compression engine uses Python's standard library and makes no LLM calls.
 
-- ~60ms of overhead per wrapped command (regex and string parsing only, no LLM inference — dominated by Python interpreter startup, not compression logic itself)
-- Fully deterministic — same input always produces same output
-- Works offline, no external dependencies
-- 1,300+ tests including precision tests that verify critical data survives compression, and a compression-ratchet suite gating CI on real-world ratios
-- Supports both Claude Code and Antigravity CLI
+See the [processor reference](processors/index.md) for command coverage, and
+[benchmarks](benchmarks.md) for measured output reduction. Error preservation
+is tested against known fixtures; it is not proof that every possible CLI
+output format is lossless.
 
-### cc_token_saver_mcp
+## How to make a fair comparison
 
-An MCP server that intercepts tool calls and delegates simple tasks (like reading files or listing directories) to a local LLM instead of Claude. This reduces token usage by avoiding Claude entirely for trivial operations. It's a different strategy — **task delegation** rather than output compression. Can be used alongside Token-Saver.
+1. Collect representative success and failure logs from your normal work.
+2. Check that filenames, diagnostic messages, and other information your agent
+   needs remain available after compression or retrieval.
+3. Compare output size and latency on the same inputs and machine. Token-Saver's
+   counts are character-based estimates, not model-specific billing figures.
+4. Test the integration with your assistant, including exit status propagation
+   and behavior when the compression tool is unavailable.
 
-### token-optimizer-mcp
-
-An MCP-based tool that caches and compresses responses. Useful for repetitive queries where the same command is run multiple times. Complements Token-Saver's single-pass compression with cross-invocation caching.
-
-### Claude Context Mode
-
-A skill for Claude Code that runs commands in a sandboxed environment and indexes outputs for later retrieval via FTS5. Useful for managing very large codebases where full context doesn't fit. Solves a different problem — **context management** rather than output compression.
-
-## Can I Use Them Together?
-
-Yes. Token-Saver operates at the output level (compressing what the model sees), while the other tools operate at the task level (delegating), caching level (avoiding re-computation), or context level (indexing). They are complementary, not competing.
+A savings dashboard alone is not a differentiator: both Token-Saver and RTK
+report output savings. Compression and retrieval may be combined, but overlapping
+hooks or a second compression pass need end-to-end testing before you rely on
+that combination.

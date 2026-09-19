@@ -10,22 +10,20 @@ title: Token-Saver
 # falls back to the full site.description when tagline is unset — which is
 # what produced a <title> that was the whole paragraph below. Keep tagline
 # short; description stays long-form for <meta name="description"> and og:.
-tagline: Content-aware output compression for AI coding assistants
+tagline: CLI token compression for AI coding assistants
 description: >-
-  Content-aware output compression for AI coding assistants. 36 specialized
-  processors compress verbose CLI output (git, pytest, npm, terraform,
-  kubectl, docker, and more) deterministically, saving 60-99% of tokens
-  without losing errors, diffs, or stack traces.
+  Reduce CLI output tokens for AI coding assistants with 36 specialized
+  processors. Local compression for git, pytest, Docker, Terraform, and more.
+lang: en-US
 url: "https://ppgranger.github.io"
 baseurl: "/token-saver"
 
 github_username: ppgranger
 repository: ppgranger/token-saver
 
-# Every page in docs/ sets its own front matter (title, description,
-# permalink) — see docs/processors/*.md for the pattern. Pages without
-# front matter are skipped by Jekyll's default collections, so nothing here
-# needs an explicit include/exclude list for the .md sources.
+# Public pages set their own title, description, and stable permalink.
+# Maintainer instructions are explicitly excluded below, including nested
+# AGENTS.md files which Pages might otherwise copy into the published site.
 
 # just-the-docs only styles a page if it uses one of its layouts, and none of
 # our sources declare one. Default every page to `default` rather than adding a
@@ -62,7 +60,7 @@ aux_links:
     - "https://github.com/ppgranger/token-saver"
 aux_links_new_tab: true
 
-# Sidebar sorting: nav_order first, then title. The 29 processor pages carry no
+# Sidebar sorting: nav_order first, then title. Processor pages carry no
 # nav_order deliberately, so they sort alphabetically and adding a processor
 # needs no renumbering. case_insensitive matches how the titles read.
 nav_sort: case_insensitive
@@ -79,8 +77,8 @@ gh_edit_source: docs
 gh_edit_view_mode: "tree"
 
 footer_content: >-
-  Token-Saver is MIT licensed. No LLM calls, no network access, fully
-  deterministic.
+  Token-Saver is Apache-2.0 licensed. Compression runs locally without LLM calls.
+  <a href="/token-saver/sitemap.xml">Sitemap</a>.
 
 callouts:
   note:
@@ -100,10 +98,16 @@ plugins:
   - jekyll-include-cache
   - jekyll-seo-tag
   - jekyll-relative-links
+  - jekyll-sitemap
 
 exclude:
+  - Gemfile
+  - Gemfile.lock
   - .sass-cache/
   - .jekyll-cache/
+  - AGENTS.md
+  - "**/AGENTS.md"
+  - seo-audit.md
 
 markdown: kramdown
 kramdown:

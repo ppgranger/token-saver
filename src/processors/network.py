@@ -1,13 +1,27 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Network output processor: curl, wget, httpie."""
 
 import json
 import re
 
-from .base import Processor
-from .utils import compress_json_value
+from src.processors import base
+from src.processors import utils
 
 
-class NetworkProcessor(Processor):
+class NetworkProcessor(base.Processor):
+    """Reduce HTTP transfer noise and summarize large response bodies."""
+
     priority = 30
     handles_failure = True
     hook_patterns = [
@@ -16,16 +30,36 @@ class NetworkProcessor(Processor):
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "network"
 
     def can_handle(self, command: str) -> bool:
         # Match curl, wget, or httpie (http/https commands at start of line)
-        # Avoid false positives: only match http/https as standalone commands, not as URLs
+        # Avoid false positives: only match http/https as standalone commands,
+        # not as URLs
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         return bool(
-            re.search(r"\b(curl|wget)\b", command) or re.match(r"^\s*(http|https)\s+", command)
+            re.search(r"\b(curl|wget)\b", command)
+            or re.match(r"^\s*(http|https)\s+", command)
         )
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
@@ -38,6 +72,7 @@ class NetworkProcessor(Processor):
         return output
 
     def _process_curl(self, output: str, command: str) -> str:
+        """Keep HTTP status and useful headers while reducing transfer noise."""
         lines = output.splitlines()
 
         is_verbose = re.search(r"\s-[a-zA-Z]*v|--verbose", command)
@@ -85,7 +120,10 @@ class NetworkProcessor(Processor):
             # Request headers (> prefix) -- keep only the method line
             if stripped.startswith("> "):
                 header_content = stripped[2:].strip()
-                if re.match(r"^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+", header_content):
+                if re.match(
+                    r"^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+",
+                    header_content,
+                ):
                     result.append(stripped)
                 continue
 
@@ -101,7 +139,11 @@ class NetworkProcessor(Processor):
                     in_body = True
                     continue
                 # Check if header is important
-                header_lower = header_content.split(":")[0].lower() if ":" in header_content else ""
+                header_lower = (
+                    header_content.split(":")[0].lower()
+                    if ":" in header_content
+                    else ""
+                )
                 if any(header_lower.startswith(h) for h in important_headers):
                     result.append(stripped)
                 continue
@@ -158,7 +200,9 @@ class NetworkProcessor(Processor):
         return "\n".join(result)
 
     def _maybe_compress_body(self, text: str) -> str:
-        """Try compressing the body as HTML first, then JSON. Returns the original
+        """Try compressing the body as HTML first, then JSON.
+
+        Returns the original
         text if neither applies or the body is small enough to keep verbatim.
         """
         html_summary = self._maybe_compress_html(text)
@@ -181,12 +225,17 @@ class NetworkProcessor(Processor):
         if len(stripped) < 1500:
             return text
 
-        compressed = compress_json_value(data, max_depth=2)
+        compressed = utils.compress_json_value(data, max_depth=2)
         summary = json.dumps(compressed, indent=2, default=str)
-        return f"{summary}\n\n({len(stripped)} chars, {len(text.splitlines())} lines)"
+        return (
+            f"{summary}\n\n({len(stripped)} chars, {len(text.splitlines())} "
+            f"lines)"
+        )
 
     _HTML_DETECT_RE = re.compile(r"<!doctype\s+html|<html\b", re.IGNORECASE)
-    _HTML_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+    _HTML_TITLE_RE = re.compile(
+        r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL
+    )
     _HTML_H1_RE = re.compile(r"<h1[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
     _HTML_TAG_STRIP_RE = re.compile(r"<[^>]+>")
     _HTML_ERROR_RE = re.compile(
@@ -216,26 +265,39 @@ class NetworkProcessor(Processor):
         )
 
         h1_m = self._HTML_H1_RE.search(stripped)
-        h1 = self._HTML_TAG_STRIP_RE.sub("", h1_m.group(1)).strip()[:120] if h1_m else None
+        h1 = (
+            self._HTML_TAG_STRIP_RE.sub("", h1_m.group(1)).strip()[:120]
+            if h1_m
+            else None
+        )
 
         counts = {
             "links": len(re.findall(r"<a\b", stripped, re.IGNORECASE)),
             "images": len(re.findall(r"<img\b", stripped, re.IGNORECASE)),
             "scripts": len(re.findall(r"<script\b", stripped, re.IGNORECASE)),
-            "stylesheets": len(re.findall(r"<link\b[^>]*stylesheet", stripped, re.IGNORECASE)),
+            "stylesheets": len(
+                re.findall(r"<link\b[^>]*stylesheet", stripped, re.IGNORECASE)
+            ),
             "forms": len(re.findall(r"<form\b", stripped, re.IGNORECASE)),
             "inputs": len(re.findall(r"<input\b", stripped, re.IGNORECASE)),
         }
 
         parts = [
-            f"[HTML page, {len(stripped)} chars, {len(text.splitlines())} lines]",
+            (
+                f"[HTML page, {len(stripped)} chars, {len(text.splitlines())} "
+                f"lines]"
+            ),
             f"<title>: {title}",
         ]
         if h1 and h1 != title:
             parts.append(f"<h1>: {h1}")
-        parts.append("Structure: " + ", ".join(f"{n} {k}" for k, n in counts.items() if n > 0))
+        parts.append(
+            "Structure: "
+            + ", ".join(f"{n} {k}" for k, n in counts.items() if n > 0)
+        )
 
-        # Surface any obvious error markers — useful for debugging server responses
+        # Surface any obvious error markers — useful for debugging server
+        # responses
         error_m = self._HTML_ERROR_RE.search(stripped)
         if error_m:
             parts.append(f"Error markers: {error_m.group(0).strip()[:200]}")
@@ -243,10 +305,11 @@ class NetworkProcessor(Processor):
         return "\n".join(parts)
 
     def _process_wget(self, output: str) -> str:
+        """Retain transfer results and diagnostics without download progress."""
         lines = output.splitlines()
         result = []
 
-        _useful_re = re.compile(
+        useful_re = re.compile(
             r"^(Length:|Saving to:|Location:|HTTP request sent|--\d{4})"
             r"|^\d{3}\s"
             r"|\b(saved|ERROR|error|failed|refused|not found)\b",
@@ -257,13 +320,13 @@ class NetworkProcessor(Processor):
             stripped = line.strip()
             if not stripped:
                 continue
-            if _useful_re.search(stripped):
+            if useful_re.search(stripped):
                 result.append(stripped)
 
         return "\n".join(result) if result else output
 
     def _process_httpie(self, output: str) -> str:
-        """Compress httpie output: keep status, important headers, compress body."""
+        """Keep HTTPie status and useful headers, summarizing large bodies."""
         lines = output.splitlines()
         result = []
         body_lines = []

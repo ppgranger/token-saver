@@ -1,10 +1,22 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Kubernetes output processor: kubectl get, describe, logs, apply, delete."""
 
 import re
 
-from .. import config
-from .base import Processor
-from .utils import compress_log_lines
+from src import config
+from src.processors import base
+from src.processors import utils
 
 # Optional kubectl global options that may appear before the subcommand.
 # Covers: -n <ns>, --namespace <ns>, --context <ctx>, --kubeconfig <path>,
@@ -16,24 +28,40 @@ _KUBECTL_OPTS = (
 )
 
 _KUBECTL_SUBCMDS = r"(get|describe|logs|top|apply|delete|create)"
-_KUBECTL_CMD_RE = re.compile(rf"\b(kubectl|oc)\s+{_KUBECTL_OPTS}{_KUBECTL_SUBCMDS}\b")
+_KUBECTL_CMD_RE = re.compile(
+    rf"\b(kubectl|oc)\s+{_KUBECTL_OPTS}{_KUBECTL_SUBCMDS}\b"
+)
 
 # Regex to detect "all containers ready": e.g. 1/1, 2/2, 3/3, 10/10
 _READY_RE = re.compile(r"\b(\d+)/(\d+)\b")
 
 
-class KubectlProcessor(Processor):
+class KubectlProcessor(base.Processor):
+    """Summarize Kubernetes resources and retain unhealthy states and logs."""
+
     priority = 32
     handles_failure = True
     hook_patterns = [
-        rf"^(kubectl|oc)\s+{_KUBECTL_OPTS}(get|describe|logs|top|apply|delete|create)\b",
+        (
+            rf"^(kubectl|oc)\s+{_KUBECTL_OPTS}(get|describe|logs|top|apply|"
+            rf"delete|create)\b"
+        ),
     ]
 
     @property
     def name(self) -> str:
+        """The stable name used for processor routing and savings tracking."""
         return "kubectl"
 
     def can_handle(self, command: str) -> bool:
+        """Return whether this processor supports the supplied command.
+
+        Args:
+            command: Shell command text used for routing.
+
+        Returns:
+            Whether the command matches this processor's supported tools.
+        """
         return bool(_KUBECTL_CMD_RE.search(command))
 
     def _get_subcmd(self, command: str) -> str | None:
@@ -42,6 +70,15 @@ class KubectlProcessor(Processor):
         return m.group(2) if m else None
 
     def process(self, command: str, output: str) -> str:
+        """Compress captured output according to this processor's rules.
+
+        Args:
+            command: Original shell command used to select output handling.
+            output: Captured command output before this transformation.
+
+        Returns:
+            Compressed text, or the input when no safe reduction is available.
+        """
         if not output or not output.strip():
             return output
 
@@ -63,7 +100,9 @@ class KubectlProcessor(Processor):
             return m.group(1) == m.group(2)
         return False
 
-    def _strip_column(self, header: str, lines: list[str], col_name: str) -> tuple[str, list[str]]:
+    def _strip_column(
+        self, header: str, lines: list[str], col_name: str
+    ) -> tuple[str, list[str]]:
         """Remove a column by name from tabular output."""
         m = re.search(rf"\b{col_name}\b", header)
         if not m:
@@ -186,7 +225,9 @@ class KubectlProcessor(Processor):
             stripped = line.strip()
 
             # Top-level key-value lines (no leading whitespace, key: value)
-            if re.match(r"^[A-Z][\w\s-]+:", line) and not line.startswith((" ", "\t")):
+            if re.match(r"^[A-Z][\w\s-]+:", line) and not line.startswith(
+                (" ", "\t")
+            ):
                 key = line.split(":")[0].strip().lower()
 
                 # Check if this starts a noise section
@@ -220,7 +261,11 @@ class KubectlProcessor(Processor):
 
             # Container state info
             if re.search(
-                r"(State|Last State|Restart Count|Exit Code|Reason|Ready|Image):", stripped
+                (
+                    r"(State|Last State|Restart Count|Exit Code|Reason|Ready|"
+                    r"Image):"
+                ),
+                stripped,
             ):
                 result.append(line)
                 continue
@@ -240,7 +285,7 @@ class KubectlProcessor(Processor):
         if len(lines) <= keep_head + keep_tail:
             return output
 
-        return compress_log_lines(
+        return utils.compress_log_lines(
             lines,
             keep_head=keep_head,
             keep_tail=keep_tail,
@@ -248,7 +293,7 @@ class KubectlProcessor(Processor):
         )
 
     def _process_mutate(self, output: str) -> str:
-        """Compress kubectl apply/delete/create: keep result lines, skip verbose details."""
+        """Retain mutation results while reducing verbose kubectl details."""
         lines = output.splitlines()
         if len(lines) <= 20:
             return output
@@ -258,8 +303,13 @@ class KubectlProcessor(Processor):
             stripped = line.strip()
             # Resource mutation results, errors, warnings, summaries
             if (
-                re.search(r"\b(created|configured|unchanged|deleted|patched)\b", stripped)
-                or re.search(r"\b(error|Error|ERROR|warning|Warning)\b", stripped)
+                re.search(
+                    r"\b(created|configured|unchanged|deleted|patched)\b",
+                    stripped,
+                )
+                or re.search(
+                    r"\b(error|Error|ERROR|warning|Warning)\b", stripped
+                )
                 or re.search(r"\d+\s+resource", stripped)
             ):
                 result.append(stripped)

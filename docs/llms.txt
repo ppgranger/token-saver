@@ -4,17 +4,23 @@
 > and Antigravity CLI plugin that intercepts verbose CLI command output
 > (git, pytest, npm, terraform, kubectl, docker, and more) and compresses it
 > deterministically before it reaches the model, using 36 specialized
-> processors — one per tool family. No LLM calls, no network access,
-> fully offline. Typical savings: 60-99% per command, with all errors,
-> diffs, and stack traces preserved by design.
+> processors — one per tool family. Compression runs locally without LLM
+> calls or output uploads. An optional release check contacts GitHub. Savings
+> depend on the output and use character-based token estimates. Error
+> preservation is covered by representative fixtures and configurable limits.
 
 ## Start here
 
+- [Quick Start](https://github.com/ppgranger/token-saver/blob/main/README.md#quick-start): Plugin installation and first steps.
 - [Home](https://ppgranger.github.io/token-saver/): Overview and quick start.
 - [Benchmarks](https://ppgranger.github.io/token-saver/benchmarks/): 22 measured compression scenarios, gated by CI, with methodology.
-- [How It Compares](https://ppgranger.github.io/token-saver/comparison/): Token-Saver vs cc_token_saver_mcp, token-optimizer-mcp, Claude Context Mode.
+- [How It Compares](https://ppgranger.github.io/token-saver/comparison/): Token-Saver, RTK, and Context Mode: command compression and context retrieval.
 - [FAQ](https://ppgranger.github.io/token-saver/faq/): Common questions on privacy, precision, platform support.
 - [Full README](https://github.com/ppgranger/token-saver/blob/main/README.md): Installation, architecture, configuration reference.
+
+- [Compression quality gates](https://ppgranger.github.io/token-saver/quality-gates/): Offline compression and replay checks for saved logs, token budgets, and required diagnostics.
+- [Architecture](https://ppgranger.github.io/token-saver/architecture/): Component responsibilities and extension points for contributors.
+- [Delta](https://ppgranger.github.io/token-saver/delta/): Experimental v3 pytest and Ruff diagnostic comparisons, opt-in local retention, and detail retrieval.
 
 ## Processors (one page per tool family)
 
@@ -48,8 +54,17 @@
 - [env](https://ppgranger.github.io/token-saver/processors/env/): Environment variable listing commands.
 - [generic](https://ppgranger.github.io/token-saver/processors/generic/): Fallback processor for unrecognized commands.
 
+- [act](https://ppgranger.github.io/token-saver/processors/act/): Compress local GitHub Actions logs from act while retaining workflow output, step results, job status, and recognized errors.
+- [bun](https://ppgranger.github.io/token-saver/processors/bun/): Compress Bun package installation output, retaining package changes, summaries, and recognized warnings and errors.
+- [cdktf](https://ppgranger.github.io/token-saver/processors/cdktf/): Compress CDK for Terraform output using the Terraform plan and apply processor after filtering synthesis and compilation progress.
+- [just](https://ppgranger.github.io/token-saver/processors/just/): Compact long just recipe listings with recipe counts, an explicit overflow marker, and recognized errors.
+- [mise](https://ppgranger.github.io/token-saver/processors/mise/): Reduce mise runtime installation progress while preserving installation results and recognized warnings and errors.
+- [nix](https://ppgranger.github.io/token-saver/processors/nix/): Summarize Nix build and store-transfer output with counts while retaining recognized diagnostics and plan summaries.
+- [pulumi](https://ppgranger.github.io/token-saver/processors/pulumi/): Compact Pulumi infrastructure updates and previews while retaining resource operations, output summaries, and recognized diagnostics.
+
 ## Optional
 
 - [Source repository](https://github.com/ppgranger/token-saver): Full source, issue tracker, releases.
 - [Custom Processors Guide](https://github.com/ppgranger/token-saver/blob/main/examples/custom_processor/README.md): How to write and register your own processor.
+- [Contributing](https://github.com/ppgranger/token-saver/blob/main/CONTRIBUTING.md): Development setup, test suite, and contribution conventions.
 - [License](https://github.com/ppgranger/token-saver/blob/main/LICENSE): Apache-2.0.

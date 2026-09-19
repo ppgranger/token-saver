@@ -5,6 +5,82 @@ All notable changes to token-saver are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [3.0.0] - 2026-09-19
+
+### Added
+
+- Experimental Delta in v3 for repeated `pytest` and `ruff check`
+  diagnostics in Claude Code. Opt-in comparisons retain full new and changed
+  failures, summarize unchanged failures, and distinguish explicitly passing
+  tests from diagnostics that were not observed again. Separate private local
+  snapshots expire on access and have bounded retention; `delta show` retrieves
+  details without re-execution and `delta clear` removes retained snapshots.
+  Unchanged repeats use ordinary compression when it is shorter; full new or
+  changed diagnostics take priority over output size. Valid snapshots still
+  establish a baseline when ordinary sanitized output is returned.
+  Delta retention settings accept only global configuration or environment
+  overrides. Includes a reproducible synthetic sequence benchmark counting
+  both targeted and complete detail retrieval.
+- A second Delta benchmark executes real pytest and Ruff commands on disposable
+  fixture projects, verifies edit/repeat/pass transitions and exit statuses,
+  and counts targeted and complete detail retrieval separately. Includes JSON
+  reports and POSIX quoting coverage for Windows executable paths.
+- Portable `compress` stdin filter with captured exit-status routing, JSON output and estimated token-budget checks.
+- Offline `replay` quality contracts: per-case and aggregate budgets, minimum savings, literal diagnostic preservation, and content-free CI reports. Includes a runnable fixture manifest.
+- Scoped `AGENTS.md` contributor guidance and documentation of architecture and quality gates.
+- Documentation build and SEO checks in CI, an automatic sitemap, and reference pages for all 36 processors.
+
+### Changed
+
+- Strengthened SOLID boundaries: host-independent injectable command policy, one
+  shared routing evaluator, pure Delta comparison, lazy audit/recording adapters
+  with a write-only persistence contract, and pure statistics formatting. Core
+  and CLI explanation no longer import the Claude hook. The CLI delegates
+  update operations to a dedicated adapter. Existing public entry points and
+  output formats remain compatible.
+- Align Python source, hooks, installers, examples, and tests with the Google
+  Python Style Guide: absolute module imports, 80-column formatting, useful
+  API documentation, and simple comprehensions. Add the vendored Google Pylint
+  configuration and structural style checks to CI; document scoped exceptions
+  and contributor guidance in `AGENTS.md` and `CONTRIBUTING.md`.
+- Separated processor registration from discovery and made engine processors and policy injectable while preserving default behavior.
+- Qualified output-savings and information-preservation claims, corrected site licensing, and refreshed the sourced comparison.
+
+### Fixed
+
+- Close optional tracking/statistics connections after write or query failures;
+  reuse the complete tracker schema during recovery. Avoid import-time audit
+  files, global CLI argument mutation, and sensitive logging traceback dumps
+  when an already-open audit journal fails to write or rotate. Optional release
+  lookup failures no longer print raw exception details.
+- Delta recognizes pytest helper-frame tracebacks and parametrized identities
+  containing summary delimiters. Exact repeated multiline exception summaries
+  are deduplicated without discarding unknown context or unique evidence.
+- Delta preserves custom processor redactions instead of reparsing the original
+  output, and rejects malformed snapshot schema versions and passed inventories.
+- Chained processors and cleanup validate textual results before replacing a
+  masked result. Generic mismatch fallback honors its own redaction contract.
+- Delta storage retains the latest inserted run after clock changes, discards
+  future-dated snapshots on access, and tolerates concurrent removal of optional
+  SQLite journals during permission checks.
+- Optional compression and tracking failures log content-free messages rather
+  than captured command arguments, exception text, or tracebacks.
+- Delta masks passwords in authenticated URLs with an empty username and
+  safely rejects excessively nested stored JSON. Pytest snapshots decline
+  contradictory passing/failing observations for a duplicate test identity.
+- Installed-tree Delta smoke coverage verifies default-off behavior, actual
+  execution counts, comparison, and targeted retrieval outside the checkout.
+  Installer tests isolate inherited storage/import settings and Windows e2e
+  commands use POSIX-compatible executable paths.
+- Windows Python executable routing recognizes `.exe` paths for supported
+  module commands while retaining interactive and recursive-wrapper exclusions.
+  Delta storage consistently rejects directories used as database files even
+  when Windows reports an access error instead of an existing-file error.
+- Prevented critical-line recovery and compression fallback from restoring already-redacted secret values; small environment outputs now redact sensitive assignments too.
+- Resolved savings database paths per tracker instance and honored `TOKEN_SAVER_DB_DIR` consistently, with tests isolated from the developer profile.
+
 ## [2.7.2] - 2026-08-09
 
 ### Added

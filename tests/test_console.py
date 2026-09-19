@@ -1,4 +1,16 @@
-"""Entry points must survive a non-UTF-8 console.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+r"""Entry points must survive a non-UTF-8 console.
 
 ``print()`` encodes with whatever ``sys.stdout`` was built with.  On Windows
 that is the console codepage, and the first Windows CI run died twice on it:
@@ -32,7 +44,9 @@ def _cp1252_env(**extra: str) -> dict[str, str]:
     return env
 
 
-def _run(args: list[str], env: dict[str, str], stdin: str = "") -> subprocess.CompletedProcess:
+def _run(
+    args: list[str], env: dict[str, str], stdin: str = ""
+) -> subprocess.CompletedProcess:
     return subprocess.run(  # noqa: S603
         [sys.executable, *args],
         input=stdin,
@@ -58,7 +72,7 @@ def test_stats_prints_box_drawing_on_a_cp1252_console(tmp_path):
 
 
 def test_cli_stats_prints_box_drawing_on_a_cp1252_console(tmp_path):
-    """The same rule reached through the ``token-saver`` CLI, a separate entry point.
+    """Support box-drawing output through the standalone CLI entry point.
 
     ``src/cli.py`` calls ``use_utf8_io()`` itself rather than inheriting it from
     stats.py, so it needs its own guard.
@@ -103,7 +117,8 @@ def test_session_hook_still_finds_its_session_on_a_cp1252_stdin(tmp_path):
     message = json.loads(result.stdout)["systemMessage"]
     assert "Lifetime:" in message, message
     assert "Session:" in message, (
-        f"the hook did not match the session id — stdin was mis-decoded: {message!r}"
+        f"the hook did not match the session id — stdin was mis-decoded: "
+        f"{message!r}"
     )
 
 
@@ -120,7 +135,9 @@ def test_antigravity_hook_round_trips_non_ascii_output(tmp_path):
     # summarises its file list away, taking the emoji with it and testing
     # nothing.  A failure line is content compression is required to keep, so
     # if the emoji is missing at the end, encoding is the only suspect.
-    noisy = "\n".join(f"tests/test_{i}.py::test_thing PASSED" for i in range(60))
+    noisy = "\n".join(
+        f"tests/test_{i}.py::test_thing PASSED" for i in range(60)
+    )
     output = (
         f"{noisy}\n"
         "=== FAILURES ===\n"
@@ -147,14 +164,17 @@ def test_antigravity_hook_round_trips_non_ascii_output(tmp_path):
     assert "UnicodeDecodeError" not in result.stderr, result.stderr
     assert "UnicodeEncodeError" not in result.stderr, result.stderr
     decision = json.loads(result.stdout)
-    assert decision.get("reason"), f"hook returned no compressed output: {decision}"
+    assert decision.get("reason"), (
+        f"hook returned no compressed output: {decision}"
+    )
     assert UNDECODABLE_IN_CP1252 in decision["reason"], (
-        f"the emoji did not survive the round trip: {decision['reason'][:200]!r}"
+        f"the emoji did not survive the round trip: "
+        f"{decision['reason'][:200]!r}"
     )
 
 
 def test_wrap_prints_undecodable_command_output_on_a_cp1252_console():
-    """The end-to-end worst case: undecodable *in*, un-encodable *out*.
+    r"""The end-to-end worst case: undecodable *in*, un-encodable *out*.
 
     ``_run_command`` decodes the command's bytes with ``errors="replace"``,
     which substitutes ``\\ufffd`` — a character cp1252 cannot encode.  So the
@@ -164,7 +184,8 @@ def test_wrap_prints_undecodable_command_output_on_a_cp1252_console():
     # through bash, where the backslashes in C:\... would otherwise be eaten as
     # escapes and the interpreter would not be found.
     emit = (
-        f"{shlex.quote(sys.executable)} -c \"import sys; sys.stdout.buffer.write(b'ok-\\x80-end')\""
+        f'{shlex.quote(sys.executable)} -c "import sys; '
+        f"sys.stdout.buffer.write(b'ok-\\x80-end')\""
     )
     result = _run(["scripts/wrap.py", emit], _cp1252_env())
     assert "UnicodeEncodeError" not in result.stderr, result.stderr
@@ -180,7 +201,9 @@ def test_wrap_prints_undecodable_command_output_on_a_cp1252_console():
 UNDECODABLE_IN_CP1252 = "❌"
 
 
-def test_pretool_hook_still_compresses_a_non_ascii_command_on_a_cp1252_stdin(tmp_path):
+def test_pretool_hook_still_compresses_a_non_ascii_command_on_a_cp1252_stdin(
+    tmp_path,
+):
     """The hook reads the command as JSON on stdin, and commands contain emoji.
 
     Asserting "it did not crash" is not enough here, and that is the whole
@@ -195,7 +218,8 @@ def test_pretool_hook_still_compresses_a_non_ascii_command_on_a_cp1252_stdin(tmp
     # sequence, which is pure ASCII and decodes fine under cp1252 — the test
     # would then pass with the bug present.  Claude Code sends the raw bytes.
     payload = json.dumps(
-        {"tool_name": "Bash", "tool_input": {"command": command}}, ensure_ascii=False
+        {"tool_name": "Bash", "tool_input": {"command": command}},
+        ensure_ascii=False,
     )
     assert UNDECODABLE_IN_CP1252 in payload
     assert b"\x9d" in payload.encode("utf-8")
@@ -207,8 +231,12 @@ def test_pretool_hook_still_compresses_a_non_ascii_command_on_a_cp1252_stdin(tmp
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip(), "hook emitted no decision — it silently declined to compress"
+    assert result.stdout.strip(), (
+        "hook emitted no decision — it silently declined to compress"
+    )
     decision = json.loads(result.stdout)
     rewritten = decision["hookSpecificOutput"]["updatedInput"]["command"]
     assert "wrap.py" in rewritten
-    assert command in rewritten, f"the emoji did not survive the round trip: {rewritten!r}"
+    assert command in rewritten, (
+        f"the emoji did not survive the round trip: {rewritten!r}"
+    )

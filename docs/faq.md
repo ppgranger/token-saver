@@ -1,6 +1,6 @@
 ---
 title: FAQ
-description: Answers on privacy, precision guarantees, platform support, and how Token-Saver behaves when it fails.
+description: Answers about local compression, error preservation, token estimates, supported platforms, and Token-Saver configuration.
 permalink: /faq/
 nav_order: 5
 ---
@@ -15,21 +15,27 @@ cached for 24 hours and silently skipped offline.
 
 ## Will it hide an error from me or from the model?
 
-That's the failure mode the whole design is built around. Errors, stack
-traces, and non-zero exits are preserved; a failing command routes around
-processors that haven't proven they handle failure; dropped error lines are
-re-appended by the engine; and a test suite runs a failing fixture through
-every processor at every exit code to prove it. Truncation, when it happens,
-is always explicitly marked.
+Error preservation is a tested design goal, not a guarantee for every possible
+output format. Known failure output falls back to the generic processor when
+the selected processor does not support failures. The engine can recover
+recognized error lines for those processors, subject to configured limits.
+Failure-aware processors have their own preservation tests.
+
+The test suite checks a failure fixture for every built-in processor with
+exit status `0`, `1`, and unknown. Grouping and marked truncation can still
+omit detail. Inspect the [processor reference](processors/index.md) for the relevant
+limits, and validate representative logs before changing thresholds.
 
 ## How much will I actually save?
 
-It depends entirely on which commands your agent runs. Sessions dominated by
-test runs and installs see the high end (90%+); sessions dominated by
-careful `git diff` reading see 40-70%. Run `token-saver stats` after a day
-of normal use for your real number, or `token-saver benchmark '<command>'`
-for a specific one. See [Benchmarks](benchmarks.md) for the full measured
-set.
+It depends on the commands, their output, and your configuration. Recorded
+[benchmark scenarios](benchmarks.md) range from unchanged source-code output
+to fully removed progress output. Run `token-saver stats` after normal use, or
+`token-saver benchmark '<command>'` for a specific command. The benchmark
+command executes that command.
+
+All token counts use a character-based estimate. Output reduction does not
+equal whole-session token savings or a guaranteed reduction in API charges.
 
 ## Does it work with the Claude API or the Claude Agent SDK directly?
 
@@ -51,9 +57,13 @@ interactive terminal is untouched.
 
 ## What happens if Token-Saver crashes?
 
-The hook fails open: the original command runs, uncompressed, exactly as it
-would without Token-Saver installed. Same for a Python error, a missing
-file, or a timeout.
+Eligibility checks can leave a command unwrapped when compression is unavailable.
+Compression failures handled by the adapters return captured output; they must
+not rerun a command that has already executed.
+
+A command timeout is different: the wrapper stops the child process, reports
+the partial output it could collect, and exits with status `124`. Configure
+`wrap_timeout` for commands that legitimately need longer.
 
 ## Can I use it alongside other token-reduction MCP servers?
 
@@ -76,10 +86,20 @@ design.
 
 ## Can a repository I clone attack me through `.token-saver.json`?
 
-Not through the three keys that would matter. `user_processors_dir`
-(arbitrary code execution), `disabled_processors`, and
-`redaction_allowlist` are all rejected from project-level config. The rest
-are numeric thresholds with no code path to abuse.
+Project configuration cannot set `user_processors_dir`, `disabled_processors`,
+or `redaction_allowlist`, which control trusted code and secret masking.
+It also cannot enable Delta recording or change its retention limits:
+`delta_enabled`, `delta_retention_hours`, and `delta_max_runs` require global
+configuration or environment variables. A project may still tune ordinary
+compression thresholds, so review its configuration when output matters.
+
+## Does Token-Saver keep diagnostic output on disk?
+
+Ordinary compression and savings tracking do not archive output. The optional
+[Experimental Delta](delta.md) retains sanitized pytest and Ruff snapshots locally
+when explicitly enabled. Its defaults are 24 hours and at most 100 snapshots.
+Masking recognizes common secret formats but cannot identify every secret.
+Use `token-saver delta clear` to remove snapshots and reset comparisons.
 
 ## How do I turn it off temporarily?
 
@@ -88,55 +108,6 @@ are numeric thresholds with no code path to abuse.
 
 ## Is a specific processor's behavior documented anywhere?
 
-Yes — the [processor reference](processors/) has a page per
+Yes — the [processor reference](processors/index.md) has a page per
 processor covering what it matches, what it keeps, what it drops, and its
 config knobs.
-
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "FAQPage",
-  "mainEntity": [
-    {
-      "@type": "Question",
-      "name": "Does Token-Saver send my code or output to any server?",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "No. Compression is entirely local, using regex and string parsing in Python's standard library. The only network call is an optional GitHub release check, cached for 24 hours and silently skipped offline."
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "Will it hide an error from me or from the model?",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "No. Errors, stack traces, and non-zero exits are preserved by design; a failing command routes around processors that haven't proven they handle failure, and a test suite verifies this at every exit code."
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "How much will Token-Saver actually save?",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "It depends on which commands are run. Sessions dominated by test runs and installs see 90%+ savings; sessions dominated by git diff reading see 40-70%."
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "Does Token-Saver work with the Claude API or Claude Agent SDK directly?",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "Not as a drop-in plugin, but the compression engine is importable as a Python module and has no dependency on Claude Code or Antigravity CLI."
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "What happens if Token-Saver crashes?",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "The hook fails open: the original, uncompressed command output is returned exactly as it would be without Token-Saver installed."
-      }
-    }
-  ]
-}
-</script>

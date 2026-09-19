@@ -1,4 +1,16 @@
-"""Tests for src/shell_syntax.py's quote-aware scanner and its consumers.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+r"""Tests for src/shell_syntax.py's quote-aware scanner and its consumers.
 
 Regression coverage for GitHub issue #49: an unquoted, backslash-escaped
 quote character (``\\"`` or ``\\'``) was misread by ``iter_unquoted`` as the
@@ -8,23 +20,17 @@ blinding every safety check built on top of it (newline/background-operator
 smuggling, output redirection, dangerous constructs, chain splitting).
 """
 
+import pathlib
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from src.shell_syntax import (
-    has_output_redirection,
-    has_unquoted,
-    has_unquoted_background_operator,
-    has_unquoted_newline,
-    iter_unquoted,
-)
+import src.shell_syntax
 
 
 def _visible(command: str) -> str:
     """Concatenate every character iter_unquoted considers unquoted."""
-    return "".join(ch for _, ch in iter_unquoted(command))
+    return "".join(ch for _, ch in src.shell_syntax.iter_unquoted(command))
 
 
 class TestIterUnquotedEscapes:
@@ -80,34 +86,77 @@ class TestIterUnquotedEscapes:
 
 class TestNewlineSmugglingClosed:
     def test_bare_newline_still_rejected(self):
-        assert has_unquoted_newline("git status\nsudo rm -rf /tmp/x") is True
+        assert (
+            src.shell_syntax.has_unquoted_newline(
+                "git status\nsudo rm -rf /tmp/x"
+            )
+            is True
+        )
 
     def test_escaped_quote_prefix_no_longer_bypasses_newline_check(self):
-        assert has_unquoted_newline('git status \\"\nsudo rm -rf /tmp/important') is True
+        assert (
+            src.shell_syntax.has_unquoted_newline(
+                'git status \\"\nsudo rm -rf /tmp/important'
+            )
+            is True
+        )
 
     def test_escaped_quote_prefix_with_grep_style_payload(self):
-        assert has_unquoted_newline('git log --grep=\\"fix\nsudo rm -rf /tmp/x') is True
+        assert (
+            src.shell_syntax.has_unquoted_newline(
+                'git log --grep=\\"fix\nsudo rm -rf /tmp/x'
+            )
+            is True
+        )
 
     def test_line_continuation_still_not_flagged(self):
         # A backslash directly before the newline is a genuine POSIX line
         # continuation, not a statement separator.
-        assert has_unquoted_newline("echo a \\\n&& git status") is False
+        assert (
+            src.shell_syntax.has_unquoted_newline("echo a \\\n&& git status")
+            is False
+        )
 
 
 class TestBackgroundOperatorSmugglingClosed:
     def test_bare_ampersand_still_rejected(self):
-        assert has_unquoted_background_operator("git status & touch /tmp/probe") is True
+        assert (
+            src.shell_syntax.has_unquoted_background_operator(
+                "git status & touch /tmp/probe"
+            )
+            is True
+        )
 
     def test_escaped_quote_prefix_no_longer_bypasses_background_check(self):
-        assert has_unquoted_background_operator('git status \\" & touch /tmp/probe') is True
+        assert (
+            src.shell_syntax.has_unquoted_background_operator(
+                'git status \\" & touch /tmp/probe'
+            )
+            is True
+        )
 
     def test_double_ampersand_still_not_flagged(self):
-        assert has_unquoted_background_operator("git status && echo done") is False
+        assert (
+            src.shell_syntax.has_unquoted_background_operator(
+                "git status && echo done"
+            )
+            is False
+        )
 
 
 class TestOutputRedirectionAndDangerousConstructs:
     def test_escaped_quote_prefix_no_longer_bypasses_redirection_check(self):
-        assert has_output_redirection('git status \\" > /etc/passwd') is True
+        assert (
+            src.shell_syntax.has_output_redirection(
+                'git status \\" > /etc/passwd'
+            )
+            is True
+        )
 
     def test_escaped_quote_prefix_no_longer_bypasses_construct_check(self):
-        assert has_unquoted('git status \\" $(id)', ("$(", "`", "<<")) is True
+        assert (
+            src.shell_syntax.has_unquoted(
+                'git status \\" $(id)', ("$(", "`", "<<")
+            )
+            is True
+        )

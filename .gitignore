@@ -29,6 +29,7 @@ build/
 *.env.local
 
 # Jekyll (docs/)
+.sass-cache/
 docs/_site/
 docs/.sass-cache/
 docs/.jekyll-cache/

@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """AfterTool hook for Antigravity CLI.
 
 Reads JSON from stdin, compresses tool output, replaces it via deny+reason.
@@ -11,22 +23,27 @@ import sys
 # Ensure the plugin root is importable (antigravity/ -> plugin root)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Installed entrypoints must establish the package root first.
+# pylint: disable=wrong-import-position
+from src import console
 from src import core
-from src.console import use_utf8_io
-from src.platforms import Platform, get_command, get_tool_output
+from src import platforms
+
+# pylint: enable=wrong-import-position
 
 
 def main():
-    use_utf8_io()
+    """Read one host payload and emit replacement output when compressed."""
+    console.use_utf8_io()
     try:
         input_data = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
         sys.exit(0)
 
-    platform = Platform.ANTIGRAVITY_CLI
+    platform = platforms.Platform.ANTIGRAVITY_CLI
 
-    command = get_command(input_data, platform) or ""
-    output = get_tool_output(input_data, platform)
+    command = platforms.get_command(input_data, platform) or ""
+    output = platforms.get_tool_output(input_data, platform)
 
     if not output:
         sys.exit(0)

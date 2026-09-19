@@ -1,3 +1,15 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Keep ``hook_patterns`` and ``can_handle`` from drifting apart.
 
 Every processor states which commands it wants twice: ``hook_patterns`` decides
@@ -24,11 +36,11 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.processors import discover_processors
-from tests.failure_fixtures import CASES
+import src.processors
+import tests.failure_fixtures
 
-PROCESSORS = discover_processors()
-FIXTURE_COMMAND = {c.processor: c.command for c in CASES}
+PROCESSORS = src.processors.discover_processors()
+FIXTURE_COMMAND = {c.processor: c.command for c in tests.failure_fixtures.CASES}
 
 
 def _corpus() -> list[str]:
@@ -38,7 +50,9 @@ def _corpus() -> list[str]:
     contributors add cases, instead of relying on a list nobody maintains.
     """
     found: set[str] = set()
-    pattern = re.compile(r'(?:is_compressible|can_handle|compress)\(\s*(["\'])(.+?)\1')
+    pattern = re.compile(
+        r'(?:is_compressible|can_handle|compress)\(\s*(["\'])(.+?)\1'
+    )
     for path in pathlib.Path(__file__).parent.glob("*.py"):
         for match in pattern.finditer(path.read_text(encoding="utf-8")):
             command = match.group(2)
@@ -52,7 +66,7 @@ CORPUS = _corpus()
 
 
 def test_corpus_is_substantial():
-    """A corpus that quietly shrank to nothing would make every test below pass."""
+    """Keep the command corpus large enough to exercise routing."""
     assert len(CORPUS) > 300, f"only {len(CORPUS)} commands harvested"
 
 
@@ -67,21 +81,27 @@ def test_hook_patterns_imply_can_handle(processor):
     disagreements = [
         command
         for command in CORPUS
-        if any(p.search(command) for p in compiled) and not processor.can_handle(command)
+        if any(p.search(command) for p in compiled)
+        and not processor.can_handle(command)
     ]
     assert disagreements == [], (
-        f"{processor.name}: hook_patterns match these but can_handle rejects them: "
+        f"{processor.name}: hook_patterns match these but can_handle "
+        "rejects them: "
         f"{disagreements[:5]}"
     )
 
 
 @pytest.mark.parametrize("processor", PROCESSORS, ids=lambda p: p.name)
 def test_hook_patterns_are_anchored(processor):
-    """Patterns decide interception on the whole command; unanchored ones
-    match mid-string and would wrap unrelated commands (``cat notes-git.txt``).
+    """Anchor interception patterns to the beginning of commands.
+
+    Patterns decide interception on the whole command; unanchored ones match
+    mid-string and would wrap unrelated commands (``cat notes-git.txt``).
     """
     unanchored = [p for p in processor.hook_patterns if not p.startswith("^")]
-    assert unanchored == [], f"{processor.name} has unanchored hook_patterns: {unanchored}"
+    assert unanchored == [], (
+        f"{processor.name} has unanchored hook_patterns: {unanchored}"
+    )
 
 
 @pytest.mark.parametrize("processor", PROCESSORS, ids=lambda p: p.name)
@@ -98,9 +118,12 @@ def test_failure_fixture_command_would_be_intercepted(processor):
     fixture proves nothing about the real path.
     """
     if not processor.hook_patterns:
-        pytest.skip(f"{processor.name} is the fallback and has no hook_patterns")
+        pytest.skip(
+            f"{processor.name} is the fallback and has no hook_patterns"
+        )
     command = FIXTURE_COMMAND[processor.name]
     assert any(re.search(p, command) for p in processor.hook_patterns), (
-        f"{processor.name}: fixture command {command!r} is not matched by its own "
+        f"{processor.name}: fixture command {command!r} is not matched "
+        "by its own "
         "hook_patterns, so the hook would never route it here"
     )

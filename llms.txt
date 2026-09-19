@@ -4,51 +4,67 @@
 > and Antigravity CLI plugin that intercepts verbose CLI command output
 > (git, pytest, npm, terraform, kubectl, docker, and more) and compresses it
 > deterministically before it reaches the model, using 36 specialized
-> processors — one per tool family. No LLM calls, no network access,
-> fully offline. Typical savings: 60-99% per command, with all errors,
-> diffs, and stack traces preserved by design.
+> processors — one per tool family. Compression runs locally without LLM
+> calls or output uploads. An optional release check contacts GitHub. Savings
+> depend on the output and use character-based token estimates. Error
+> preservation is covered by representative fixtures and configurable limits.
 
 ## Start here
 
-- [README](https://github.com/ppgranger/token-saver/blob/main/README.md): Full overview — installation, architecture, configuration, FAQ.
-- [Quick Start](https://github.com/ppgranger/token-saver/blob/main/README.md#quick-start): Install via `/plugin marketplace add ppgranger/token-saver`.
-- [Benchmarks](https://github.com/ppgranger/token-saver/blob/main/docs/benchmarks.md): 22 measured compression scenarios, gated by CI, with methodology.
-- [How It Compares](https://github.com/ppgranger/token-saver/blob/main/docs/comparison.md): Token-Saver vs cc_token_saver_mcp, token-optimizer-mcp, Claude Context Mode.
+- [Quick Start](https://github.com/ppgranger/token-saver/blob/main/README.md#quick-start): Plugin installation and first steps.
+- [Home](https://ppgranger.github.io/token-saver/): Overview and quick start.
+- [Benchmarks](https://ppgranger.github.io/token-saver/benchmarks/): 22 measured compression scenarios, gated by CI, with methodology.
+- [How It Compares](https://ppgranger.github.io/token-saver/comparison/): Token-Saver, RTK, and Context Mode: command compression and context retrieval.
+- [FAQ](https://ppgranger.github.io/token-saver/faq/): Common questions on privacy, precision, platform support.
+- [Full README](https://github.com/ppgranger/token-saver/blob/main/README.md): Installation, architecture, configuration reference.
+
+- [Compression quality gates](https://ppgranger.github.io/token-saver/quality-gates/): Offline compression and replay checks for saved logs, token budgets, and required diagnostics.
+- [Architecture](https://ppgranger.github.io/token-saver/architecture/): Component responsibilities and extension points for contributors.
+- [Delta](https://ppgranger.github.io/token-saver/delta/): Experimental v3 pytest and Ruff diagnostic comparisons, opt-in local retention, and detail retrieval.
 
 ## Processors (one page per tool family)
 
-- [git](https://github.com/ppgranger/token-saver/blob/main/docs/processors/git.md): status, diff, log, show, push/pull/fetch, branch, stash, blame.
-- [test_output](https://github.com/ppgranger/token-saver/blob/main/docs/processors/test_output.md): pytest, jest, go test, cargo test and other test runners.
-- [lint_output](https://github.com/ppgranger/token-saver/blob/main/docs/processors/lint_output.md): eslint, ruff, pylint, clippy, mypy and other linters.
-- [build_output](https://github.com/ppgranger/token-saver/blob/main/docs/processors/build_output.md): Build tool output across major ecosystems.
-- [docker](https://github.com/ppgranger/token-saver/blob/main/docs/processors/docker.md): Docker CLI and Docker Compose output.
-- [kubectl](https://github.com/ppgranger/token-saver/blob/main/docs/processors/kubectl.md): kubectl and oc (OpenShift) commands.
-- [terraform](https://github.com/ppgranger/token-saver/blob/main/docs/processors/terraform.md): Terraform and OpenTofu commands.
-- [cargo](https://github.com/ppgranger/token-saver/blob/main/docs/processors/cargo.md): Rust's cargo build system.
-- [cargo_clippy](https://github.com/ppgranger/token-saver/blob/main/docs/processors/cargo_clippy.md): Rust clippy lint output.
-- [go](https://github.com/ppgranger/token-saver/blob/main/docs/processors/go.md): Go toolchain commands.
-- [maven_gradle](https://github.com/ppgranger/token-saver/blob/main/docs/processors/maven_gradle.md): Maven and Gradle build output.
-- [python_install](https://github.com/ppgranger/token-saver/blob/main/docs/processors/python_install.md): Python package installation output (pip).
-- [package_list](https://github.com/ppgranger/token-saver/blob/main/docs/processors/package_list.md): pip list, npm ls, and other package listing commands.
-- [helm](https://github.com/ppgranger/token-saver/blob/main/docs/processors/helm.md): Helm CLI output for chart management.
-- [ansible](https://github.com/ppgranger/token-saver/blob/main/docs/processors/ansible.md): ansible-playbook and ansible command output.
-- [cloud_cli](https://github.com/ppgranger/token-saver/blob/main/docs/processors/cloud_cli.md): aws, gcloud, az and other cloud provider CLIs.
-- [gh](https://github.com/ppgranger/token-saver/blob/main/docs/processors/gh.md): GitHub CLI (gh) output.
-- [db_query](https://github.com/ppgranger/token-saver/blob/main/docs/processors/db_query.md): Database query result output.
-- [jq_yq](https://github.com/ppgranger/token-saver/blob/main/docs/processors/jq_yq.md): Large JSON/YAML output from jq and yq.
-- [network](https://github.com/ppgranger/token-saver/blob/main/docs/processors/network.md): HTTP client output (curl, wget).
-- [search](https://github.com/ppgranger/token-saver/blob/main/docs/processors/search.md): grep, find, ripgrep output.
-- [file_listing](https://github.com/ppgranger/token-saver/blob/main/docs/processors/file_listing.md): Directory listing commands (ls, tree, find).
-- [file_content](https://github.com/ppgranger/token-saver/blob/main/docs/processors/file_content.md): Content-aware compression for file viewing commands.
-- [ssh](https://github.com/ppgranger/token-saver/blob/main/docs/processors/ssh.md): Non-interactive SSH and SCP output.
-- [structured_log](https://github.com/ppgranger/token-saver/blob/main/docs/processors/structured_log.md): JSON Lines log output from log tailing tools.
-- [syslog](https://github.com/ppgranger/token-saver/blob/main/docs/processors/syslog.md): journalctl and dmesg output.
-- [system_info](https://github.com/ppgranger/token-saver/blob/main/docs/processors/system_info.md): Disk and file counting commands.
-- [env](https://github.com/ppgranger/token-saver/blob/main/docs/processors/env.md): Environment variable listing commands.
-- [generic](https://github.com/ppgranger/token-saver/blob/main/docs/processors/generic.md): Fallback processor for unrecognized commands.
+- [git](https://ppgranger.github.io/token-saver/processors/git/): status, diff, log, show, push/pull/fetch, branch, stash, blame.
+- [test_output](https://ppgranger.github.io/token-saver/processors/test_output/): pytest, jest, go test, cargo test and other test runners.
+- [lint_output](https://ppgranger.github.io/token-saver/processors/lint_output/): eslint, ruff, pylint, clippy, mypy and other linters.
+- [build_output](https://ppgranger.github.io/token-saver/processors/build_output/): Build tool output across major ecosystems.
+- [docker](https://ppgranger.github.io/token-saver/processors/docker/): Docker CLI and Docker Compose output.
+- [kubectl](https://ppgranger.github.io/token-saver/processors/kubectl/): kubectl and oc (OpenShift) commands.
+- [terraform](https://ppgranger.github.io/token-saver/processors/terraform/): Terraform and OpenTofu commands.
+- [cargo](https://ppgranger.github.io/token-saver/processors/cargo/): Rust's cargo build system.
+- [cargo_clippy](https://ppgranger.github.io/token-saver/processors/cargo_clippy/): Rust clippy lint output.
+- [go](https://ppgranger.github.io/token-saver/processors/go/): Go toolchain commands.
+- [maven_gradle](https://ppgranger.github.io/token-saver/processors/maven_gradle/): Maven and Gradle build output.
+- [python_install](https://ppgranger.github.io/token-saver/processors/python_install/): Python package installation output (pip).
+- [package_list](https://ppgranger.github.io/token-saver/processors/package_list/): pip list, npm ls, and other package listing commands.
+- [helm](https://ppgranger.github.io/token-saver/processors/helm/): Helm CLI output for chart management.
+- [ansible](https://ppgranger.github.io/token-saver/processors/ansible/): ansible-playbook and ansible command output.
+- [cloud_cli](https://ppgranger.github.io/token-saver/processors/cloud_cli/): aws, gcloud, az and other cloud provider CLIs.
+- [gh](https://ppgranger.github.io/token-saver/processors/gh/): GitHub CLI (gh) output.
+- [db_query](https://ppgranger.github.io/token-saver/processors/db_query/): Database query result output.
+- [jq_yq](https://ppgranger.github.io/token-saver/processors/jq_yq/): Large JSON/YAML output from jq and yq.
+- [network](https://ppgranger.github.io/token-saver/processors/network/): HTTP client output (curl, wget).
+- [search](https://ppgranger.github.io/token-saver/processors/search/): grep, find, ripgrep output.
+- [file_listing](https://ppgranger.github.io/token-saver/processors/file_listing/): Directory listing commands (ls, tree, find).
+- [file_content](https://ppgranger.github.io/token-saver/processors/file_content/): Content-aware compression for file viewing commands.
+- [ssh](https://ppgranger.github.io/token-saver/processors/ssh/): Non-interactive SSH and SCP output.
+- [structured_log](https://ppgranger.github.io/token-saver/processors/structured_log/): JSON Lines log output from log tailing tools.
+- [syslog](https://ppgranger.github.io/token-saver/processors/syslog/): journalctl and dmesg output.
+- [system_info](https://ppgranger.github.io/token-saver/processors/system_info/): Disk and file counting commands.
+- [env](https://ppgranger.github.io/token-saver/processors/env/): Environment variable listing commands.
+- [generic](https://ppgranger.github.io/token-saver/processors/generic/): Fallback processor for unrecognized commands.
+
+- [act](https://ppgranger.github.io/token-saver/processors/act/): Compress local GitHub Actions logs from act while retaining workflow output, step results, job status, and recognized errors.
+- [bun](https://ppgranger.github.io/token-saver/processors/bun/): Compress Bun package installation output, retaining package changes, summaries, and recognized warnings and errors.
+- [cdktf](https://ppgranger.github.io/token-saver/processors/cdktf/): Compress CDK for Terraform output using the Terraform plan and apply processor after filtering synthesis and compilation progress.
+- [just](https://ppgranger.github.io/token-saver/processors/just/): Compact long just recipe listings with recipe counts, an explicit overflow marker, and recognized errors.
+- [mise](https://ppgranger.github.io/token-saver/processors/mise/): Reduce mise runtime installation progress while preserving installation results and recognized warnings and errors.
+- [nix](https://ppgranger.github.io/token-saver/processors/nix/): Summarize Nix build and store-transfer output with counts while retaining recognized diagnostics and plan summaries.
+- [pulumi](https://ppgranger.github.io/token-saver/processors/pulumi/): Compact Pulumi infrastructure updates and previews while retaining resource operations, output summaries, and recognized diagnostics.
 
 ## Optional
 
+- [Source repository](https://github.com/ppgranger/token-saver): Full source, issue tracker, releases.
 - [Custom Processors Guide](https://github.com/ppgranger/token-saver/blob/main/examples/custom_processor/README.md): How to write and register your own processor.
-- [Contributing](https://github.com/ppgranger/token-saver/blob/main/CONTRIBUTING.md): Development setup, test suite, PR conventions.
+- [Contributing](https://github.com/ppgranger/token-saver/blob/main/CONTRIBUTING.md): Development setup, test suite, and contribution conventions.
 - [License](https://github.com/ppgranger/token-saver/blob/main/LICENSE): Apache-2.0.
