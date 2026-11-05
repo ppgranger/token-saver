@@ -444,14 +444,18 @@ python3 install.py --uninstall --keep-data  # Keep stats DB
 
 ### Updating
 
-**Plugin install**: Claude Code handles updates automatically when you refresh the marketplace.
+**Plugin install**: Run `/plugin update token-saver` from within Claude Code.
+Marketplace installs do not add the `token-saver` CLI to your shell's `PATH`.
 
 **Manual install**: Run `token-saver update` from anywhere, or:
 ```bash
 cd token-saver && git pull && python3 install.py --target claude
 ```
 
-**GitHub releases**: Both methods check for new releases via the GitHub API. The `token-saver update` CLI command and the SessionStart hook notification work regardless of install method. The remote lookup is cached for 24h and fails open — a network outage or an API rate limit never blocks a session.
+**GitHub releases**: The SessionStart hook checks for new releases via the
+GitHub API for both install methods and recommends the appropriate updater.
+The remote lookup is cached for 24h and fails open — a network outage or an
+API rate limit never blocks a session.
 
 ### Upgrading from v1.x to v2.0
 
