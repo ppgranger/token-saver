@@ -67,6 +67,8 @@ for manual installation, Antigravity CLI setup, and upgrading from v1.x.
 
 ## Documentation
 
+- [Codex setup](codex.md) — opt-in shell wrapper and project instructions.
+- [Optional Markdown workflow](markdown-workflow.md) — evaluate named section reads with Texio alongside normal targeted reads.
 - [Delta: changes between runs](delta.md) — activation, diagnostic states, retained details, and reproducible benchmarks.
 - [Compression quality gates](quality-gates.md) — compress saved logs and check budgets and required diagnostics before adopting new rules.
 - [Architecture](architecture.md) — extension points and responsibilities for contributors.

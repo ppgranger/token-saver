@@ -23,6 +23,15 @@ import os
 import shlex
 import sys
 
+# Check before importing runtime modules that require Python 3.10 syntax/types.
+if sys.version_info < (3, 10):  # noqa: UP036
+    print(
+        "[token-saver] Python 3.10+ is required; compression is disabled. "
+        "Configure the hook to use a supported Python interpreter.",
+        file=sys.stderr,
+    )
+    sys.exit(0)
+
 # Ensure the extension root is importable (scripts/ -> plugin root)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -146,9 +155,9 @@ def main():
     # the rewritten command so it propagates to the wrap.py subprocess.
     cc_session = input_data.get("session_id", "")
 
-    # Rewrite: pass the original command as a single quoted argument to avoid
-    # injection
-    python = "python" if os.name == "nt" else "python3"
+    # Reuse the hook's interpreter even if python3 on PATH is too old. Quote
+    # both executable paths and the original command for the host's Bash shell.
+    python = shlex.quote(sys.executable)
     session_prefix = (
         f"TOKEN_SAVER_SESSION={shlex.quote(cc_session)} " if cc_session else ""
     )

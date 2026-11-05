@@ -7,7 +7,7 @@ nav_order: 3
 
 # Token-Saver Compression Benchmarks
 
-Version: **3.0.0** · Baselines last updated: **2026-08-02** · Source: [`tests/compression_baselines.json`](https://github.com/ppgranger/token-saver/blob/main/tests/compression_baselines.json)
+Version: **3.0.1** · Baselines last updated: **2026-08-02** · Source: [`tests/compression_baselines.json`](https://github.com/ppgranger/token-saver/blob/main/tests/compression_baselines.json)
 
 These are not marketing estimates. Every row below is a fixed baseline
 checked into the repository and enforced by
