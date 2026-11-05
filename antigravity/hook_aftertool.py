@@ -20,6 +20,15 @@ import json
 import os
 import sys
 
+# Preserve the host tool result when its hook interpreter is unsupported.
+if sys.version_info < (3, 10):  # noqa: UP036
+    print(
+        "[token-saver] Python 3.10+ is required; compression is disabled. "
+        "Configure the hook to use a supported Python interpreter.",
+        file=sys.stderr,
+    )
+    sys.exit(0)
+
 # Ensure the plugin root is importable (antigravity/ -> plugin root)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

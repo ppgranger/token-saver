@@ -22,6 +22,15 @@ Delegates to src/hook_session.py. This wrapper exists because:
 import os
 import sys
 
+# Keep an unsupported interpreter from failing inside the runtime imports.
+if sys.version_info < (3, 10):  # noqa: UP036
+    print(
+        "[token-saver] Python 3.10+ is required; compression is disabled. "
+        "Configure the hook to use a supported Python interpreter.",
+        file=sys.stderr,
+    )
+    sys.exit(0)
+
 # Add plugin root to path so src/ is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

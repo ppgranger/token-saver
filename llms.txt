@@ -22,6 +22,9 @@
 - [Architecture](https://ppgranger.github.io/token-saver/architecture/): Component responsibilities and extension points for contributors.
 - [Delta](https://ppgranger.github.io/token-saver/delta/): Experimental v3 pytest and Ruff diagnostic comparisons, opt-in local retention, and detail retrieval.
 
+- [Codex setup](https://ppgranger.github.io/token-saver/codex/): Opt-in shell wrapper and AGENTS.md instructions for Codex.
+- [Optional Markdown workflow](https://ppgranger.github.io/token-saver/markdown-workflow/): A disposable-file Texio evaluation alongside targeted reads and output compression.
+
 ## Processors (one page per tool family)
 
 - [git](https://ppgranger.github.io/token-saver/processors/git/): status, diff, log, show, push/pull/fetch, branch, stash, blame.

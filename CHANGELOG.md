@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-11-05
+
+### Fixed
+
+- Use the running hook's Python interpreter for the command wrapper, preserving
+  executable paths with spaces and avoiding a different Python on `PATH`.
+  Unsupported interpreters now report the Python 3.10+ requirement before
+  importing runtime modules; hooks remain non-blocking (#75).
+- Direct marketplace installations to Claude Code's `/plugin update token-saver`
+  command in update notices; keep `token-saver update` for manual installs (#74).
+
+### Added
+
+- An opt-in Codex workflow using the existing shell wrapper and project
+  `AGENTS.md` instructions, with setup, exit-status checks, and limitations (#68).
+- An optional Texio Markdown section recipe with a reproducible disposable-file
+  comparison, measured command/output overhead, and explicit limits. No runtime
+  dependency or automatic file-read rewriting is added (#76).
+
 ## [3.0.0] - 2026-09-19
 
 ### Added
