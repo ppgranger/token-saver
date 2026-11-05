@@ -135,6 +135,8 @@ def check_for_update(fetch_fn=None, cache_ttl=_CACHE_TTL_SECONDS):
     The remote lookup is cached for ``cache_ttl`` seconds so repeated
     SessionStart hooks reuse a recent result instead of re-querying GitHub. When
     ``fetch_fn`` is supplied (tests) the cache is bypassed entirely.
+    Update instructions match the location of this installed module: marketplace
+    installs use Claude Code's plugin updater, while others use the CLI.
 
     Args:
         fetch_fn: Override fetch function (for testing). Should return version
@@ -154,9 +156,20 @@ def check_for_update(fetch_fn=None, cache_ttl=_CACHE_TTL_SECONDS):
                 if cache_ttl > 0:
                     _write_cache(latest)
         if _parse_version(latest) > _parse_version(src.__version__):
+            # The updater imports this module's release helpers. Defer the
+            # reverse dependency until both modules can finish initializing.
+            # pylint: disable-next=import-outside-toplevel
+            from src import updater  # noqa: PLC0415
+
+            repo_dir = os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__))
+            )
+            command = "token-saver update"
+            if updater.is_marketplace_managed(repo_dir):
+                command = "/plugin update token-saver (from within Claude Code)"
             return (
                 f"Update available: v{src.__version__} -> v{latest} "
-                "-- Run: token-saver update"
+                f"-- Run: {command}"
             )
     # An optional update notice must never fail the session-start hook.
     # pylint: disable-next=broad-exception-caught

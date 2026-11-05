@@ -37,6 +37,16 @@ import subprocess
 import sys
 import uuid
 
+# Hooks reject old interpreters before rewriting; direct invocations must also
+# report the requirement clearly rather than failing during runtime imports.
+if sys.version_info < (3, 10):  # noqa: UP036
+    print(
+        "[token-saver] Python 3.10+ is required to run the wrapper. "
+        "Use a supported Python interpreter.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 # Ensure the extension root is importable (scripts/ -> plugin root)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

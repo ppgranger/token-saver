@@ -15,10 +15,21 @@
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import src.version_check
 import src.version_check as version_check
+
+
+@pytest.fixture(autouse=True)
+def local_install_location(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        version_check,
+        "__file__",
+        str(tmp_path / "source" / "src" / "version_check.py"),
+    )
 
 
 class TestParseVersion:
@@ -54,6 +65,44 @@ class TestCheckForUpdate:
         assert result is not None
         assert "99.0.0" in result
         assert "token-saver update" in result
+
+    @pytest.mark.parametrize("config_root", [".claude", "AppData/claude"])
+    def test_marketplace_update_uses_claude_plugin_command(
+        self, tmp_path, monkeypatch, config_root
+    ):
+        installed_module = (
+            tmp_path
+            / config_root
+            / "plugins"
+            / "cache"
+            / "token-saver-marketplace"
+            / "token-saver"
+            / "3.0.0"
+            / "src"
+            / "version_check.py"
+        )
+        monkeypatch.setattr(version_check, "__file__", str(installed_module))
+
+        result = version_check.check_for_update(fetch_fn=lambda: "99.0.0")
+
+        assert result == (
+            f"Update available: v{src.__version__} -> v99.0.0 "
+            "-- Run: /plugin update token-saver (from within Claude Code)"
+        )
+        assert "token-saver update" not in result
+
+    def test_project_location_does_not_override_install_type(
+        self, tmp_path, monkeypatch
+    ):
+        project = tmp_path / "plugins" / "cache" / "project"
+        project.mkdir(parents=True)
+        monkeypatch.chdir(project)
+        monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(project))
+
+        result = version_check.check_for_update(fetch_fn=lambda: "99.0.0")
+
+        assert result is not None
+        assert result.endswith("-- Run: token-saver update")
 
     def test_already_up_to_date(self):
         import src

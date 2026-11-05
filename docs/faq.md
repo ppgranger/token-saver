@@ -44,6 +44,13 @@ Antigravity CLI plugin. But the engine is importable (`from src.engine
 import CompressionEngine`) and has no dependency on either platform, so
 wiring it into your own agent loop is a few lines.
 
+## Can I use it with Codex?
+
+Yes, through the [explicit wrapper and project instructions](codex.md).
+This opt-in workflow uses the existing command wrapper and preserves command
+exit status. Token-Saver does not currently ship an automatic Codex adapter;
+the Claude Code and Antigravity installers do not configure Codex.
+
 ## Does it work on Windows?
 
 Yes. Windows is a supported platform, with a `token-saver.cmd` launcher, an

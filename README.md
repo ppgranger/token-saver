@@ -23,8 +23,9 @@ kubernetes, terraform, pulumi, helm, ansible, aws, gcloud, and more. Their rules
 reduce progress logs and boilerplate, with failure fixtures and optional quality
 contracts checking important diagnostics.
 
-Ordinary compression supports **Claude Code** and **Antigravity CLI**. It runs
-automatically after installation. Results depend on the command and output;
+Ordinary compression runs automatically in **Claude Code** and **Antigravity
+CLI** after installation. **Codex** can use an explicit wrapper with
+[project instructions](docs/codex.md). Results depend on the command and output;
 already concise or unsupported output may stay unchanged.
 
 **Why developers use Token-Saver:**
@@ -49,6 +50,8 @@ already concise or unsupported output may stay unchanged.
 - [How It Works](#how-it-works)
 - [Precision Guarantees](#precision-guarantees)
 - [Installation](#installation)
+- [Codex setup](docs/codex.md)
+- [Optional Markdown workflow](docs/markdown-workflow.md)
 - [CLI Reference](#cli-reference)
 - [Delta: Changes Between Runs](#delta-changes-between-runs)
 - [Compression Quality Gates](#compression-quality-gates)
@@ -311,7 +314,7 @@ The two platforms use different mechanisms:
 ```
 1. Claude wants to run `git status`
 2. PreToolUse hook intercepts the command
-3. Rewrites to: python3 wrap.py 'git status'
+3. Rewrites to: /path/to/hook-python wrap.py 'git status'
 4. wrap.py executes the original command
 5. Compresses the output
 6. Claude receives the compressed version
@@ -374,9 +377,14 @@ your workflow requires.
 ### Prerequisites
 
 - Python 3.10+
-- Claude Code and/or Antigravity CLI
+- Claude Code, Antigravity CLI, or Codex with the [manual wrapper setup](docs/codex.md)
 
 No third-party Python packages are required — Token-Saver uses only the standard library.
+
+For Codex, follow the [explicit wrapper and AGENTS.md recipe](docs/codex.md).
+It uses a local checkout and does not require installing either platform plugin.
+For section-scoped Markdown work, see the separate, opt-in
+[Texio evaluation recipe](docs/markdown-workflow.md).
 
 ### Method 1: Claude Code Plugin (recommended)
 
@@ -1100,6 +1108,14 @@ Yes — [`docs/processors/`](docs/processors/) has a page per processor covering
 matches, what it keeps, what it drops, and its config knobs.
 
 ## Troubleshooting
+
+**The hooks report that Python 3.10 or later is required.** Check the interpreter
+used by the host application, which may differ from your interactive terminal's
+`python3`. Launch the host with a `PATH` that selects Python 3.10+, or configure
+its hook commands to use an absolute supported Python executable. The pre-tool
+hook passes that same executable to `wrap.py`, including paths with spaces.
+Unsupported interpreters print a clear diagnostic and leave hook commands
+unwrapped; directly invoking the wrapper with an old Python exits with an error.
 
 **A command isn't being compressed.** Ask why:
 
